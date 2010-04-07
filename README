@@ -1,0 +1,54 @@
+Supported LSA:
+  Router, Network, Summary, AsbrSummary, AsExternal
+
+TODO: NSSA, TE
+
+Supported Ospf Packets:
+
+  Link State Update
+  Link State Request
+  Link State Ack
+  Database Description
+  Hello
+
+Supported RouterType: 
+
+  Intra-area
+  ABR   -> generate Summary and set B bit
+  ASBR  -> generate AsExternal and set E bit
+
+Network Types Supported
+  Broadcast (DROTHER)
+  point-to-point
+
+Authentication:
+ no auth
+TODO: MD5, Password
+
+Learned LSA Functionality
+
+   display of the Link State Database
+       summary
+       detailed  
+       detailed junos  like
+TODO   detailed IOS    like
+TODO   detailed IOS-XR like
+
+Scalability:
+
+  calculate large Area: 
+     A Grid 50x50 Intra-area routers
+     Summary x N
+     AsExternal x N
+  
+  calculate ls_db from router show ospf database detailed | display xml output
+
+Automation:
+  
+  Using ruby language and the set of OSPF ruby classes provided by this library
+  All OSPF constructs can be described in simple ruby statements
+
+RFCs:
+
+ RFC 2328
+ RFC 4915

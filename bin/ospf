@@ -1,0 +1,141 @@
+#!/usr/bin/env ruby
+
+require 'neighbor/neighbor'
+require 'packet/ospf_packet'
+require 'ls_db/link_state_database'
+require 'ls_db/link_state_database_links'
+require 'infra/parse_options'
+require 'pp'
+
+Thread.current["name"]  = "#{self}"
+
+cli = Thread.new do
+  Thread.current["name"]  = "CLI"
+  
+  # Parse command line
+  begin
+    options = OptParse.parse(ARGV)
+  rescue OptionParser::InvalidOption => e
+    STDERR.puts e.to_s.gsub(/at\s*$/,'')
+    exit(1)
+  end
+  
+  #
+  #   p options
+  #   neighbor.start_ls_refresh
+  #   puts ls_db.to_s_summary
+  #   neighbor.new_state OSPFv2::NeighborState::ExStart.new(neighbor), 'Just trying...'
+  #   neighbor.new_state OSPFv2::NeighborState::Down.new.start(neighbor), 'Just trying...'
+  # TODO: --ls-db-size  100
+  #       --dd-packing 1 to 71*20+24
+  #
+  # TODO: see to load this configuration from a file
+  #       and reload from a different file form CLI
+  #
+  
+  ls_db = OSPFv2::LSDB::LinkStateDatabase.create :columns=> 2, :rows=> 1, :base_prefix => '169.0.0.0/24', :base_router_id=> 0x80000000
+
+  # #  Up all links
+  # OSPFv2::LSDB::Link.all.each { |id,lnk| ls_db.link lnk, :up  }
+  # 
+  # # Add some Summary LSAs  
+  # rid1 = OSPFv2::LSDB::LinkStateDatabase.router_id(1,1,0x80000000)
+  # rid2 = OSPFv2::LSDB::LinkStateDatabase.router_id(2,1,0x80000000)
+  # 
+  # [rid1,rid2].each  do |rid|
+  #   ls_db.lookup(1,rid).set_abr
+  #   20.times { ls_db << OSPFv2::Summary.new_lsdb( :advertising_router=> rid ) }
+  # end
+  # 
+  # # Add some External LSAs
+  # rid3 = OSPFv2::LSDB::LinkStateDatabase.router_id(3,1,0x80000000)
+  # ls_db.lookup(1,rid3).set_asbr
+  # 20.times { ls_db << OSPFv2::AsExternal.new_lsdb(:advertising_router=> rid3)}
+  
+  
+  # TODO: new_transit
+  dr = '192.168.1.200'
+  lc = '192.168.1.123'
+  link = {:router_link_type=>2, :link_id=> dr, :link_data=> lc}
+  rlsa = ls_db << { 
+    :advertising_router=> options.router_id, 
+    :ls_id=> options.router_id, :nwveb=>2, 
+    :ls_type=>:router_lsa, 
+    :options=> 0x22,
+    :links=>[link] 
+    }
+  
+  # want to see lsa being maxaged....
+  ls_db.advertised_routers + 2
+  ls_db.advertised_routers + 3
+  ls_db.advertised_routers + 5
+  
+  neighbor = OSPFv2::Neighbor.new :src_addr => options.ipaddr, :router_id => options.router_id, :area_id=>options.area_id, :log_fname => options.log_fname
+  
+  neighbor.ls_db = ls_db
+  
+  ls_db.ls_refresh_time=10
+  ls_db.ls_refresh_interval=15
+  
+  help= <<-"end;"
+  end;
+  
+  def prompt() ; ">> " ; end
+  
+  sleep(1)
+  ue=nil
+
+  def eval_cmd(cmd,binding)
+    s = eval(cmd,binding)
+    print "=> #{s.inspect}"
+    puts
+  rescue SyntaxError, NameError => e
+    puts "% syntax error\n"
+  rescue => e
+    puts "% error: #{e}\n"
+  end
+
+  loop do
+    print prompt() ; $stdout.flush
+    cmd = STDIN.gets
+    break unless cmd
+    next if cmd.size == 0
+    ary = cmd.downcase.split(' ')
+    case ary[0]
+    when 'start'
+      OSPFv2::Lsa::LsAge.aging :on
+      neighbor.start
+      
+    when 'stop'  ; neighbor.stop
+    when 'decode'
+      puts OSPFv2::OspfPacket.factory([ary[1..-1].join].pack('H*'))
+    when 'help', '?'
+      print help
+    when nil
+    when /^(exit|quit|x|q|fin|end)$/
+      exit
+    when 'aging'
+      case ary[1]
+      when '?'
+        puts %w(\  on off).join("\n  #{ary[0]} ")
+        next
+      when 'off'
+        OSPFv2::Lsa::LsAge.aging :off
+        next
+      when 'on'
+        OSPFv2::Lsa::LsAge.aging :on
+        next
+      end
+      puts "% syntax error\n"
+
+    else
+      eval_cmd cmd, binding()
+    end
+  end
+
+end
+
+cli.join
+
+exit
+
