@@ -52,18 +52,18 @@ module OSPFv2
       super
     end
     
-    def to_s
+    def to_s_default(*args)
       super  +
       ['',netmask, metric, *mt_metrics].collect { |x| x.to_s }.join("\n   ")
     end
     
-    # Summary  30.0.47.0        128.2.0.1        0x80000003   835  0x0  0x5c30  28
-    #   mask 255.255.255.0
-    #   Topology default (ID 0) -> Metric: 0
-    def to_s_junos
+    def to_s_junos_verbose
       mask = "mask #{netmask.to_ip}"
       super +
       ['', mask, metric.to_s_junos, *mt_metrics.collect{|m| m.to_s_junos}].join("\n  ")
+    end
+    def to_s_junos
+      super
     end
     
   end
@@ -132,22 +132,6 @@ module OSPFv2
       new(hash)
     end
   end
-
-  # puts Summary.new_lsdb
-  # puts Summary.new_lsdb
-  # puts Summary.new_lsdb
-  # Summary.new_lsdb
-  # Summary.new_lsdb
-  # Summary.new_lsdb
-  # Summary.new_lsdb
-  # 
-  # puts Summary.new h = {
-  #   :advertising_router=>"1.1.1.1",
-  #   :metric => 1,
-  #   :network => "10.0.0.1/20",
-  #   :mt_metrics => [{:id=>33, :metric=>20}, {:id=>34, :metric=>255}]
-  # }
-
 
 end
 

@@ -44,7 +44,7 @@ module OSPFv2
 
     ForwardingAddress = Class.new(OSPFv2::Id)
     
-    attr_reader  :id, :metric, :type, :forwarding_address, :tag
+    attr_reader  :metric, :type, :forwarding_address, :tag, :mt_id
     attr_checked :metric do |x|
       (0..0xffffff).include?(x)
     end
@@ -54,7 +54,7 @@ module OSPFv2
     attr_checked :tag do |x|
       (0..0xffffffff).include?(x)
     end
-    attr_checked :id do |x|
+    attr_checked :mt_id do |x|
       (0..0x7f).include?(x)
     end
     
@@ -65,7 +65,7 @@ module OSPFv2
       self.metric=0
       self.type=:e1
       self.tag=0
-      self.id=0
+      self.mt_id=0
       if arg.is_a?(Hash)
         set arg
       elsif arg.is_a?(String)
@@ -87,32 +87,30 @@ module OSPFv2
     
     def parse(s)
       long1, long2, @tag = s.unpack('NNN')
-      @type, @id, @metric = parse_e_id_metric(long1)
+      @type, @mt_id, @metric = parse_e_id_metric(long1)
       @forwarding_address = ForwardingAddress.new(long2)
     end
     
     def to_s
-      "#{type.to_s.upcase} (ID #{id.to_i}) Metric: #{metric.to_i} Forwarding: #{forwarding_address.to_ip} Tag: #{tag}"
+      "#{type.to_s.upcase} (ID #{mt_id}) Metric: #{metric.to_i} Forwarding: #{forwarding_address.to_ip} Tag: #{tag}"
     end
-    
-    def to_hash
-      h = super
-      h.delete(:id) unless @id>0
-      h
-    end
-    
+   
     private
     
     def encoded_e_id_metric
-      [(metric.to_i | ( type==:e2 ? 0x80000000 : id.to_i ))].pack('N')
+      long = 0
+      long = 0x80000000 if type== :e2
+      long |= (mt_id << 24)
+      long |= metric.to_i
+      [long].pack('N')
     end
     
     def parse_e_id_metric(long)
       type = :e1
       type = :e2 if (long >> 31) > 0
       metric = long & 0xffffff
-      id = long >> 24 & 0x7f
-      [type,id,metric]
+      _id = long >> 24 & 0x7f
+      [type,_id,metric]
     end
     
     def metric_to_s
@@ -123,22 +121,36 @@ module OSPFv2
   
   class ExternalRoute < ExternalRoute_Base
     def initialize(arg={})
-      @forwarding_address = ForwardingAddress.new
       if arg.is_a?(Hash)
-        raise ArgumentError, "ID should be 0" if arg[:id] and arg[:id]>0
+        @forwarding_address = ForwardingAddress.new
+        raise ArgumentError, "ID should be 0" if arg[:id] and arg[:mt_id]>0
       end
       super
     end
+    def to_hash
+      h = super
+      h.delete(:mt_id)
+      h
+    end
+    
   end
 
   class MtExternalRoute < ExternalRoute_Base
     def initialize(arg={})
-      @forwarding_address = ForwardingAddress.new
       if arg.is_a?(Hash)
-        raise ArgumentError, "MT-ID not set!" unless arg[:id]
-        raise ArgumentError, "ID should not be 0!" if arg[:id]==0
+        @forwarding_address = ForwardingAddress.new
+        raise ArgumentError, "MT-ID not set!" unless arg[:mt_id]
+        raise ArgumentError, "MT-ID should not be 0!" if arg[:mt_id]==0
       end
       super
+    end
+  end
+  
+  def ExternalRoute_Base.new_hash(h)
+    if h[:mt_metrics]
+      MtExternalRoute.new(h)
+    else
+      ExternalRoute.new(h)
     end
   end
   

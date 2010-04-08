@@ -92,10 +92,12 @@ module OSPFv2
     end
     
     def to_s
-      super +
-      @requests.collect { |x| 
+      s = []
+      s << super
+      s << @requests.collect { |x| 
         "LS type #{ls_type_to_s(x[0])} Link State ID #{ls_id_to_s(x[1])} Advertising Router #{advr_to_s(x[2])}"
       }.join("\n ")
+      s.join("\n ")
     end
     
     def to_lsu(ls_db, arg={})

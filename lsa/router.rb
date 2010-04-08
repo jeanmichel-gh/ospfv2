@@ -217,16 +217,20 @@ module OSPFv2
       end
     end
     
-    def to_s
+    def to_s_default
        super  +
        ['', nwveb_to_s, *links.collect {|x| x.to_s6 }].join("\n   ")
      end
 
-    def to_s_junos
-      link_hdr = "  bits 0x#{nwveb.to_i}, link count #{links.size}"
-      links_to_s = links.collect {|link| link.to_s_junos }
-      super + ['', link_hdr, *links_to_s].join("\n")
-    end
+     def to_s_junos
+       super
+     end
+
+     def to_s_junos_verbose
+       link_hdr = "  bits 0x#{nwveb.to_i}, link count #{links.size}"
+       links_to_s = links.collect {|link| link.to_s_junos }
+       super + ['', link_hdr, *links_to_s].join("\n")
+     end
 
     def has_link?(*args)
       self[*args] ? true : false
@@ -289,6 +293,11 @@ module OSPFv2
   # rlsa = Router.new( :advertising_router => '1.1.1.1', :ls_id => '2.2.2.2')
   # p rlsa.advertising_router
   # p rlsa.ls_id
+  # 
+  # $style=:default
+  # 
+  # puts rlsa
+
   
   class Router
     def self.new_hash(h)

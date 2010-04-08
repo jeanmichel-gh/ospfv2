@@ -106,10 +106,22 @@ module OSPFv2
       lsas[val] 
     end
 
+    # def to_s
+    #   s = []
+    #   s << super
+    #   s << lsas.collect { |x| x.to_s_junos }.join("\n ")
+    #   s.join("\n ")
+    # end
+
     def to_s
-      super +
-      lsas.collect { |x| x.to_s }.join("\n ")
+      s = []
+      s << super(:brief)
+      s << "\# LSAs #{@lsas.size}"
+      s << "Age  Options  Type    Link-State ID   Advr Router     Sequence   Checksum  Length"
+      s << @lsas.collect { |x| x.to_s }.join("\n ")
+      s.join("\n ")
     end
+
     
     def each
       lsas.each { |ls| yield ls }

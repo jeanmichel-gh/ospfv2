@@ -97,7 +97,19 @@ require 'lsa/lsa'
 require 'ls_db/link_state_database'
 
 module OSPFv2
+  
+  
+  
   class DatabaseDescription < OspfPacket
+    
+    class << self
+      
+      def seqn
+        @seqn ||= rand(0x4fff)
+        @seqn +=1
+      end
+      
+    end
 
     attr_reader :options, :ls_db, :interface_mtu, :dd_sequence_number
 
@@ -129,11 +141,42 @@ module OSPFv2
     end
 
     def to_s
-      s = super
-      s+= [interface_mtu, options, imms_to_s, dd_sequence_number_to_s].collect { |x| x.to_s }.join("\n ")
-      s+= (['']+(@lsas.collect { |x| x.header_to_s })).join("\n ") if @lsas
-      s
+      s = []
+      s << super(:brief)
+      s << "MTU #{interface_mtu.to_i}, Options 0x#{options.to_i.to_s(16)}, #{imms_to_s}, DD_SEQ: 0x#{dd_sequence_number_to_shex}"
+      s << "Age  Options  Type    Link-State ID   Advr Router     Sequence   Checksum  Length" if @lsas
+      s <<((@lsas.collect { |x| x.to_s_dd })).join("\n ") if @lsas
+      s.join("\n ")
     end
+
+    # 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+    # +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    # |   Version #   |       2       |         Packet length         |
+    # +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    # |                          Router ID                            |
+    # +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    # |                           Area ID                             |
+    # +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    # |           Checksum            |             AuType            |
+    # +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    # |                       Authentication                          |
+    # +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    # |                       Authentication                          |
+    
+    
+    
+    
+    # 16:57 (exstart) snd DatabaseDescription:
+    #  Version 2, RouterId 0.0.0.1, AreaId 0.0.0.0, AuType 0, Checksum 0x9580, len 9999
+    # MTU 1500, Options 0x0, I|M|MS: 0 [000], DD_SEQ: d022675
+    # 123456789.123456789.123456789.123456789.123456789.123456789.123456789.123456789.
+    #  Age  Options  Type    Link-State ID   Advr Router     Sequence   Checksum  Length
+    #   41    0x22  router    128.1.0.2       128.1.0.2       0x80000001  0x9580   36     
+    #   41    0x00  external  50.0.1.0        128.1.0.1       0x80000001  0x115a   48     
+    #   42    0x22  router    128.1.0.1       128.1.0.1       0x80000001  0xa86e   36     
+    #   41    0x00  summary   30.0.1.0        128.1.0.1       0x80000001  0x6459   28     
+
+
     def to_s_short
       "I|M|MS: [#{[imms].pack('C').unpack('B8')[0][5..7]}] SEQN: #{dd_sequence_number}"
     end
@@ -195,7 +238,11 @@ module OSPFv2
     end
     
     def dd_sequence_number_to_s
-      "DD sequence number: #{dd_sequence_number}"
+      "DD sequence number: #{dd_sequence_number_to_shex}"
+    end
+
+    def dd_sequence_number_to_shex
+      dd_sequence_number.to_s(16)
     end
     
     def parse(s)

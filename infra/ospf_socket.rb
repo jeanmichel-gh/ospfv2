@@ -14,7 +14,10 @@ module OSPFv2
     attr_reader :sock
     
     def initialize(src, options={})
+      @src = src
       @sock = Socket.open(Socket::PF_INET, Socket::SOCK_RAW, IPPROTO_OSPF)
+      add_membership OSPFv2::AllSPFRouters
+      add_membership OSPFv2::AllDRouters
     rescue Errno::EPERM
       $stderr.puts "#{e}: You are not root, cannot run: #{$0}!"
       exit(1)
@@ -61,6 +64,12 @@ module OSPFv2
     
     private
     
+    def add_membership(group)
+      @sock.setsockopt(Socket::IPPROTO_IP, Socket::IP_ADD_MEMBERSHIP, (IPAddr.new(group).hton + IPAddr.new(@src).hton))
+      puts "*** ADDED #{group} membership to Send Socket ***"
+    rescue Errno::EADDRNOTAVAIL
+    end
+
     def _send_(bits, sock_addr)
       @sock.send(bits,0,addr)
     end
@@ -91,6 +100,7 @@ module OSPFv2
     end
     def add_membership(group)
       @sock.setsockopt(Socket::IPPROTO_IP, Socket::IP_ADD_MEMBERSHIP, (IPAddr.new(group).hton + IPAddr.new(@src).hton))
+      puts "*** ADDED #{group} membership to Recv Socket ***"
     rescue Errno::EADDRNOTAVAIL
     end
   end

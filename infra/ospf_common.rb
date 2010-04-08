@@ -79,12 +79,23 @@ class Object
     end
   end
   def method_missing(method, *args, &block)
-    puts "COMMON method_missing: #{method}"
-    if method.to_s =~ /^to_s(\d*)/
+    # puts "COMMON method_missing: #{method}"
+  
+    if method.to_s =~ /^to_s(\d+)/
       to_s($1.to_i)
     else
+      # p caller
       super
     end
+  end
+  def define_to_s
+    if defined?($style)
+      self.class.class_eval { eval("alias :to_s :to_s_#{$style}") }
+    elsif respond_to?(:to_s_default)
+      self.class.class_eval { alias :to_s :to_s_default }
+    else
+      puts "You're screwed!"
+    end      
   end
 end
 
@@ -206,9 +217,11 @@ module OSPFv2
               instance_variable_set("@#{key.to_s}", h[key])
             end
           rescue ArgumentError => e
-            #FIXME: attr_writer_delegate generate a NameError (in link_state_database)
-            p "WE HAVE A NAME ERROR: #{e.inspect}"
-            # instance_variable_set("@#{key.to_s}", h[key])
+            raise
+            # 
+            # #FIXME: attr_writer_delegate generate a NameError (in link_state_database)
+            # p "WE HAVE A NAME ERROR: #{e.inspect}"
+            # # instance_variable_set("@#{key.to_s}", h[key])
           ensure
             h.delete(key)
           end
@@ -254,70 +267,3 @@ module OSPFv2
 end
 
 load "../../test/ospfv2/infra/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if __FILE__ == $0
-
-
-__END__
-
-
-=begin
-  require 'ipaddr'
-  class IPAddr
-
-    def plen    
-      m = @mask_addr
-      len = ipv6? ? 128 : 32
-      while ((m & 1 ==0) and len>0)
-        len -=1
-        m >>= 1
-      end
-      len
-    end  
-
-    def length    
-      hton.size
-    end
-
-    def to_shex 
-      hton.bin2ascii(true) 
-    end
-
-    def __incr(v)
-      IPAddr.ntop([hton.unpack('N*')[0] + (v)].pack('N*'))
-    end
-    private :__incr
-
-    def host(v)
-      __incr(v)+"/"+plen.to_s
-    end
-
-    def + (inc)
-      incr_net(inc)
-    end
-
-    def incr_net(v=1)
-      __incr(v<<(32-plen))
-    end
-
-    #--
-    # doesn't work for ipv6
-    #++
-    def netmask
-      (0xffffffff << (32-plen)) & 0xffffffff
-    end
-
-    def revserse_netmask
-      ~netnask & 0xffffffff
-    end
-
-    def IPAddr.to_ary(prefix)
-      source_address,plen = prefix.split('/')
-      addr = IPAddr.new(prefix)
-      network = addr.to_s
-      netmask = [addr.netmask].pack('N').unpack('CCCC').collect {|c| c}.join('.')
-      [addr, source_address, plen.to_i, network, netmask]
-    end
-
-  end
-  
-=end
-

@@ -89,6 +89,8 @@ require 'ie/sequence_number'
 require 'ie/options'
 require 'ls_db/advertised_routers'
 
+require 'infra/to_s'
+
 module OSPFv2
   
   class Lsa
@@ -115,6 +117,7 @@ module OSPFv2
     include OSPFv2::Common
     include OSPFv2::Constant
     
+    # FIXME: when adding LSA in LSDB should be acked when init, rxmt otherwise ....
     def ack
       @_rxmt_=false
     end
@@ -143,7 +146,7 @@ module OSPFv2
       @ls_id = LsId.new
       @advertising_router = AdvertisingRouter.new
       @_length = 0
-      @_rxmt_ = true
+      @_rxmt_ = false
       
       if arg.is_a?(Hash)
         set arg
@@ -160,8 +163,16 @@ module OSPFv2
     def sequence_number=(seqn)
       @sequence_number = SequenceNumber.new(seqn)
     end
+
+    def to_s_default
+      len = encode.size
+      ls_type_to_s = ls_type.to_sym.to_s.chomp('_lsa')
+      sprintf("%-4.0d  0x%2.2x  %-8s  %-15.15s %-15.15s 0x%8.8x  0x%4.4x   %-7d", 
+      ls_age.to_i, options.to_i, ls_type.to_s_short, ls_id.to_ip, advertising_router.to_ip, seqn.to_I,csum_to_i,len)
+    end
+    alias :to_s_dd :to_s_default
     
-    def to_s
+    def to_s_verbose
       len = encode.size
       s=[]
       s << self.class.to_s.split('::').last + ":"
@@ -176,15 +187,25 @@ module OSPFv2
       s.join("\n   ")
     end
     
-    alias :header_to_s :to_s
+    alias :to_s_header :to_s
     
     def to_s_junos
       len = encode.size
       sprintf("%-7s %-1.1s%-15.15s  %-15.15s  0x%8.8x  %4.0d  0x%2.2x 0x%4.4x %3d", LsType.to_junos(ls_type.to_i), '', ls_id.to_ip, advertising_router.to_ip, seqn.to_I, ls_age.to_i, options.to_i, csum_to_i, len)
-      
     end
-    
-    
+    include OSPFv2::TO_S  
+    alias :to_s_junos_verbose :to_s_junos
+    # 
+    # def to_s(*args)
+    #   return to_s_default(*args) unless defined?($style)
+    #   case $style
+    #   when :junos ; to_s_junos(*args)
+    #   when :junos_verbose ; to_s_junos_verbose(*args)
+    #   else
+    #     to_s_default(*args)
+    #   end
+    # end
+      
     def encode_header
       header = []
       header << ls_age.encode
@@ -302,6 +323,16 @@ module OSPFv2
       h
     end
     
+    def method_missing(method, *args, &block)
+      puts "Method missing in #{self.class}: method: #{method}"
+
+      if method == :to_s_junos
+        :to_s_default
+      else
+        super
+      end
+    end
+
     protected
     
     def csum_to_i
@@ -311,10 +342,11 @@ module OSPFv2
       retry
     end
     
+
     private
     
     def csum=(value)
-      p caller if value.is_a?(Fixnum)
+      raise if value.is_a?(Fixnum)
       @_csum=value
     end
     
@@ -377,153 +409,7 @@ module OSPFv2
     end
     
   end
-  # 
-  # lsa1 = Lsa.new :advertising_router=> '1.1.1.1',
-  #                :ls_type => :router_lsa,
-  #                :ls_id => '2.2.2.2',
-  #                :options => 7,
-  #                :ls_age => 0xffff
-  # lsa2 = Lsa.new :advertising_router=> '1.1.1.1',
-  #                :ls_type => :router_lsa,
-  #                :ls_id => '2.2.2.2',
-  #                :options => 7,
-  #                :ls_age => 0xffff
-  #                
-  # # assert lsa1 == lsa2
-  # lsa1.ls_age=2
-  # # assert (lsa1 > lsa2)
-  # lsa2.ls_age=1000
-  # p (lsa1 > lsa2)
-  # # assert (lsa1 < lsa2)
-  
+
 end
 
 load "../../test/ospfv2/lsa/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if __FILE__ == $0
-
-__END__
-
-
-module Ospf
-class LSA
-  attr :do_not_refresh, true
-  attr :dd_seqn, true
-  attr :described, true
-  
-  def ack
-    self.header.rxmt=false
-  end
-  def retransmit
-    self.header.rxmt=true
-  end
-  def ack?
-    self.header.rxmt == false
-  end
-  def is_acked?
-    self.ack?
-  end
-end
-end
-
-  def to_s
-    "age: #{lsage}, options: #{@options.to_s}, type: #{@lstype}, lsid: #{lsid}, advr: #{advr}, " +
-    "seqn: #{seqn_to_s}, csum: #{@csum}, length: #{@length}"
-  end
-  
-  def to_s
-    sprintf("%s age %d opt 0x%x lsid %s advr %s len %d seqn 0x%x csum 0x%x", LSA_Header.lstype_to_s[@lstype], lsage, @options.to_i, lsid, advr, @length, seqn.to_i, @csum)
-  end
-  
-  def LSA_Header.headline
-    s = "Age  Options  Type    Link-State ID   Advr Router     Sequence   Checksum  Length"
-  end
-
-  def to_s_junos_style(lstype='',rtype=' ')
-    sprintf("%-7s %-1.1s%-15.15s  %-15.15s  0x%8.8x  %4.0d  0x%2.2x 0x%4.4x %3d", lstype, rtype, lsid, advr, seqn.to_i, lsage, @options.to_i, @csum, @length)
-  end
-  
-  def to_s2
-    sprintf("%-4.0d  0x%2.2x  %-8s  %-15.15s %-15.15s 0x%8.8x  0x%4.4x   %-7d", lsage, @options.to_i, LSA_Header.lstype_to_s[@lstype], lsid, advr, seqn.to_i, @csum, @length)
-  end
-
-
-module LSA
-  include Ospf
-    
-  def eql?(lsa)
-    self.header.eql?(lsa)
-  end
-  
-  def lstype
-    self.header.lstype
-  end
-  def lsid
-    self.header.lsid
-  end
-  def lsage
-    self.header.lsage
-  end
-  def lsage=(age)
-    self.header.lsage=age
-  end
-  def advr
-    self.header.advr
-  end
-  def seqn
-    SequenceNumber.new(self.header.seqn)
-  end
-  
-  def key
-    [self.lstype,self.lsid,self.advr]
-  end
-
-  def packet_size(packet, header)
-    header.length=packet.size
-    packet[18..19]=[header.length].pack('n')
-  end
-  
-  def packet_fletchsum(packet)
-    csum = self.fletcher_csum_lsa(packet)
-    @header.csum = csum
-    packet[16..17] = csum
-    packet
-  end
-  
-  def LSA.validate_checksum(packet)
-    #TODO validate_checksum
-  end
-
-  def incr_seqn(n=1)
-    self.header.incr_seqn(n)
-  end
-
- 
-  def refresh(refresh_time, _seqn=nil)
-    def refresh?(ls)
-      ls.lsage.to_i > @ls_refresh_time # and @advrs.key?(ls.advr)
-    end
-    
-    self.header.seqn = _seqn unless _seqn.nil?
-    self.incr_seqn
-    self.lsage=0
-    self.header.time=Time.now
-    self
-  end
-  
-  def maxage
-    self.header.lsage=MaxAge
-    self
-  end
-  
-  def maxaged?
-    self.lsage == MaxAge
-  end
-  
-  def clone
-    clone=super()
-    #clone.header = self.header.clone
-  end
-  
-end
-
-
-__END__

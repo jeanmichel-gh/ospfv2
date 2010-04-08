@@ -62,6 +62,8 @@ require 'lsa/lsa_factory'
 require 'ls_db/common'
 require 'ls_db/advertised_routers'
 
+require 'infra/to_s'
+
 module OSPFv2
 
   module LSDB
@@ -69,6 +71,7 @@ module OSPFv2
   class LinkStateDatabase
     include OSPFv2
     include OSPFv2::Common
+    include TO_S
     
     AreaId = Class.new(OSPFv2::Id)
     
@@ -130,7 +133,7 @@ module OSPFv2
     end
     
     def <<(arg)
-      lsa = OSPFv2::Lsa.factory(arg)
+      lsa = OSPFv2::Lsa.factory(arg) unless lsa.is_a?(Lsa)
       @ls_db.store(lsa.key,lsa)
       lsa
     end
@@ -199,19 +202,26 @@ module OSPFv2
       @offset=0
     end
  
-    def to_s
-      @ls_db.each { |k,v| puts v }
+    def to_s_default
+      s = []
+      s << "    OSPF link state database, Area #{area_id.to_ip}"
+      s << "Age  Options  Type    Link-State ID   Advr Router     Sequence   Checksum  Length"
+       LsType.all.each do |type|
+         s << (__send__ "all_#{type}").collect { |l| l.to_s  }
+       end
+      s.join("\n")
     end
     
-    def to_s_summary
-      lsas = []
-      lsas << "    OSPF link state database, Area #{area_id.to_ip}"
-      lsas << " Type       ID               Adv Rtr           Seq      Age  Opt  Cksum  Len "
-       LsType.all.each do |type|
-         lsas << (__send__ "all_#{type}").collect { |l| l.to_s_junos  }.join("\n")
-       end
-      lsas.join("\n")
-    end
+    # def to_s_junos
+    #   lsas = []
+    #   lsas << "    OSPF link state database, Area #{area_id.to_ip}"
+    #   lsas << " Type       ID               Adv Rtr           Seq      Age  Opt  Cksum  Len "
+    #    LsType.all.each do |type|
+    #      lsas << "    OSPF AS SCOPE link state database"  if type == :external
+    #      lsas << (__send__ "all_#{type}").collect { |l| l.to_s }
+    #    end
+    #   lsas.join("\n")
+    # end
     
     def [](*key)
       lookup(*key)
@@ -341,8 +351,8 @@ load "../../test/ospfv2/ls_db/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if _
 __END__
 
 
-lsa.header_to_s_junos
-lsa.header_to_s_cisco
+lsa.to_s_header_junos
+lsa.to_s_header_cisco
 
 lsa.to_s_summary_cisco
 lsa.to_s_summary_xxxx

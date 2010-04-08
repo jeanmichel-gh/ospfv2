@@ -1,8 +1,9 @@
 module OSPFv2
   class Neighbor
     
-    def recv_hello(hello, *args)
-      @state.recv_hello self, hello, *args
+    def recv_hello(hello, from, port)
+      @neighbor_ip = from
+      @state.recv_hello self, hello, from
     rescue Exception => e
       debug "rescued #{e.inspect}"
     end
@@ -43,22 +44,21 @@ module OSPFv2
           debug "*** #{rcv_dd.router_id} is slave ***"
           if rcv_dd.master? 
             debug "*** #{rcv_dd.router_id} claims mastership ***"
-            # re-assert we are the Master ...
-            @last_dd_seqn = @dd.seqn
-            send @dd
+            # @last_dd_seqn = @dd.seqn
+            send_dd DatabaseDescription.new( :router_id=> @router_id, :area_id=> @area_id, imms=>7),  true
           elsif rcv_dd.seqn == @last_dd_seqn
             negotiation_done
             @last_dd_seqn += 1
             if @ls_db
               @ls_db.recv_dd(rcv_dd, @ls_req_list)
-              @dd = DatabaseDescription.new :router_id=> @router_id, :area_id=> @area_id, 
+              dd = DatabaseDescription.new :router_id=> @router_id, :area_id=> @area_id, 
                                             :ls_db => @ls_db, :number_of_lsa=>60
             else
-              @dd.no_more
+              dd = DatabaseDescription.new :router_id=> @router_id, :area_id=> @area_id
             end
-            @dd.is_master
-            @dd.seqn = @last_dd_seqn
-            send_dd
+            dd.is_master
+            @last_dd_seqn = dd.seqn = @last_dd_seqn
+            send_dd dd, true
           else
             # just stay in ExStart ...
             debug "*** @last_dd_seqn=#{@last_dd_seqn}, rcv_dd.seqn=#{rcv_dd.seqn} "
@@ -68,14 +68,14 @@ module OSPFv2
           if rcv_dd.imms == 0x7
             if @ls_db
               @ls_db.recv_dd(rcv_dd, @ls_req_list)
-              @dd = DatabaseDescription.new :router_id=> @router_id, :area_id=> @area_id, :ls_db => @ls_db, :dd_sequence_number=> rcv_dd.seqn
+              dd = DatabaseDescription.new :router_id=> @router_id, :area_id=> @area_id, :ls_db => @ls_db
             else
-              @dd.seqn = rcv_dd.seqn
-              @dd.imms = 0 # more
+              dd = DatabaseDescription.new :router_id=> @router_id, :area_id=> @area_id
+              dd.imms = 0 # no more
             end
-            @last_dd_seqn_rcv = rcv_dd.seqn
+            @last_dd_seqn_rcv = dd.seqn = rcv_dd.seqn
             dd_rxmt_interval.cancel
-            send @dd
+            send_dd dd, true
             negotiation_done
           end
         end
@@ -97,17 +97,18 @@ module OSPFv2
               @dd = DatabaseDescription.new :router_id=> @router_id, :area_id=> @area_id, 
               :ls_db => @ls_db, :dd_sequence_number=>rcv_dd.seqn
             else
+              @dd.dd_sequence_number= rcv_dd.seqn # ack back
               @dd.imms = 0 # no more
             end
-            send @dd
+            send_dd @dd, true
           elsif rcv_dd.seqn == @last_dd_seqn_rcv
-            send @dd
+            # use rxmt
           else
             @state.seq_number_mismatch(self)
           end
 
           unless  rcv_dd.more? || @dd.more?
-            # dd_rxmt_interval.cancel
+            dd_rxmt_interval.cancel
             new_state Loading.new(self), 'exchange_done'
             new_state Full.new, 'no loading: req list is empty' if @ls_req_list.empty?
           end
@@ -136,7 +137,7 @@ module OSPFv2
               end
               @dd.is_master
               @dd.seqn = @last_dd_seqn
-              send_dd
+              send_dd @dd, true
             end
 
           elsif @last_dd_seqn - rcv_dd.seqn == 1

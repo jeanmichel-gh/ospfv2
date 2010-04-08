@@ -184,73 +184,8 @@ if __FILE__ == $0
       # 128.2.0.1  x.R.x.C   (2,1)
       # 128.1.0.1            (1,1)
 
-    end  
-    # 
-    # def test_create_prefix
-    #   Link.count=0
-    #   lsdb = LinkStateDatabase.create(3,2, {:prefix=>'192.168.0.0/24'})
-    #   rida = lsdb.rid(1,1)
-    #   ridb = lsdb.rid(2,1)
-    #   rlsa =lsdb.lookup(1,rida,rida)
-    #   assert_not_nil(rlsa)
-    #   link = rlsa.lookup(1,long2ip(ridb))[0]
-    #   assert_equal('192.168.0.1',link.data)
-    #   assert_equal(false, rlsa.lookup(3,'192.168.0.0')[0].nil?)
-    #   rlsa =lsdb.lookup(1,ridb,ridb)
-    #   link = rlsa.lookup(1,rida)[0]
-    #   assert_equal('192.168.0.2',link.data)
-    #   assert_equal(false, rlsa.lookup(3,'192.168.0.0')[0].nil?)
-    # end
-    # 
-    # def test_create_rid_base
-    #   lsdb = LinkStateDatabase.create(10,10, {:rid_base=>0xff000000})
-    #   assert_equal('255.1.0.1', long2ip(lsdb.rid(1,1)))
-    #   assert_equal('255.5.0.5', long2ip(lsdb.rid(5,5)))
-    # end
-
+    end
+ 
   end
 
-end
-
-
-__END__
-
-
-raise ArgumentError, "expecting a Link or TE_Link object", caller unless link.is_a?(Link)
-# addr, source_address, plen, network, netmask = IPAddr.to_ary(link.prefix)
-
-local = (what == :local or what == :both)
-remote = (what == :remote or what == :both)
-
-local_exist = has_router_lsa?(link.rid)
-remote_exist = has_router_lsa?(link.nid)
-
-add_loopback(link.rid) if local
-add_loopback(link.nid) if remote
-
-# if link.is_a?(TE_Link)
-#   self << link.te_lsa_linktlv_local if local
-#   self << link.te_lsa_linktlv_remote if remote
-# end
-
-link.add_observer(self)        
-link_flood(link,what,local_exist,remote_exist)
-
-link.lsas.each do |lsa|
-  if (lsa.methods & ["set_link"])==[]
-    def lsa.set_link(link)
-      @_links=[link]
-      def self.set_link(link)
-        @_links << link
-      end
-    end
-    def lsa.link?
-      @_links
-    end
-  end
-  lsa.set_link(link)
-end
-end
-
-end
 end

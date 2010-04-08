@@ -11,10 +11,11 @@ module OSPFv2
   class External_Base < Lsa
     
     Netmask = Class.new(OSPFv2::Id)
+    ExternalRoute = Class.new(OSPFv2::ExternalRoute)
     
     
     attr_reader :netmask, :external_route, :mt_metrics
-    attr_writer_delegate :netmask
+    attr_writer_delegate :netmask, :external_route
     
     def initialize(arg={})
       @netmask, @external_route = nil
@@ -45,19 +46,40 @@ module OSPFv2
       super
     end
     
-    def to_s
+    def to_s_default
+      mt_metrics = self.mt_metrics.collect
+      super  +
+      ['',netmask, external_route, *mt_metrics ].collect { |x| x.to_s }.join("\n   ")
+    end
+    
+    def to_s_junos
+      super
+    end
+    
+    # Extern   50.0.2.0         128.3.0.1        0x80000001    39  0x0  0x1454  48
+    #   mask 255.255.255.0
+    #   Topology default (ID 0)
+    #     Type: 1, Metric: 0, Fwd addr: 0.0.0.0, Tag: 0.0.0.0
+    #   Topology default (ID 0)
+    #     Type: 1, Metric: 30, Fwd addr: 0.0.0.0, Tag: 0.0.0.10
+    def to_s_junos_verbose
       mt_metrics = self.mt_metrics.collect
       super  +
       ['',netmask, external_route, *mt_metrics ].collect { |x| x.to_s }.join("\n   ")
     end
     
     def mt_metrics=(val)
+      # p "in mt_metrics=(val)"
+      # p val
       [val].flatten.each { |x| self << x }
     end
     
     def <<(ext_route)
       @mt_metrics ||=[]
-      @mt_metrics << MtExternalRoute.new(ext_route)
+      # p "calling MtExternalRoute with #{ext_route.inspect}"
+      route = MtExternalRoute.new(ext_route)
+      # p route
+      @mt_metrics << route
       self
     end
     
@@ -142,7 +164,7 @@ module OSPFv2
 
     def initialize(arg={})
        if arg.is_a?(Hash)
-         arg = fix_hash(arg).merge!({:ls_type => :as_external_lsa,}) 
+         arg = fix_hash(arg).merge!({:ls_type => :as_external_lsa,})
        end
        super
      end
@@ -150,22 +172,22 @@ module OSPFv2
      private
 
      def fix_hash(arg)
+       # p 'HERE'
+       # p arg
        if arg[:network]
          addr = IPAddr.new arg[:network]
          arg.delete :network
          arg.store :netmask, addr.netmask
          arg.store :ls_id, addr.to_s
        end
-       ext_route = arg[:external_route] ||={}
-       ext_route.store :metric, arg[:metric]  if arg[:metric]
-       ext_route.store :forwarding_address, arg[:forwarding_address]  if arg[:forwarding_address]
-       ext_route.store :type, arg[:type]  if arg[:type]
-       ext_route.store :tag, arg[:tag]  if arg[:tag]
-       arg.delete(:metric)
-       arg.delete(:forwarding_address)
-       arg.delete(:type)
-       arg.delete(:tag)
-       arg.merge!(:external_route=>ext_route)
+       route = arg[:external_route] ||={}
+       [:metric, :forwarding_address, :type, :tag].each do |e|
+         next unless arg[e]
+         route.store(e, arg[e]) if arg[e]
+         arg.delete(e)
+       end
+       arg.merge!(:external_route=>route)
+       # p "FIXED arg: #{arg.inspect}"
        arg
      end
  
@@ -174,12 +196,28 @@ module OSPFv2
   def AsExternal.new_hash(h)
     new(h)
   end
+  # 
+  # h_lsa = {
+  #   :advertising_router=>"1.1.1.1",
+  #   :ls_id=>"10.0.0.0",
+  #   :netmask => "255.255.255.0",
+  #   :forwarding_address => "1.2.3.0",
+  #   :metric => 1,
+  #   :type => :e2,
+  #   :tag=> 255
+  # }
+  # ext = OSPFv2::AsExternal.new(h_lsa)    
+  # puts ext
+  # 
 
 end
 
 load "../../test/ospfv2/lsa/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if __FILE__ == $0
 
+
 __END__
+
+
 
 __END__
 

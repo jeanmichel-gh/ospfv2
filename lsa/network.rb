@@ -108,7 +108,7 @@ class Network < Lsa
   #    NetworkMask: 255.255.255.0
   #    AttachRouter: 192.168.1.200
   #    AttachRouter: 193.0.0.0
-  def to_s
+  def to_s_default(*args)
     super  +
     ['', network_mask, *attached_routers].join("\n   ")
   end
@@ -119,6 +119,10 @@ class Network < Lsa
   #   attached router 193.0.0.0
   # 
   def to_s_junos
+    super
+  end
+
+  def to_s_junos_verbose
     mask = "mask #{network_mask.to_ip}"
     attrs = attached_routers.collect { |ar| "attached router #{ar.to_ip}"}
     super +

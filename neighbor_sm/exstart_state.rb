@@ -6,7 +6,7 @@ module OSPFv2
       def initialize(n)
         @neighbor = n
          n.instance_eval do
-          @last_dd_seqn = rand(0x4ffff)
+          @last_dd_seqn = dd_sequence_number
           
           #-- could be a State#reset method inherited ?
           @ls_db.reset if @ls_db
@@ -15,9 +15,9 @@ module OSPFv2
           @periodic_rxmt.cancel
           #--
           
-          @dd = DatabaseDescription.new :router_id=> @router_id, :area_id=> @area_id, 
-                                        :imms=>7, :dd_sequence_number => @last_dd_seqn
-          send_dd
+          dd = DatabaseDescription.new :router_id=> @router_id, :area_id=> @area_id, 
+                                        :imms=>7, :dd_sequence_number => (@last_dd_seqn = dd_sequence_number)
+          send_dd dd, true
         end
         
       end

@@ -75,14 +75,14 @@ module OSPFv2
       else
         s = []
         s << "\n#{Time.to_ts} (#{state}) #{ev} #{obj.name.to_camel}:\n#{obj}"
-        s << obj.encode.hexlify.join("\n ")
+        s << obj.encode.hexlify.join("\n ") if defined?($debug) and $debug == 1
         s << "\n"
         @trace.trace s.join
       end
     end
 
     def debug(obj)
-      log :debug, obj
+      log :debug, obj  if defined? $debug and $debug ==1
     end
     
     def clear_lsa_request_list
@@ -102,7 +102,7 @@ module OSPFv2
     alias :new_state :change_state
     
     def dd_sequence_number
-      @dd_sequence_number ||= rand(0x4ffff)
+      @dd_sequence_number = DatabaseDescription.seqn
     end
     def start
       unless @ev
@@ -167,11 +167,13 @@ module OSPFv2
       @periodic_rxmt.start {
         if @ls_req_list
           debug "There are #{@ls_req_list.size} LS Request to re-transmit!"
-          send LinkStateRequest.new :area_id => @area_id, :router_id=> @router_id, :requests=> @ls_req_list.keys unless @ls_req_list.empty?
+          send LinkStateRequest.new :area_id => @area_id, :router_id=> @router_id, :requests=> @ls_req_list.keys \
+                unless @ls_req_list.empty?
         end
         lsas = @ls_db.all_not_acked
         debug "There are #{lsas.size} LSA to re-transmit!"
-        send LinkStateUpdate.new_lsas  :router_id=> @router_id, :area_id => @area_id, :lsas => lsas
+        send LinkStateUpdate.new_lsas  :router_id=> @router_id, :area_id => @area_id, :lsas => lsas  \
+                unless lsas.empty?
       }
     end
     
@@ -191,11 +193,10 @@ module OSPFv2
       @state.exchange_done(self)
     end
     
-    def send_dd
+    def send_dd(dd, rxmt=false)
       dd_rxmt_interval.cancel
-      dd = @dd
-      dd_rxmt_interval.start { debug "*** re-transmitting #{dd} ***" ; send dd } 
-      send dd
+      dd_rxmt_interval.start { debug "\n\n\n*** re-transmitting #{dd} ***\n\n\n" ; send dd } if rxmt
+      send dd, @neighbor_ip
     end
 
     def method_missing(method, *args, &block)

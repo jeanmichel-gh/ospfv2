@@ -11,7 +11,7 @@ class Id
   end
 
   def self.to_i(id)
-    return id unless id.is_a?(String)
+    return id.to_i unless id.is_a?(String) and id.split('.').size==4
     IPAddr.new(id).to_i
   end
 

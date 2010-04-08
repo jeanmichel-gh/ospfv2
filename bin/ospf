@@ -9,6 +9,7 @@ require 'pp'
 
 Thread.current["name"]  = "#{self}"
 
+
 cli = Thread.new do
   Thread.current["name"]  = "CLI"
   
@@ -35,47 +36,47 @@ cli = Thread.new do
   
   ls_db = OSPFv2::LSDB::LinkStateDatabase.create :columns=> 2, :rows=> 1, :base_prefix => '169.0.0.0/24', :base_router_id=> 0x80000000
 
-  # #  Up all links
+  #  Up all links
   # OSPFv2::LSDB::Link.all.each { |id,lnk| ls_db.link lnk, :up  }
   # 
-  # # Add some Summary LSAs  
-  # rid1 = OSPFv2::LSDB::LinkStateDatabase.router_id(1,1,0x80000000)
+  # Add some Summary LSAs  
+  rid1 = OSPFv2::LSDB::LinkStateDatabase.router_id(1,1,0x80000000)
   # rid2 = OSPFv2::LSDB::LinkStateDatabase.router_id(2,1,0x80000000)
-  # 
-  # [rid1,rid2].each  do |rid|
-  #   ls_db.lookup(1,rid).set_abr
-  #   20.times { ls_db << OSPFv2::Summary.new_lsdb( :advertising_router=> rid ) }
-  # end
-  # 
-  # # Add some External LSAs
-  # rid3 = OSPFv2::LSDB::LinkStateDatabase.router_id(3,1,0x80000000)
-  # ls_db.lookup(1,rid3).set_asbr
-  # 20.times { ls_db << OSPFv2::AsExternal.new_lsdb(:advertising_router=> rid3)}
   
+  [rid1].each  do |rid|
+    ls_db.lookup(1,rid).set_abr
+    1.times { ls_db << OSPFv2::Summary.new_lsdb( :advertising_router=> rid ) }
+  end
+  # 
+  # Add some External LSAs
+  rid3 = OSPFv2::LSDB::LinkStateDatabase.router_id(1,1,0x80000000)
+  ls_db.lookup(1,rid3).set_asbr
+  1.times { ls_db << OSPFv2::AsExternal.new_lsdb(:advertising_router=> rid3, :mt_metrics=>[{:mt_id=>10, :metric=>20, :tag=>10}])}
   
   # TODO: new_transit
-  dr = '192.168.1.200'
-  lc = '192.168.1.123'
-  link = {:router_link_type=>2, :link_id=> dr, :link_data=> lc}
-  rlsa = ls_db << { 
-    :advertising_router=> options.router_id, 
-    :ls_id=> options.router_id, :nwveb=>2, 
-    :ls_type=>:router_lsa, 
-    :options=> 0x22,
-    :links=>[link] 
-    }
-  
+  # dr = '192.168.1.200'
+  # lc = '192.168.1.123'
+  # link = {:router_link_type=>2, :link_id=> dr, :link_data=> lc}
+  # rlsa = ls_db << { 
+  #   :advertising_router=> options.router_id, 
+  #   :ls_id=> options.router_id, :nwveb=>2, 
+  #   :ls_type=>:router_lsa, 
+  #   :options=> 0x22,
+  #   :links=>[link] 
+  #   }
+  #   
   # want to see lsa being maxaged....
-  ls_db.advertised_routers + 2
-  ls_db.advertised_routers + 3
-  ls_db.advertised_routers + 5
+  # ls_db.advertised_routers + 2
+  # ls_db.advertised_routers + 3
+  # ls_db.advertised_routers + 5
   
   neighbor = OSPFv2::Neighbor.new :src_addr => options.ipaddr, :router_id => options.router_id, :area_id=>options.area_id, :log_fname => options.log_fname
   
   neighbor.ls_db = ls_db
-  
-  ls_db.ls_refresh_time=10
-  ls_db.ls_refresh_interval=15
+
+  # Add option to parse 
+  ls_db.ls_refresh_time=300
+  ls_db.ls_refresh_interval=10
   
   help= <<-"end;"
   end;

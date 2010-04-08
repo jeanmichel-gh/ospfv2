@@ -79,6 +79,19 @@ class LsType
   def to_s
     self.class.to_s.split('::').last + ": #{to_sym}"
   end
+  def to_s_short
+    case to_i
+    when  1; 'router'
+    when  2; 'network'
+    when  3; 'summary'
+    when  4; 'asbrSum'
+    when  5; 'external'
+    when  7; 'nssa'
+    when  9; 'opaqLnk'
+    when 10; 'opaqArea'
+    when 11; 'opaqAs'
+    end
+  end
   def to_sym
     LsType.to_sym @ls_type
   end
