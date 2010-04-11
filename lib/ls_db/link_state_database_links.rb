@@ -39,6 +39,10 @@ module OSPFv2::LSDB
       rows=arg[:rows]
       cols=arg[:columns]
       @base_router_id = arg[:base_router_id] 
+      if arg[:base_prefix]
+        Link.reset_ip_addr
+        Link.base_ip_addr arg[:base_prefix]
+      end
       @base_prefix = arg[:base_prefix]
       router_id = lambda { |c,r|  (r<<16) + c + @base_router_id }
       1.upto(rows) do |r|
@@ -104,15 +108,11 @@ module OSPFv2::LSDB
                     :metric => link.metric      
     end
 
-    def link_down(link)  
-  # rlsa =  @ls_db[1,1]
-  # p rlsa.links.size
-  # p rlsa
-  # rlsa.delete(:point_to_point,'0.0.0.2')
-  # p rlsa.links.size
-
-      lookup(link.local_lsa).delete(1, link.neighbor_id.to_ip)
-      lookup(link.remote_lsa).delete(:point_to_point, link.router_id.to_ip)
+    def link_down(link)      
+      lsa = @ls_db[link.local_lsa]
+      lsa.delete(1, link.neighbor_id.to_ip)
+      lsa = @ls_db[link.remote_lsa]
+      lsa.delete(1, link.router_id.to_ip)
     end
 
     def link_refresh
@@ -152,99 +152,5 @@ module OSPFv2::LSDB
  
 end
 
+load "../../../test/ospfv2/ls_db/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if __FILE__ == $0
 
-# FIXME: when ls_db is emtpty, got that:
-#    OSPF link state database, Area 0.0.0.0
-# Type       ID               Adv Rtr           Seq      Age  Opt  Cksum  Len 
-
-if __FILE__ == $0
-
-  require "test/unit"
-
-  # require "ls_db/link_add"
-
-  class TestLsDbLinks < Test::Unit::TestCase
-    include OSPFv2::LSDB
-    def setup
-      @ls_db = LinkStateDatabase.new(:area_id=> 0)
-    end
-    def test_new_link
-      @ls_db = LinkStateDatabase.new :area_id=>0
-      @ls_db.new_link :router_id=> 1, :neighbor_id=>2
-      @ls_db.new_link :router_id=> 1, :neighbor_id=>3
-      @ls_db.new_link :router_id=> 1, :neighbor_id=>4
-      @ls_db.new_link :router_id=> 1, :neighbor_id=>5
-
-      puts @ls_db.to_s_junos
-
-      Link.all.values.each { |lnk| @ls_db.link lnk, :down  }
-      
-      puts @ls_db.to_s_junos
-
-      Link.all.values.each { |lnk| @ls_db.link lnk, :up  }
-
-      puts @ls_db.to_s_junos
-
-
-      rlsa =  @ls_db[1,1]
-      p rlsa.links.size
-      p rlsa
-      rlsa.delete(:point_to_point,'0.0.0.1')
-      p rlsa.links.size      
-      
-      assert_equal 2, @ls_db.size
-      
-
-      puts @ls_db.to_s_junos
-      
-      
-      @ls_db.link Link[1], :down
-
-      puts @ls_db.to_s_junos
-      
-    end
-  end
-end
-
-__END__
-
-
-
-    def test_new_link_local_only
-      @ls_db = LinkStateDatabase.new :area_id=>0
-      @ls_db.new_link :router_id=> 1, :neighbor_id=>2, :direction => :local_only
-      @ls_db.new_link :router_id=> 1, :neighbor_id=>3, :direction => :local_only
-      @ls_db.new_link :router_id=> 1, :neighbor_id=>4, :direction => :local_only
-      @ls_db.new_link :router_id=> 1, :neighbor_id=>5, :direction => :local_only
-      assert_equal 1,  @ls_db.size
-      assert_equal 1,  @ls_db.all_router[0].advertising_router.to_i
-    end
-    def test_new_link_remote_only
-      @ls_db = LinkStateDatabase.new :area_id=>0
-      @ls_db.new_link :router_id=> 1, :neighbor_id=>2, :direction => :remote_only
-      @ls_db.new_link :router_id=> 1, :neighbor_id=>3, :direction => :remote_only
-      @ls_db.new_link :router_id=> 1, :neighbor_id=>4, :direction => :remote_only
-      @ls_db.new_link :router_id=> 1, :neighbor_id=>5, :direction => :remote_only
-      assert_equal 4,  @ls_db.size
-    end
-    def test_link_up_down
-      @ls_db = LinkStateDatabase.new :area_id=>0
-      assert_equal 0, @ls_db.size
-      @ls_db.new_link :router_id=> 1, :neighbor_id=>2
-      assert_equal 2, @ls_db.size
-      @ls_db.link Link.all[1], :up
-      assert_equal 4, @ls_db.size
-    end
-
-    def test_create
-      ls_db = LinkStateDatabase.create :columns=> 1, :rows=> 2, :base_prefix => '169.0.0.0/24', :base_router_id=> 0x80000000
-      assert_equal 2, ls_db.size
-      #puts ls_db
-      # 128.2.0.1  x.R.x.C   (2,1)
-      # 128.1.0.1            (1,1)
-
-    end
- 
-  end
-
-end

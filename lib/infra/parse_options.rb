@@ -10,6 +10,8 @@ class OptParse
     options.ipaddr = '192.168.1.123'
     options.network = '192.168.1.0'
     options.netmask = '255.255.255.0'
+    options.base_link_addr = '1.3.0.0/30'
+    options.base_router_id = 0
     options.hello_int = 10
     options.router_id = 1
     options.neighbor_id = 2
@@ -36,6 +38,8 @@ class OptParse
 
     option_help = "blabla ...."
     hlp_address =    "IP Address of the OSPF Interface."
+    hlp_base_link_addr = "base p2p links addres [#{options.base_link_addr}]"
+    hlp_base_router_id   = "base router-id [#{to_ip.call(options.base_router_id)}]"
     hlp_neighbor_id= "Neighbor Id. [#{to_ip.call(options.neighbor_id)}]"
     hlp_router_id =  "Router Id.   [#{to_ip.call(options.router_id)}]"
     hlp_area_id =    "Area Id.     [#{to_ip.call(options.area_id)}]"
@@ -49,12 +53,18 @@ class OptParse
 
       opts.banner = "Usage: #{$0} [options]"
 
-      opts.on("-i", "--address [ADRRESS/LEN]", hlp_address) { |x| 
+      opts.on( "--base-p2p-addr [PREFIX]", hlp_base_link_addr) { |x| 
+        options.base_link_addr = x
+      }
+      opts.on("-i", "--address [PREFIX]", hlp_address) { |x| 
         options.ipaddr = x
         options.ipaddr = x.split('/')[0]
         _addr = IPAddr.new x
         options.network = _addr.to_s
         options.netmask = _addr.netmask
+      }
+      opts.on("--base-router-id [ID]", hlp_base_router_id) { |id| 
+        options.base_router_id = id.to_i
       }
       opts.on("-r", "--router-id [ID]", hlp_router_id) { |id| 
         options.router_id = OSPFv2::Id.to_i(id) 

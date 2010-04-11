@@ -24,42 +24,39 @@ cli = Thread.new do
   
   ls_db = OSPFv2::LSDB::LinkStateDatabase.create :columns=> options.grid[0], 
                                                  :rows=> options.grid[1], 
-                                                 :base_prefix => '169.0.0.0/24', 
-                                                 :base_router_id=> 0x80000000
+                                                 :base_prefix => options.base_link_addr, 
+                                                 :base_router_id=> options.base_router_id
 
   #  Up all links
   OSPFv2::LSDB::Link.all.each { |id,lnk| ls_db.link lnk, :up  }
 
   
-  # Describe the connection to the router
+  # Describe the connection to our neighbor
+  # It's a p2p connection
+  #   we need to describe a p2p link and a stub link
   rlsa = Router.new :ls_id=> options.router_id, 
                     :advertising_router=>options.router_id, 
                     :options=>0x22
-                    
   rlsa << RouterLink.new_point_to_point(:link_id=>options.neighbor_id,
                                         :link_data=> options.ipaddr,
-                                        :metric=>1)
-                                        
+                                        :metric=>1)     
   rlsa << RouterLink.new_stub_network(:link_id=>options.network, 
                                       :link_data=>options.netmask, 
                                       :metric=>1)
-
   ls_db << rlsa
-  
-  rid1 = OSPFv2::LSDB::LinkStateDatabase.router_id(1,1,0x80000000)
-  rid2 = OSPFv2::LSDB::LinkStateDatabase.router_id(2,1,0x80000000)
-  rid3 = OSPFv2::LSDB::LinkStateDatabase.router_id(1,1,0x80000000)
 
-  # add a link between 200.0.0.1 and rid1
+
+  rid1 = OSPFv2::LSDB::LinkStateDatabase.router_id(1,1,options.base_router_id)
+  rid2 = OSPFv2::LSDB::LinkStateDatabase.router_id(2,1,options.base_router_id)
+  rid3 = OSPFv2::LSDB::LinkStateDatabase.router_id(1,1,options.base_router_id)
+
+  # add a  a p2p link between router_id and rid1
   ls_db.new_link :router_id=> options.router_id, :neighbor_id=>rid1
 
   # Link.all.values.each { |lnk| @ls_db.link lnk, :down  }
   
   # Add some Summary LSAs
-  rid1 = OSPFv2::LSDB::LinkStateDatabase.router_id(1,1,0x80000000)
-  rid2 = OSPFv2::LSDB::LinkStateDatabase.router_id(2,1,0x80000000)
-
-  [rid1,rid2].each  do |rid|    
+  [rid1,rid2].each  do |rid|
     ls_db.lookup(1,rid).set_abr
     (options.num_sum/2).times { ls_db << OSPFv2::Summary.new_lsdb( :advertising_router=> rid ) }
   end
@@ -68,7 +65,10 @@ cli = Thread.new do
   ls_db.find_router_lsa(rid3).set_asbr
   options.num_ext.times { \
           ls_db << OSPFv2::AsExternal.new_lsdb(:advertising_router=> rid3, 
-                                               :mt_metrics=>[{:mt_id=>10, :metric=>20, :tag=>10}])}
+                                               :mt_metrics=>[{:mt_id=>10, :metric=>20,
+                                                              :tag=>10}])}
+  
+  ls_db << AsbrSummary.new(:advertising_router=> rid3, :ls_id=> rid3)
   
   
   neighbor = OSPFv2::Neighbor.new :src_addr => options.ipaddr, 
@@ -99,7 +99,7 @@ cli = Thread.new do
 
   def eval_cmd(cmd,binding)
     s = eval(cmd,binding)
-    print "=> #{s.inspect}"
+    print "=> #{s.inspect}" if s
     puts
   rescue SyntaxError, NameError => e
     puts "% syntax error\n"
@@ -114,6 +114,7 @@ cli = Thread.new do
   loop do
     print prompt() ; $stdout.flush
     cmd = STDIN.gets
+    break unless cmd
     next if cmd.size == 0
     ary = cmd.downcase.split(' ')
     case ary[0]

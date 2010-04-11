@@ -221,13 +221,14 @@ module OSPFv2
          lsas << (__send__ "all_#{type}").collect { |l| 
            if verbose
              l.to_s_junos_verbose 
-           else
+           else 
              l.to_s_junos
            end
          }
        end
       lsas.join("\n")
     end
+    alias :to_j :to_s_junos
     
     def [](*key)
       lookup(*key)

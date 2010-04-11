@@ -149,7 +149,7 @@ module OSPFv2::LSDB
     #     Topology count: 0, Default metric: 0
     #     
     def add_loopback(arg={})
-      add_link_to_stub_network :router_id => arg[:router_id], :link_id=> arg[:address], :link_data=> '255.255.255.255'
+      add_link_to_stub_network :router_id => arg[:router_id], :link_id=> arg[:address], :link_data=> '255.255.255.255', :metric=> arg[:metric]
     end
     
   end
