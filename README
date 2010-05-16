@@ -44,9 +44,6 @@ Automation:
   All OSPF constructs can be described in simple ruby statements
 
 
-
-
-
 RFCs:
 
  RFC 2328
