@@ -20,8 +20,8 @@
 # along with OSPFv2.  If not, see <http://www.gnu.org/licenses/>.
 #++
 
-
 # 0 Null authentication 1 Simple password 2 Cryptographic authentication
+
 module OSPFv2
 class AuType
   def initialize(au_type=0)

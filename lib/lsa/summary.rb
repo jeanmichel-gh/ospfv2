@@ -26,20 +26,22 @@ require 'ie/metric'
 require 'ie/mt_metric'
 require 'ie/id'
 
-
 module OSPFv2
 
-  Netmask = Class.new(Id)
+  unless const_defined?(:Netmask)
+    Netmask = Class.new(Id)
+  end
   
   class Summary_Base < Lsa
     
     attr_reader :metric, :netmask, :mt_metrics
     
-    def initialize(arg={})
+    def initialize(type, arg={})
       @netmask=nil
       @metric=nil
       @mt_metrics=[]
-      super
+      @ls_type = LsType.new(type)
+      super arg
     end
     
     def mt_metrics=(val)
@@ -121,15 +123,17 @@ module OSPFv2
     
     
     def initialize(arg={})
-      if arg.is_a?(Hash)
-        arg = fix_hash(arg).merge!({:ls_type => :summary_lsa,}) 
+      case arg
+      when Hash
+        arg = fix_hash(arg).merge!({:ls_type => :summary_lsa,})
       end
-      super
+      super 3, arg
     end
     
     private
     
     def fix_hash(arg)
+      
       if arg[:network]
         addr = IPAddr.new arg[:network]
         arg.delete :network
@@ -137,14 +141,17 @@ module OSPFv2
         arg.store :ls_id, addr.to_s
       end
       arg
+    rescue => e
+      p 'HERE'
+      p arg
+      raise
     end
     
   end
   
   class AsbrSummary < Summary_Base
     def initialize(arg={})
-      arg.merge!({:ls_type => :asbr_summary_lsa,}) if arg.is_a?(Hash)
-      super
+      super 4, arg
     end
   end
   
@@ -162,17 +169,6 @@ load "../../../test/ospfv2/lsa/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if 
 
 __END__
 
-# if arg.is_a?(Hash)
-#   arg.merge!({:ls_type=> :summary_lsa}) unless arg.has_key?(:ls_type) 
-#   set arg
-#    super
-# elsif arg.is_a?(String)
-#   parse arg
-# elsif arg.is_a?(self.class)
-#   parse arg.encode
-# else
-#   raise ArgumentError, "Invalid argument", caller
-# end
 
 =begin rdoc
 

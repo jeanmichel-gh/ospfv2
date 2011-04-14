@@ -100,16 +100,17 @@ class Object
       ""
     end
   end
-  def method_missing(method, *args, &block)
-    # puts "COMMON method_missing: #{method}"
   
+  def method_missing(method, *args, &block)
     if method.to_s =~ /^to_s(\d+)/
       to_s($1.to_i)
     else
       # p caller
+      #FIXME: Check if working with 1.9.2
       super
     end
   end
+  
   def define_to_s
     if defined?($style)
       self.class.class_eval { eval("alias :to_s :to_s_#{$style}") }
@@ -117,7 +118,7 @@ class Object
       self.class.class_eval { alias :to_s :to_s_default }
     else
       puts "You're screwed!"
-    end      
+    end
   end
 end
 
@@ -175,7 +176,7 @@ class IPAddr
     [to_s,mlen].join('/')
   end
     
-  def IPAddr.to_ary(prefix)
+  def IPAddr.to_arr(prefix)
     source_address,mlen = prefix.split('/')
     ip = IPAddr.new(prefix)
     network = ip.to_s
@@ -200,8 +201,6 @@ class IPAddr
     Proc.new { |n| n*(2**(max_len - mlen)) }
   end
   
-
-
 end
 
 

@@ -52,14 +52,14 @@ module OSPFv2::LSDB
       raise ArgumentError, "missing prefix" unless prefix
       raise ArgumentError, "missing neighbor router id" unless neighbor_id
 
-      _, addr, plen, network, netmask = IPAddr.to_ary(prefix)
+      _, addr, plen, network, netmask = IPAddr.to_arr(prefix)
 
       # if not set assume router id is the interface address given to us in :prefix
       router_id ||= addr
       
 
       # router_id to list of advertised routers
-      advertised_routers + router_id
+      advertised_routers << router_id
 
       rlsa = find_router_lsa router_id
 
@@ -72,7 +72,7 @@ module OSPFv2::LSDB
          :ls_type=>:router_lsa, 
          :options=> 0x22
          
-        advertised_routers + router_id
+        advertised_routers << router_id
 
         # add to lsdb
         self << rlsa
@@ -97,7 +97,7 @@ module OSPFv2::LSDB
     
     def remove_adjacency(rid, neighbor_id, prefix)
       if (rlsa = lookup(:router_lsa, rid))
-        addr, source_address, plen, network, netmask = IPAddr.to_ary(prefix)
+        addr, source_address, plen, network, netmask = IPAddr.to_arr(prefix)
         rlsa.delete(:point_to_point,id2ip(neighbor_id))
         rlsa.delete(3,network)
       end
@@ -139,7 +139,7 @@ module OSPFv2::LSDB
           :ls_type=>:router_lsa,
           :options=> 0x22
         
-        advertised_routers + router_id
+        advertised_routers << router_id
         
         # add to lsdb
         self << rlsa

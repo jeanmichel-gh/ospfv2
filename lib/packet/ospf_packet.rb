@@ -147,6 +147,7 @@ module OSPFv2
       else
         raise ArgumentError, "Invalid argument", caller
       end
+      @_len=nil
     end
     
     def encode(payload='',router_id=@router_id)
@@ -167,7 +168,7 @@ module OSPFv2
   # Version 2, RouterId 0.0.0.1, AreaId 0.0.0.0, AuType 0, Checksum 0x9580, len 9999
 
     def to_s_brief
-      encode unless @_len
+      encode
       "Version #{ospf_version.to_i}, RouterId #{router_id.to_ip}, AreaId #{area_id.to_ip}, Checksum #{0}, len #{@_len}"
     end
   
@@ -202,7 +203,6 @@ module OSPFv2
     end
 
     def method_missing(method, *args, &block)
-      puts "Method missing in #{self.class}: method: #{method}"
 
       if method == :to_s_junos
         to_s_default(*args)

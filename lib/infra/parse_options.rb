@@ -56,7 +56,7 @@ class OptParse
 
     to_ip = lambda { |id| [id].pack('N').unpack('C*').join('.') }
     to_id = lambda { |x| OSPFv2::Id.to_i(x) }
-    dead_int = lambda { @dead_int || (options.hello_int * 4)}
+    dead_int = lambda { options.dead_int || (options.hello_int * 4) }
 
     option_help = "blabla ...."
     hlp_address =    "IP Address of the OSPF Interface."
@@ -104,7 +104,7 @@ class OptParse
         options.hello_int = int.to_i
       }
       opts.on("--dead-interval [INT]", hlp_dead_int) { |int| 
-        @dead_int = int.to_i
+        options.dead_int = int.to_i
       }
       opts.on("-g", "--grid [colxrow]", hlp_grid) { |grid| 
         options.grid = grid.split('x').collect { |x| x.to_i }
@@ -124,7 +124,7 @@ class OptParse
     end
 
     optparse.parse!(args)
-    options.dead_int = @dead_int || (options.hello_int * 4)
+    options.dead_int ||= (options.hello_int * 4)
 
     options
 

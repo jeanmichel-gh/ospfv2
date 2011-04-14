@@ -155,17 +155,19 @@ module OSPFv2
   
   class External_Base < Lsa
     
-    Netmask = Class.new(OSPFv2::Id)
-    ExternalRoute = Class.new(OSPFv2::ExternalRoute)
-    
+    unless const_defined?(:Netmask)
+      Netmask = Class.new(OSPFv2::Id)
+      ExternalRoute = Class.new(OSPFv2::ExternalRoute)
+    end
     
     attr_reader :netmask, :external_route, :mt_metrics
     attr_writer_delegate :netmask, :external_route
     
-    def initialize(arg={})
+    def initialize(ls_type, arg={})
       @netmask, @external_route = nil
       @mt_metrics=[]
-      super
+      @ls_type = LsType.new(ls_type)
+      super arg
     end
     
     def encode
@@ -277,7 +279,9 @@ module OSPFv2
 
   class AsExternal < External_Base
 
-    ExternalRoute = Class.new(OSPFv2::ExternalRoute)
+    unless const_defined?(:ExternalRoute)
+      ExternalRoute = Class.new(OSPFv2::ExternalRoute)
+    end
 
     class << self
       def count
@@ -308,11 +312,9 @@ module OSPFv2
     end
 
     def initialize(arg={})
-       if arg.is_a?(Hash)
-         arg = fix_hash(arg).merge!({:ls_type => :as_external_lsa,})
-       end
-       super
-     end
+      arg = fix_hash(arg) if arg.is_a?(Hash)
+      super 5, arg
+    end
 
      private
 

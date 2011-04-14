@@ -79,7 +79,7 @@ module OSPFv2
     attr_accessor :lsa_headers
     
     def self.ack_ls_update(lsu, *args)
-      ls_ack = new *args
+      ls_ack = new(*args)
       ls_ack.lsa_headers = lsu.lsas
       ls_ack
     end

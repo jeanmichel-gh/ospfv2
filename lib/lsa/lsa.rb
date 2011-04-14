@@ -49,6 +49,28 @@ are also contained in the LSA header.
  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
 
+  0                   1                   2                   3
+  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  |            LS age             |     Options   |  9, 10, or 11 |
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  |  Opaque Type  |               Opaque ID                       |
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  |                      Advertising Router                       |
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  |                      LS Sequence Number                       |
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  |         LS checksum           |           Length              |
+  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+  |                                                               |
+  +                                                               +
+  |                      Opaque Information                       |
+  +                                                               +
+  |                              ...                              |
+ # 
+
+
+
 LS age
     The time in seconds since the LSA was originated.
 
@@ -118,9 +140,12 @@ module OSPFv2
   class Lsa
     include Comparable
     
-    AdvertisingRouter = Class.new(Id)
-    LsId = Class.new(Id)
-    LsAge = Class.new(LsAge)
+    unless const_defined?(:AdvertisingRouter)
+      AdvertisingRouter = Class.new(Id)
+      LsId = Class.new(Id)
+      LsAge = Class.new(LsAge)
+      MODX=4102
+    end
 
     class << self
       def new_ntop(arg)
@@ -164,11 +189,15 @@ module OSPFv2
       @ls_age = LsAge.new
       @sequence_number = SequenceNumber.new
       @options = Options.new
-      @ls_type = LsType.new klass_to_ls_type
       @ls_id = LsId.new
       @advertising_router = AdvertisingRouter.new
       @_length = 0
       @_rxmt_ = false
+      
+      # unless @ls_type
+      #   # raise if caller[-2].grep(/test\/unit/).empty?
+      #   @ls_type = LsType.new(1)
+      # end
       
       if arg.is_a?(Hash)
         set arg
@@ -188,9 +217,11 @@ module OSPFv2
 
     def to_s_default
       len = encode.size
-      ls_type_to_s = ls_type.to_sym.to_s.chomp('_lsa')
-      sprintf("%-4.0d  0x%2.2x  %-8s  %-15.15s %-15.15s 0x%8.8x  0x%4.4x   %-7d", 
-      ls_age.to_i, options.to_i, ls_type.to_s_short, ls_id.to_ip, advertising_router.to_ip, seqn.to_I,csum_to_i,len)
+      if is_opaque?
+      else
+        sprintf("%-4.0d  0x%2.2x  %-8s  %-15.15s %-15.15s 0x%8.8x  0x%4.4x   %-7d", 
+        ls_age.to_i, options.to_i, ls_type.to_s_short, ls_id.to_ip, advertising_router.to_ip, seqn.to_I,csum_to_i,len)
+      end
     end
     alias :to_s_dd :to_s_default
     
@@ -202,7 +233,11 @@ module OSPFv2
       s << options.to_s
       s << ls_type.to_s
       s << advertising_router.to_s
-      s << ls_id.to_s
+      if is_opaque?
+        # s << ls_id.to_s
+      else
+        s << ls_id.to_s
+      end
       s << "SequenceNumber: " + sequence_number.to_s
       s << "LS checksum: #{format "%4x", csum_to_i}" if @_csum
       s << "length: #{@_size.unpack('n')}" if @_size
@@ -213,31 +248,39 @@ module OSPFv2
     
     def to_s_junos
       len = encode.size
-      sprintf("%-7s %-1.1s%-15.15s  %-15.15s  0x%8.8x  %4.0d  0x%2.2x 0x%4.4x %3d", LsType.to_junos(ls_type.to_i), '', ls_id.to_ip, advertising_router.to_ip, seqn.to_I, ls_age.to_i, options.to_i, csum_to_i, len)
+      if is_opaque?
+      else
+        sprintf("%-7s %-1.1s%-15.15s  %-15.15s  0x%8.8x  %4.0d  0x%2.2x 0x%4.4x %3d", ls_type.to_junos, '', ls_id.to_ip, advertising_router.to_ip, seqn.to_I, ls_age.to_i, options.to_i, csum_to_i, len)
+      end
     end
     include OSPFv2::TO_S  
     alias :to_s_junos_verbose :to_s_junos
-    # 
-    # def to_s(*args)
-    #   return to_s_default(*args) unless defined?($style)
-    #   case $style
-    #   when :junos ; to_s_junos(*args)
-    #   when :junos_verbose ; to_s_junos_verbose(*args)
-    #   else
-    #     to_s_default(*args)
-    #   end
-    # end
-      
+    
+    def is_opaque?
+      ls_type.is_opaque?
+    end
+    
     def encode_header
       header = []
       header << ls_age.encode
       header << [options.to_i].pack('C')
       header << ls_type.encode
-      header << ls_id.encode
+      if is_opaque?
+        header << [(@opaque_type << 24) + @opaque_id].pack('N')
+      else
+        header << ls_id.encode
+      end
       header << advertising_router.encode
       header << sequence_number.encode
       header << [''].pack('a4')
       header.join
+    rescue => e
+      p ls_age
+      p ls_type
+      p ls_id
+      p advertising_router
+      p sequence_number
+      raise
     end
     alias :header_encode :encode_header
     
@@ -271,7 +314,12 @@ module OSPFv2
       @ls_age = LsAge.new ls_age
       @sequence_number = SequenceNumber.new seqn
       @advertising_router = AdvertisingRouter.new advr
-      @ls_id = LsId.new ls_id
+      if is_opaque?
+        @opaque_id   = ls_id >> 24
+        @opaque_type = ls_id & 0xffffff
+      else
+        @ls_id = LsId.new ls_id
+      end
       lsa
     end
     
@@ -316,7 +364,7 @@ module OSPFv2
       return unless advertised_routers.has?(advertising_router)
       return unless refresh?(refresh_time)
       @sequence_number = SequenceNumber.new(seqn) if seqn
-      @sequence_number + 1
+      @sequence_number.incr
       @ls_age = LsAge.new
       retransmit
       self
@@ -324,7 +372,7 @@ module OSPFv2
     
     def force_refresh(seqn)
       @sequence_number = SequenceNumber.new(seqn) if seqn
-      @sequence_number + 1
+      @sequence_number.incr
       @ls_age = LsAge.new
       retransmit
       self
@@ -346,8 +394,8 @@ module OSPFv2
     end
     
     def method_missing(method, *args, &block)
-      puts "Method missing in #{self.class}: method: #{method}"
-
+      # puts "&&&&&  #{self.class}: method: #{method}"
+      # p caller[0]
       if method == :to_s_junos
         :to_s_default
       else
@@ -385,19 +433,7 @@ module OSPFv2
         puts "*** checksum error ? #{cheksum(s[2..-1], 0)}"
       end
     end
-    
-    def klass_to_ls_type
-      case self.class.to_s
-      when /Router/   ; 1
-      when /Network/  ; 2
-      when /Summary/  ; 3
-      else
-        1
-      end
-    end
-    
-    MODX=4102
-     
+
     def cheksum(mess, k=0)
       len = mess.size
       
@@ -435,4 +471,3 @@ module OSPFv2
 end
 
 load "../../../test/ospfv2/lsa/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if __FILE__ == $0
-

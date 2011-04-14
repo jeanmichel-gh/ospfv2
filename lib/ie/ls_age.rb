@@ -25,6 +25,8 @@ require 'infra/ospf_constants'
 module OSPFv2
 class LsAge
   include Comparable
+
+  @aging=false
   
   class << self
     def aging(state=:off)
@@ -41,9 +43,9 @@ class LsAge
   end
   
   def initialize(age=0)
-    raise ArgumentError, "Invalid Argument #{age}" unless age.is_a?(Integer)
     @age=age
     @time = Time.now
+    raise ArgumentError, "Invalid Argument #{age}" unless age.is_a?(Integer)
   end
   
   def to_i

@@ -82,6 +82,10 @@ module OSPFv2
       self
     end
     
+    def incr
+      +(1)
+    end
+    
     def -(num)
       self.+(-num)
     end

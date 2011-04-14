@@ -34,6 +34,7 @@ module OSPFv2
     def initialize(src, options={})
       @src = src
       @sock = Socket.open(Socket::PF_INET, Socket::SOCK_RAW, IPPROTO_OSPF)
+      @sock.setsockopt(::Socket::IPPROTO_IP, ::Socket::IP_MULTICAST_IF,  IPAddr.new(src).hton)
       add_membership OSPFv2::AllSPFRouters
       add_membership OSPFv2::AllDRouters
     rescue Errno::EPERM
@@ -50,25 +51,17 @@ module OSPFv2
     #TODO: use all_spf_routers, all_dr_routers, ...
     #     8.1      Sending protocol packets .............................. 58
     
-    def send(packet, location={:to=> :all_spf_routers})
-      case location
-      when :all_spf_routers ; send_all_spf_routers(packet)
-      when :all_dr_routers  ; send_all_dr_routers(packet)
-      else
-        send_to(packet, location[:to])
-      end
-    end
     
     def send_all_spf_routers
-      _send_ (packet.respond_to?(:encode) ? packet.encode : packet), 0, @sock_addr_all_spf_routers
+      _send_((packet.respond_to?(:encode) ? packet.encode : packet), 0, @sock_addr_all_spf_routers)
     end
     
     def send_all_dr_routers
-      _send_ (packet.respond_to?(:encode) ? packet.encode : packet), 0, @send_all_dr_routers
+      _send_((packet.respond_to?(:encode) ? packet.encode : packet), 0, @send_all_dr_routers)
     end
     
     def send_to(packet, dest)
-      _send_ (packet.respond_to?(:encode) ? packet.encode : packet), 0, Socket.pack_sockaddr_in(0, dest)
+      _send_((packet.respond_to?(:encode) ? packet.encode : packet), 0, Socket.pack_sockaddr_in(0, dest))
     end
     
     def send(packet, dest)

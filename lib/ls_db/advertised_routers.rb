@@ -26,11 +26,10 @@ require 'ie/id'
 module OSPFv2::LSDB
   class AdvertisedRouters
     AdvertisedRouter = Class.new(OSPFv2::Id)
-    attr_reader :routers
     def initialize
       @set = Set.new
     end
-    def +(id)
+    def <<(id)
       @set << router_id(id)
     end
     def routers
@@ -50,29 +49,29 @@ module OSPFv2::LSDB
   end
 end
 
-if __FILE__ == $0
-
-  require "test/unit"
-
-  # require "ls_db/advertised_routers"
-
-  class TestLsDbAdvertisedRouters < Test::Unit::TestCase
-    include OSPFv2::LSDB
-    def tests
-      assert AdvertisedRouters.new
-      routers = AdvertisedRouters.new
-      routers + 1
-      routers + '0.0.0.1'
-      routers + 2
-      routers + OSPFv2::Id.new(3)
-      assert_equal [1,2,3], routers.routers
-      routers -1 
-      assert_equal [2,3], routers.routers
-      routers -3
-      assert_equal [2], routers.routers
-      routers - '0.0.0.2'
-      assert_equal [], routers.routers
-    end
-  end
-
-end
+# if __FILE__ == $0
+# 
+#   require "test/unit"
+# 
+#   # require "ls_db/advertised_routers"
+# 
+#   class TestLsDbAdvertisedRouters < Test::Unit::TestCase
+#     include OSPFv2::LSDB
+#     def tests
+#       assert AdvertisedRouters.new
+#       routers = AdvertisedRouters.new
+#       routers + 1
+#       routers + '0.0.0.1'
+#       routers + 2
+#       routers + OSPFv2::Id.new(3)
+#       assert_equal [1,2,3], routers.routers
+#       routers -1 
+#       assert_equal [2,3], routers.routers
+#       routers -3
+#       assert_equal [2], routers.routers
+#       routers - '0.0.0.2'
+#       assert_equal [], routers.routers
+#     end
+#   end
+# 
+# end

@@ -189,7 +189,7 @@ module OSPFv2
     
     attr_reader :netmask, :designated_router_id, :backup_designated_router_id
     attr_reader :hello_interval, :options, :rtr_pri, :router_dead_interval, :neighbors
-    attr_writer_delegate :designated_router_id, :backup_designated_router_id, :neighbors
+    attr_writer_delegate :designated_router_id, :backup_designated_router_id
     
     class Neighbors
       Neighbor = Class.new(OSPFv2::Id)
@@ -268,10 +268,6 @@ module OSPFv2
       self.neighbors = hello.router_id.to_hash
     end
 
-    def to_s
-      super
-    end
-
     def to_s_verbose
       super +
       [@netmask, @options, rtr_pri_to_s, @designated_router_id, @backup_designated_router_id, neighbors_to_s].collect { |x| x.to_s }.join("\n ")
@@ -309,14 +305,24 @@ module OSPFv2
     end
     
     def parse(s)
-      netmask, @hello_interval, options, @rtr_pri, @router_dead_interval, dr, bdr, neighbors = super(s).unpack('NnCCNNNa*')
+      hello = super(s)
+      netmask, @hello_interval, options, @rtr_pri, @router_dead_interval, dr, bdr = hello.slice!(0,20).unpack('NnCCNNN')
       @netmask = Netmask.new netmask
       @options = Options.new options
       @designated_router_id = DesignatedRouterId.new dr
       @backup_designated_router_id = BackupDesignatedRouterId.new bdr
+      if @options.l?
+        puts "OPTION L BIT SET!"
+        puts "OPTION L BIT SET!"
+        puts "OPTION L BIT SET!"
+        puts "OPTION L BIT SET!"
+        puts "OPTION L BIT SET!"
+        lls_csum, lls_len = s.slice!(0,4).unpack('nn')
+        s.slice!(0,lls_len)
+      end
       @neighbors ||=Hello::Neighbors.new
-      while neighbors.size>0
-        self.neighbors= neighbors.slice!(0,4).unpack('N')[0]
+      while hello.size>0
+        self.neighbors= hello.slice!(0,4).unpack('N')[0]
       end
     end
     
@@ -325,3 +331,56 @@ module OSPFv2
 end
 
 load "../../../test/ospfv2/packet/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if __FILE__ == $0
+
+__END__
+
+
+# 
+#     0                   1                   2                   3
+#     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+#    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#    |   Version #   |       1       |         Packet length         |
+#    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#    |                          Router ID                            |
+#    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#    |                           Area ID                             |
+#    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#    |           Checksum            |             AuType            |
+#    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#    |                       Authentication                          |
+#    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#    |                       Authentication                          |
+#    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#    |                        Network Mask                           |
+#    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#    |         HelloInterval         |    Options    |    Rtr Pri    |
+#    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#    |                     RouterDeadInterval                        |
+#    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#    |                      Designated Router                        |
+#    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#    |                   Backup Designated Router                    |
+#    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#    |                          Neighbor                             |
+#    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+#    |                              ...                              |
+# 
+
+0201002c  4 
+01010101  8 
+00000000  12
+8bf10000  16
+00000000  20
+00000000  24
+ffffff00  28
+000a1201  32
+00000028  36
+c0a89e02  40
+00000000  44
+
+<< garbadge ...
+
+fff60003  48
+00010004  52
+00000001  56
+

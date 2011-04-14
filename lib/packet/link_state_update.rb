@@ -167,7 +167,7 @@ module OSPFv2
         lsas = arg[:lsas]
         arg.delete(:lsas)
         lsu = new(arg)
-        lsas.flatten.compact.each do |lsa|
+        [lsas].flatten.compact.each do |lsa|
           lsa_len = lsa.encode.size
           if (len + lsa_len) > (1476-56-20)
             lsus << lsu

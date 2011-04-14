@@ -80,15 +80,20 @@ require 'ie/id'
 require 'lsa/lsa'
 module OSPFv2
   
-NetworkMask = Class.new(Id)
-AttachRouter = Class.new(Id)
+  
 
 class Network < Lsa
+  
+  unless const_defined?(:NetworkMask)
+    NetworkMask = Class.new(Id)
+    AttachRouter = Class.new(Id)
+  end
   
   attr_reader :network_mask, :attached_routers
   
   def initialize(arg={})
     @network_mask, @attached_routers = nil, []
+    @ls_type = LsType.new(:network_lsa)
     super
   end
   

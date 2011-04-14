@@ -64,7 +64,9 @@ module OSPFv2
   class ExternalRoute_Base
     include Common
 
-    ForwardingAddress = Class.new(OSPFv2::Id)
+    unless const_defined?(:ForwardingAddress)
+      ForwardingAddress = Class.new(OSPFv2::Id)
+    end
     
     attr_reader  :metric, :type, :forwarding_address, :tag, :mt_id
     attr_checked :metric do |x|
@@ -161,7 +163,7 @@ module OSPFv2
     def initialize(arg={})
       if arg.is_a?(Hash)
         @forwarding_address = ForwardingAddress.new
-        raise ArgumentError, "MT-ID not set!" unless arg[:mt_id]
+        raise ArgumentError, "MT-ID not set!" unless arg.has_key?(:mt_id)
         raise ArgumentError, "MT-ID should not be 0!" if arg[:mt_id]==0
       end
       super
@@ -169,7 +171,8 @@ module OSPFv2
   end
   
   def ExternalRoute_Base.new_hash(h)
-    if h[:mt_metrics]
+    raise unless h.is_a?(Hash)
+    if h.has_key? :mt_metrics
       MtExternalRoute.new(h)
     else
       ExternalRoute.new(h)

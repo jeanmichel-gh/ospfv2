@@ -90,6 +90,23 @@ A.2 The Options field
      This bit describes the router's handling of demand circuits, as
      specified in [Ref10].
 
+
+2.1.  L-bit in Options Field
+
+   A new L bit (L stands for LLS) is introduced into the OSPF Options
+   field (see Figure 2a/2b).  Routers set the L bit in Hello and DD
+   packets to indicate that the packet contains an LLS data block.  In
+   other words, the LLS data block is only examined if the L bit is set.
+
+              +---+---+---+---+---+---+---+---+
+              | * | O | DC| L |N/P| MC| E | * |
+              +---+---+---+---+---+---+---+-+-+
+
+               Figure 2a: OSPFv2 Options field
+
+
+
+
 =end
 
 require 'infra/ospf_common'
@@ -254,9 +271,9 @@ module OSPFv2
     def unsetDC ; __unsetBit(6) ; end
     def dc?     ; __isSet(6)    ; end
     
-    def setR    ; __setBit(5)   ; end
-    def unsetR  ; __unsetBit(5) ; end
-    def r?      ; __isSet(5)    ; end
+    def setL    ; __setBit(5)   ; end
+    def unsetL  ; __unsetBit(5) ; end
+    def l?      ; __isSet(5)    ; end
     
     # N-bit is used in Hello packets only. 
     # It signals the area is an NSSA area.
@@ -340,7 +357,7 @@ module OSPFv2
     def _to_s_
       s = []
       s << 'O' if o?
-      s << 'R' if r?
+      s << 'L' if l?
       s << 'DC' if dc?
       s << 'N' if n?
       s << 'MC' if mc?

@@ -205,8 +205,10 @@ module OSPFv2
       super
       @links=[]
       @nwveb ||=0
+      @ls_type = LsType.new(:router_lsa)
+      
       # arg.merge!({:ls_type => 1}) if arg.is_a?(Hash)
-      [[:abr,1],[:asbr,2],[:vl,4],[:wild,8],[:nssa,16]].each { |x| def_bit *x }
+      [[:abr,1],[:asbr,2],[:vl,4],[:wild,8],[:nssa,16]].each { |x| def_bit(*x) }
     end
     
     # +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -242,7 +244,7 @@ module OSPFv2
     
     def to_s_default
        super  +
-       ['', nwveb_to_s, *links.collect {|x| x.to_s6 }].join("\n   ")
+       ['', nwveb_to_s, *links.collect {|x| x.to_s }].join("\n   ")
      end
 
      def to_s_junos

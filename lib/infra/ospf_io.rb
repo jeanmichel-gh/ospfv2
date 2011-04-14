@@ -120,7 +120,7 @@ module OSPFv2
         begin
           while @continue 
             el = deq
-            @sock.send *el
+            @sock.send(*el)
           end
         rescue => e
           p e

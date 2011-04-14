@@ -30,14 +30,6 @@ class OspfVersion
       @ospf_version = 0
     end
   end
-  def to_s
-    case @ospf_version
-    when 2  ; '2'
-    when 3  ; '3'
-    else
-      'unknown'
-    end
-  end
   def to_hash
     to_i
   end

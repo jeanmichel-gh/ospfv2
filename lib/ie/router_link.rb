@@ -118,7 +118,7 @@ module OSPFv2
           super arg
         end
         define_method(:to_hash) do
-          super.merge :router_link_type => x
+          super().merge :router_link_type => x
         end
       end
       self.const_set(x.to_klass, klassname)

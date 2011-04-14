@@ -43,7 +43,6 @@ module OSPFv2
         @logger = Logger.new(io)
       end
       def trace(s)
-         "{Time.to_ts} #{s}"
         @logger << s
       end
     end
@@ -113,6 +112,9 @@ module OSPFv2
         s << "\n"
         @trace.trace s.join
       end
+    rescue => e
+      p e
+      raise
     end
 
     def debug(obj)
@@ -169,21 +171,34 @@ module OSPFv2
     end
     
     def update(*args)
-      @evQ.enq *args
+      @evQ.enq(*args)
     end
     def send(packet, dest=OSPFv2::AllSPFRouters)
+      # p "about to send 111111 #{packet.class} "
+      # p "@output? #{@output ? true : false} #{packet.class}"
+      # p @output
+      # p "--------------"
       return unless @output
-      [packet].flatten.each { |p| 
-        log :snd, p
-        @output.enq [p,dest]
-      }
+      case packet
+      when Array
+        # p "WE HAVE AN ARRAY OF PACKET!"
+        packet.each { |p| 
+          # p "about to send p 333333 #{p.inspect}"
+          # log :snd, p
+          @output.enq [p,dest]
+        }
+      else
+        log :snd, packet
+        # p "about to send packet 333333 #{packet.inspect}"
+        @output.enq [packet,dest]
+        # p "about to send 333333 #{packet.inspect}"
+      end
     end
     
     # AllSPFRouters = "224.0.0.5"
     # AllDRouters = "224.0.0.6"
     def flood(lsas, dest=AllSPFRouters)
-      # return unless @output
-      send (LinkStateUpdate.new_lsas lsas), dest
+      send LinkStateUpdate.new_lsas(lsas), dest
     end
     
     def start_periodic_hellos

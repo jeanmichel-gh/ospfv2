@@ -149,6 +149,7 @@ module OSPFv2
       @interface_mtu = InterfaceMtu.new
       @options = Options.new
       @imms, @dd_sequence_number, @number_of_lsa=0, nil, nil
+      @lsas=[]
 
       if arg.is_a?(Hash)
         arg.merge!({:packet_type=>:dd})

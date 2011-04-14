@@ -32,13 +32,15 @@ module OSPFv2
       def factory(arg)
         if arg.is_a?(String)
           return unless (arg.size>=20)
-          case arg[3]
+          case arg.slice(3,1).unpack('C')[0]
           when 1 ; OSPFv2::Router.new_ntop(arg)
           when 2 ; OSPFv2::Network.new_ntop(arg)
           when 3 ; OSPFv2::Summary.new_ntop(arg)
           when 4 ; OSPFv2::AsbrSummary.new_ntop(arg)
           when 5 ; OSPFv2::AsExternal.new_ntop(arg)
           when 7 ; OSPFv2::AsExternal7.new_ntop(arg)
+          else 
+            raise
           end
         elsif arg.is_a?(Hash)
           case arg[:ls_type]
@@ -48,6 +50,8 @@ module OSPFv2
           when :asbr_summary_lsa  ; OSPFv2::AsbrSummary.new_hash(arg)
           when :as_external_lsa   ; OSPFv2::AsExternal.new_hash(arg)
           when :as_external7_lsa  ; OSPFv2::AsExternal7.new_hash(arg)
+          else
+            raise
           end
         elsif arg.is_a?(Lsa)
           factory(arg.encode)

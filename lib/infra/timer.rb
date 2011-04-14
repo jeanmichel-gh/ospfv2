@@ -41,6 +41,7 @@ class Timer
     @interval = interval
     @code = block if block
     add_observer observer if observer
+    @_timer_thread_ = nil
   end
 
   def start _interval=@interval, &block
@@ -69,7 +70,7 @@ class Timer
 
   def reset &block
     cancel
-    start &block
+    start(&block)
   end
 
   private

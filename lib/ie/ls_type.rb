@@ -36,6 +36,10 @@ class LsType
     [:router, :network, :summary, :asbr_summary, :as_external]
   end
   
+  def is_opaque?
+    (9..11) === @ls_type
+  end
+  
   def self.to_i(arg)
     return arg unless arg.is_a?(Symbol)
     case arg.to_s
@@ -61,9 +65,9 @@ class LsType
     when 4  ; :asbr_summary_lsa
     when 5  ; :as_external_lsa
     when 7  ; :as_external7_lsa
-    when 9  ; :opaque_link
-    when 10 ; :opaque_area
-    when 11 ; :opaque_as
+    when 9  ; :link_local_lsa
+    when 10 ; :area_lsa
+    when 11 ; :domain_lsa
     end
   end
 
@@ -75,8 +79,11 @@ class LsType
     when 3  ; 'Summary'
     when 4  ; 'ASBRSum'
     when 5  ; 'Extern'
+    when 9  ; 'OpaqLoca'
+    when 10 ; 'OpaqArea'
+    when 11 ; 'OpaqAS'
     else
-      'TBD'
+      raise
     end
   end
   
@@ -88,9 +95,9 @@ class LsType
     when  4,:asbr_summary_lsa ; @ls_type=4
     when  5,:as_external_lsa  ; @ls_type=5
     when  7,:as_external7_lsa ; @ls_type=7
-    when  9,:opaque_link      ; @ls_type=9
-    when 10,:opaque_area      ; @ls_type=10
-    when 11,:opaque_as        ; @ls_type=11
+    when  9,:link_local_lsa   ; @ls_type=9
+    when 10,:area_lsa         ; @ls_type=10
+    when 11,:domain_lsa       ; @ls_type=11
     else
       raise ArgumentError, "Invalid LsType #{ls_type}"
     end
@@ -125,6 +132,10 @@ class LsType
   
   def to_hash
     to_sym
+  end
+  
+  def to_junos
+    LsType.to_junos(to_i)
   end
   
 end

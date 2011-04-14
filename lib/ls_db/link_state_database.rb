@@ -210,12 +210,7 @@ module OSPFv2
         raise ArgumentError, "*** Invalid argument, #{args.inspect}"
       end
     end
-    
-    
-    def refresh
-      all.find_all {|l| l.refresh(ls_refresh_time) }
-    end 
-    
+
     def reset
       each {|lsa| lsa.ack }
       @offset=0
