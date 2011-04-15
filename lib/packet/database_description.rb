@@ -120,8 +120,6 @@ require 'ls_db/link_state_database'
 
 module OSPFv2
   
-  
-  
   class DatabaseDescription < OspfPacket
     
     class << self
@@ -169,7 +167,7 @@ module OSPFv2
       s << super(:brief)
       s << "MTU #{interface_mtu.to_i}, Options 0x#{options.to_i.to_s(16)}, #{imms_to_s}, DD_SEQ: 0x#{dd_sequence_number_to_shex}"
       s << "Age  Options  Type    Link-State ID   Advr Router     Sequence   Checksum  Length" if @lsas
-      s <<((@lsas.collect { |x| x.to_s_dd })).join("\n ") if @lsas
+      s << ((@lsas.collect { |x| x.to_s_dd })).join("\n ") if @lsas
       s.join("\n ")
     end
 
@@ -269,8 +267,10 @@ module OSPFv2
       dd_sequence_number.to_s(16)
     end
     
-    def parse(s)
-      interface_mtu, options, @imms, @dd_sequence_number, headers = super(s).unpack('nCCNa*')
+    def parse(_s)
+      s = super(_s)
+      db, _ = s.unpack("a#{@packet_len-24}a*")
+      interface_mtu, options, @imms, @dd_sequence_number, headers = db.unpack('nCCNa*')
       self.options = Options.new options
       @interface_mtu = InterfaceMtu.new interface_mtu
       @lsas ||=[]
@@ -281,8 +281,7 @@ module OSPFv2
     end
     
     def number_of_lsa
-      #FIXME: rename interface mtu method...
-      @number_of_lsa ||=interface_mtu.n0flsa
+      @number_of_lsa ||=interface_mtu.number_of_lsa
     end
     
     def set(arg)

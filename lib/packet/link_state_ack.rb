@@ -125,7 +125,7 @@ module OSPFv2
       headers = super(s)
       while headers.size>0
         lsa = Lsa.new headers.slice!(0,20)
-        @lsa_headers <<lsa
+        @lsa_headers << lsa
       end
     end
 

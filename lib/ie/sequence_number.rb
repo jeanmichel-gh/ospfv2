@@ -82,8 +82,10 @@ module OSPFv2
       self
     end
     
-    def incr
-      +(1)
+    def incr(num=1)
+      seqn = (@seqn.unpack('i')[0]+num)
+      @seqn = [seqn].pack('I')
+      self
     end
     
     def -(num)
@@ -91,7 +93,6 @@ module OSPFv2
     end
     
     def encode
-      #FIXME: unit-test and check if 'i' or 'I'
       [to_i].pack('N')
     end
     

@@ -77,8 +77,7 @@ require 'ls_db/advertised_routers'
 require 'infra/to_s'
 
 module OSPFv2
-
-  module LSDB
+module LSDB
 
   class LinkStateDatabase
     include OSPFv2
@@ -95,7 +94,7 @@ module OSPFv2
     
     def initialize(arg={})
       @ls_db = Hash.new
-      @area_id = nil
+      @area_id = AreaId.new
       @advertised_routers= AdvertisedRouters.new
       @ls_refresh_interval=180
       @offset=0
@@ -256,10 +255,6 @@ module OSPFv2
      all.find_all { |l| ! l.ack? }
     end
     
-    def method_missing(method, *args, &block)
-      super
-    end
-    
     def refresh
       all.find_all {|l| l.refresh(advertised_routers, ls_refresh_time) }
     end 
@@ -326,46 +321,9 @@ module OSPFv2
     
   end
 
-   #   
-   # @ls_db = []
-   # @ls_db <<  {
-   #   :sequence_number=>2147483650,
-   #   :advertising_router=>"1.2.0.0",
-   #   :ls_id=>"0.0.4.5",
-   #   :nwveb=>1, 
-   #   :ls_type=>:router_lsa,
-   #   :options=> 0x21,
-   #   :ls_age=>10,
-   #   :links=>[
-   #     {
-   #       :link_id=>"1.1.1.1", 
-   #       :link_data=>"255.255.255.255", 
-   #       :router_link_type=>:point_to_point,
-   #       :metric=>11, 
-   #       :mt_metrics=>[ {:id=>1, :metric=>11}, {:id=>2, :metric=>22} ]
-   #     },
-   #     {
-   #       :link_id=>"1.1.1.2", 
-   #       :link_data=>"255.255.255.255", 
-   #       :router_link_type=>:point_to_point,
-   #       :metric=>12, 
-   #       :mt_metrics=>[]
-   #     }
-   #   ],
-   #   }
-   #     
-   #   
-   #   ls_db = LinkStateDatabase.new :area_id=> 1, :ls_db => @ls_db
-   #   puts ""
-   #   puts ls_db.to_s_junos
-   #      
-    
-    
-
 end
 end
 
 require 'ls_db/link_state_database_build'
 
 load "../../../test/ospfv2/ls_db/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if __FILE__ == $0
-

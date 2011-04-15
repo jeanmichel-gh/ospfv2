@@ -30,10 +30,13 @@ module OSPFv2
   
   class RouterLink
     include Common
+    include CommonMetric
     
-    LinkId = Class.new(Id)
-    LinkData = Class.new(Id)
-    
+    unless const_defined?(:LinkId)
+      LinkId = Class.new(Id)
+      LinkData = Class.new(Id)
+    end
+
     attr_reader :link_id, :link_data, :router_link_type, :metric, :mt_metrics
     
     attr_writer_delegate :link_id, :link_data, :router_link_type
@@ -79,7 +82,6 @@ module OSPFv2
       rlink.join
     end
     
-    # TODO: if self.class is not RouterLink do not display RouterLinkType info....
     def to_s(ident=2)
       encode unless @router_link_type
       self.class.to_s.split('::').last + ":" +
@@ -124,17 +126,6 @@ module OSPFv2
       self.const_set(x.to_klass, klassname)
     }
     
-    # FIXME: same as summary.rb ... mixin candidate
-    def mt_metrics=(val)
-      [val].flatten.each { |x| self << x }
-    end
-    
-    def <<(metric)
-      @mt_metrics ||=[]
-      @mt_metrics << MtMetric.new(metric)
-      self
-    end
-    
     def parse(s)
       @mt_metrics ||=[]
       link_id, link_data, router_link_type, ntos, metric, mt_metrics = s.unpack('NNCCna*')
@@ -148,20 +139,8 @@ module OSPFv2
     end
     
   end
-# 
-# require 'pp'  
-#   h = {:router_link_type=>1, :metric=>1,:mt_metrics=>[{:id=>20, :metric=>33}, {:id=>255, :metric=>34}], :link_data=>"10.254.233.233",:link_id=>"2.2.2.2"}
-# 
-# pp RouterLink.new(h)
-# 
-# puts RouterLink.new(h)
-# puts RouterLink.new(h).to_shex
-
-
-
   
 end
-
 
 
 load "../../../test/ospfv2/ie/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if __FILE__ == $0

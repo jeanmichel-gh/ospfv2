@@ -140,14 +140,11 @@ module OSPFv2::LSDB
       if name.to_s =~ /^(local|remote)_address/
         (__send__ "#{$1}_prefix").split('/')[0]
       else
-        p name
-        raise
+        super
       end
     end
 
-
     private
-
 
     def _address_(host=1)
       network + host

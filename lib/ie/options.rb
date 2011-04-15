@@ -115,7 +115,7 @@ module OSPFv2
   
   class Options
      
-    attr :options, true
+    attr :options
 
     def initialize(arg={})
       @options=0
@@ -163,17 +163,17 @@ module OSPFv2
           end
         end
       end
-      unless arg[:R].nil? and arg[:r].nil?
-        _flag = arg[:R] ||= arg[:r]
+      unless arg[:L].nil? and arg[:l].nil?
+        _flag = arg[:L] ||= arg[:l]
         if _flag.is_a?(TrueClass)
-          setR
+          setL
         elsif _flag.is_a?(FalseClass)
-          unsetR
+          unsetL
         elsif _flag.is_a?(Fixnum)
           if _flag == 0
-            unsetR
+            unsetL
           else
-            setR
+            setL
           end
         end
       end
@@ -206,19 +206,19 @@ module OSPFv2
         end
       end
       unless arg[:MC].nil? and arg[:mc].nil?
-          _flag = arg[:MC] ||= arg[:mc]
-          if _flag.is_a?(TrueClass)
-            setMC
-          elsif _flag.is_a?(FalseClass)
+        _flag = arg[:MC] ||= arg[:mc]
+        if _flag.is_a?(TrueClass)
+          setMC
+        elsif _flag.is_a?(FalseClass)
+          unsetMC
+        elsif _flag.is_a?(Fixnum)
+          if _flag == 0
             unsetMC
-          elsif _flag.is_a?(Fixnum)
-            if _flag == 0
-              unsetMC
-            else
-              setMC
-            end
+          else
+            setMC
           end
         end
+      end
       unless arg[:E].nil? and arg[:e].nil?
         _flag = arg[:E] ||= arg[:e]
         if _flag.is_a?(TrueClass)
@@ -271,6 +271,10 @@ module OSPFv2
     def unsetDC ; __unsetBit(6) ; end
     def dc?     ; __isSet(6)    ; end
     
+    # A new L-bit (L stands for LLS) is introduced into the OSPF Options
+    # field (see Figures 2a and 2b).  Routers set the L-bit in Hello and DD
+    # packets to indicate that the packet contains an LLS data block.  In
+    # other words, the LLS data block is only examined if the L-bit is set.
     def setL    ; __setBit(5)   ; end
     def unsetL  ; __unsetBit(5) ; end
     def l?      ; __isSet(5)    ; end

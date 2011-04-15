@@ -34,13 +34,6 @@ module OSPFv2
     end
 
     def recv_link_state_request(ls_request, from, port)
-      # p 'HERE....'
-      #TODO: check what address the LSU shoul be send to ? unicast ? AllDRouteres ? AllSpfRouters ?
-      # p @aread_id
-      # p @router_id
-      # p ls_request.to_lsu(@ls_db, :area_id=> @aread_id, :router_id => @router_id)
-      # p from
-      # p "-----"
       send ls_request.to_lsu(@ls_db, :area_id=> @aread_id, :router_id => @router_id), from 
     end
     
@@ -58,7 +51,7 @@ module OSPFv2
           end
         }
         new_state Full.new, 'loading_done' if @ls_req_list.empty?
-       end
+      end
       @ls_db.recv_link_state_update ls_update if @ls_db
     end
     

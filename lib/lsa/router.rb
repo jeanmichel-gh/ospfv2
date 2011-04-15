@@ -208,7 +208,7 @@ module OSPFv2
       @ls_type = LsType.new(:router_lsa)
       
       # arg.merge!({:ls_type => 1}) if arg.is_a?(Hash)
-      [[:abr,1],[:asbr,2],[:vl,4],[:wild,8],[:nssa,16]].each { |x| def_bit(*x) }
+      [[:abr,1],[:asbr,2],[:vl,4],[:wild,8],[:nssa,16]].each { |x| def_bit(*x) } unless respond_to? :set_abr
     end
     
     # +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
@@ -241,21 +241,21 @@ module OSPFv2
         self << links.slice!(0,12+ntos*4)
       end
     end
-    
+
     def to_s_default
-       super  +
-       ['', nwveb_to_s, *links.collect {|x| x.to_s }].join("\n   ")
-     end
+      super  +
+      ['', nwveb_to_s, *links.collect {|x| x.to_s }].join("\n   ")
+    end
 
-     def to_s_junos
-       super
-     end
+    def to_s_junos
+      super
+    end
 
-     def to_s_junos_verbose
-       link_hdr = "  bits 0x#{nwveb.to_i}, link count #{links.size}"
-       links_to_s = links.collect {|link| link.to_s_junos }
-       super + ['', link_hdr, *links_to_s].join("\n")
-     end
+    def to_s_junos_verbose
+      link_hdr = "  bits 0x#{nwveb.to_i}, link count #{links.size}"
+      links_to_s = links.collect {|link| link.to_s_junos }
+      super + ['', link_hdr, *links_to_s].join("\n")
+    end
 
     def has_link?(*args)
       self[*args] ? true : false
@@ -281,7 +281,7 @@ module OSPFv2
       links.each { |x| yield(x)  }
     end
     
-    #FIXME: make link_id an integer ...
+    #FIXME: make link_id an integer ... 
     def args_to_key(*args)
       if args.size==1 and args[0].is_a?(RouterLink)
         [args[0].router_link_type.to_i, args[0].link_id.to_hash]
@@ -313,17 +313,7 @@ module OSPFv2
     end
 
   end
-  
-  # 
-  # rlsa = Router.new( :advertising_router => '1.1.1.1', :ls_id => '2.2.2.2')
-  # p rlsa.advertising_router
-  # p rlsa.ls_id
-  # 
-  # $style=:default
-  # 
-  # puts rlsa
-
-  
+    
   class Router
     def self.new_hash(h)
       r = new(h)

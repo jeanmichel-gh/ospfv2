@@ -203,7 +203,6 @@ module OSPFv2
     end
 
     def method_missing(method, *args, &block)
-
       if method == :to_s_junos
         to_s_default(*args)
       else
@@ -212,8 +211,7 @@ module OSPFv2
     end
 
     def to_hash(verbose=false)
-      #FIXME: verbose not working, i.e. always false
-      encode if verbose
+      encode
       h = super()
       h.delete(:authentication) if @authentication==''
       h.delete(:csum) unless verbose
@@ -234,6 +232,7 @@ module OSPFv2
       @router_id = RouterId.new(rid)
       @area_id = AreaId.new(aid)
       @au_type = AuType.new(au_type)
+      @packet_len = len
       packet
     end
     

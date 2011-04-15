@@ -43,7 +43,6 @@ class InterfaceMtu
   def number_of_lsa
     @noh ||= ((to_i - OSPFv2::PACKET_HEADER_LEN) / OSPFv2::LSA_HEADER_LEN) - 1
   end
-  alias :n0flsa :number_of_lsa
   
   def to_s
     self.class.to_s.split('::').last + ": #{to_i}"

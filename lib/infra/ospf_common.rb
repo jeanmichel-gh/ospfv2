@@ -101,16 +101,6 @@ class Object
     end
   end
   
-  def method_missing(method, *args, &block)
-    if method.to_s =~ /^to_s(\d+)/
-      to_s($1.to_i)
-    else
-      # p caller
-      #FIXME: Check if working with 1.9.2
-      super
-    end
-  end
-  
   def define_to_s
     if defined?($style)
       self.class.class_eval { eval("alias :to_s :to_s_#{$style}") }

@@ -35,8 +35,6 @@ module OSPFv2
       @src = src
       @sock = Socket.open(Socket::PF_INET, Socket::SOCK_RAW, IPPROTO_OSPF)
       @sock.setsockopt(::Socket::IPPROTO_IP, ::Socket::IP_MULTICAST_IF,  IPAddr.new(src).hton)
-      add_membership OSPFv2::AllSPFRouters
-      add_membership OSPFv2::AllDRouters
     rescue Errno::EPERM
       $stderr.puts "#{e}: You are not root, cannot run: #{$0}!"
       exit(1)
@@ -77,7 +75,6 @@ module OSPFv2
     
     def add_membership(group)
       @sock.setsockopt(Socket::IPPROTO_IP, Socket::IP_ADD_MEMBERSHIP, (IPAddr.new(group).hton + IPAddr.new(@src).hton))
-      puts "*** ADDED #{group} membership to Send Socket ***"
     rescue Errno::EADDRNOTAVAIL
     end
 
@@ -93,8 +90,8 @@ module OSPFv2
     def initialize(src, options={})
       @src=src
       @sock = Socket.open(Socket::PF_INET, Socket::SOCK_RAW,89)
-      add_membership OSPFv2::AllSPFRouters
-      add_membership OSPFv2::AllDRouters
+      add_membership OSPFv2::AllSPFRouters, src
+      add_membership OSPFv2::AllDRouters, src
     end
     def recv(size=8192)
       begin
@@ -109,10 +106,12 @@ module OSPFv2
       begin ; @sock.close ; rescue ; end
       @sock=nil
     end
-    def add_membership(group)
-      @sock.setsockopt(Socket::IPPROTO_IP, Socket::IP_ADD_MEMBERSHIP, (IPAddr.new(group).hton + IPAddr.new(@src).hton))
-      puts "*** ADDED #{group} membership to Recv Socket ***"
-    rescue Errno::EADDRNOTAVAIL
+    def add_membership(group,src)
+      optval = IPAddr.new(group).hton + IPAddr.new(src).hton
+      @sock.setsockopt(Socket::IPPROTO_IP, Socket::IP_ADD_MEMBERSHIP, optval)
+    rescue Errno::EADDRNOTAVAIL => e
+      p e
+      raise
     end
   end
 

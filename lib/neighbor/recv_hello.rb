@@ -30,12 +30,6 @@ module OSPFv2
       debug "rescued #{e.inspect}"
     end
 
-    # def recv_link_state_request(ls_request, from, port)
-    #   p 'HERE ......'
-    #   #TODO: check what address the LSU shoul be send to ? unicast ? AllDRouteres ? AllSpfRouters ?
-    #   send ls_request.to_lsu(@ls_db, :area_id=> @aread_id, :router_id => @router_id), from 
-    # end
-    
     def recv_link_state_update(ls_update, from, port)
       ls_ack = LinkStateAck.ack_ls_update ls_update, :area_id=> @area_id, :router_id=> @router_id
       send ls_ack, OSPFv2::AllDRouters #from

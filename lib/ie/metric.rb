@@ -58,6 +58,19 @@ class Metric
   end
   
 end
+
+module CommonMetric
+  def mt_metrics=(val)
+    [val].flatten.each { |x| self << x }
+  end
+  
+  def <<(metric)
+    @mt_metrics ||=[]
+    @mt_metrics << MtMetric.new(metric)
+    self
+  end
+end
+
 end
 
 load "../../../test/ospfv2/ie/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if __FILE__ == $0

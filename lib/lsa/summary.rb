@@ -33,6 +33,7 @@ module OSPFv2
   end
   
   class Summary_Base < Lsa
+    include CommonMetric
     
     attr_reader :metric, :netmask, :mt_metrics
     
@@ -44,15 +45,6 @@ module OSPFv2
       super arg
     end
     
-    def mt_metrics=(val)
-      [val].flatten.each { |x| self << x }
-    end
-    
-    def <<(metric)
-      @mt_metrics ||=[]
-      @mt_metrics << MtMetric.new(metric)
-    end
-
     def encode
       @netmask ||= Netmask.new
       @metric  ||= Metric.new
@@ -245,145 +237,3 @@ A.4.4 Summary-LSAs
 
 
 =end
-
-
-module Ospf
-  module Summary_Shared
-    private
-    def __to_s_junos_style__(sum_type, rtype=' ')
-      enc
-      s = @header.to_s_junos_style(sum_type,rtype)
-      s +="\n  mask #{netmask}"
-      s +="\n  Topology default (ID #{@mt_id[0].id}) -> Metric: #{@mt_id[0].metric}"
-      s += @mt_id[1..-1].collect { |mt| "\n  #{mt.to_s_junos_style}" }.join
-      s
-    end
-    def __to_hash__(sum_type)
-      enc
-      h = @header.to_hash.merge({:lsa_type=>sum_type, :netmask => netmask,})
-      if @mt_id.size > 1 or @mt_id[0].id != 0
-        h[:mt_id] = @mt_id.collect { |mt_id| mt_id.to_hash } unless @mt_id.nil?
-      else
-        h[:metric] = @mt_id[0].metric
-      end
-      h
-    end
-    private :__to_s_junos_style__, :__to_hash__
-    
-  end
-end
-
-require 'lsa_header'
-  
-module Ospf
-
-  class SummaryLSAs < LSA
-    include Ospf
-    include Ospf::Ip
-    include Ospf::Summary_Shared
-
-    attr :header
-    attr_accessor :mt_id
-
-    def initialize(arg={})
-      @netmask, @mt_id = 0, []
-      if arg.is_a?(Hash) then
-        arg[:lstype]=3 if arg[:lstype].nil?
-        @header = LSA_Header.new(arg)
-        set(arg)
-      elsif arg.is_a?(String)
-        __parse(arg)
-      else
-        raise ArgumentError, "Invalid argument", caller
-      end
-    end
-
-    def set(arg)
-      return self unless arg.is_a?(Hash)
-      @header.set(arg)
-      unless arg[:netmask].nil?
-        _netmask = arg[:netmask]
-        @netmask =  _netmask.is_a?(String) ? ip2long(_netmask) : _netmask
-      end      
-
-      unless arg[:metric].nil?
-        metric=arg[:metric]
-        @mt_id << MT.new({:metric=>metric})
-      end
-      unless arg[:mt_id].nil?
-        arg[:mt_id].each { |mt_id| 
-          mt_id.is_a?(MT) ? @mt_id << mt_id : @mt_id << MT.new(mt_id) 
-        }
-      end
-      self
-    end
-    
-    def <<(arg)
-      append_metric(arg)
-    end
-    
-    def enc
-      packet = @header.enc
-      packet+= __enc([[@netmask,'N'],])
-      packet +=@mt_id.collect {|mt_id| mt_id.enc}.join
-      packet_size(packet,@header)
-      packet_fletchsum(packet)
-    end
-
-    def __parse(s)
-      @header = LSA_Header.new(s)
-      arr = s[20..24].unpack("N")
-      @netmask = arr[0]
-      mt_ids = s[24..-1]
-      while mt_ids.size>0
-        @mt_id << MT.new(mt_ids.slice!(0,4))
-      end            
-    end
-    private :__parse
-
-    def to_s
-      enc
-      s = @header.to_s
-      s += "\n      netmask #{netmask}" 
-      s += "\n      " if @mt_id.size>0
-      s += @mt_id.collect { |mt| mt.to_s }.join("\n      ")
-    end
-    
-    def metric
-      @mt_id[0].metric
-    end
-
-  end
-
-  class SummaryLSA < SummaryLSAs
-    def initialize(arg={})
-      arg.merge!({:lstype => 3,}) if arg.is_a?(Hash)
-      super
-    end
-    def to_s_junos_style(rtype=' ')
-      __to_s_junos_style__('Summary', rtype)
-    end    
-    def to_hash
-      __to_hash__('Summary')
-    end
-  end
-
-  class ASBR_SummaryLSA < SummaryLSAs
-    def initialize(arg={})
-      arg.merge!({:lstype => 4, :metric=>0}) if arg.is_a?(Hash)
-      super(arg)
-    end
-     def to_s_junos_style(rtype=' ')
-       __to_s_junos_style__('ASBRSum', rtype)
-    end
-    def to_hash
-      __to_hash__('ASBRSum')
-    end
-  end
-end
-
-if __FILE__ == $0
-  load '../test/lsa_summary_test.rb'
-end
-
-

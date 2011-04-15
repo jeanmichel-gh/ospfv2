@@ -70,7 +70,7 @@ module OSPFv2
       @router_id= RouterId.new arg[:router_id] || '1.1.1.1'
       @area_id= AreaId.new arg[:aread_id] || '0.0.0.0'
       @lsa_request_list = {}
-      @ls_db=nil
+      @ls_db, @ev = nil, nil
       if arg[:log_fname]
         @trace = Trace.new(arg[:log_fname])
       else

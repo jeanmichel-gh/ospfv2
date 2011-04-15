@@ -1,25 +1,3 @@
-#--
-# Copyright 2010 Jean-Michel Esnault.
-# All rights reserved.
-# See LICENSE.txt for permissions.
-#
-#
-# This file is part of OSPFv2.
-# 
-# OSPFv2 is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-# 
-# OSPFv2 is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with OSPFv2.  If not, see <http://www.gnu.org/licenses/>.
-#++
-
 
 =begin rdoc
   
@@ -49,25 +27,26 @@ are also contained in the LSA header.
  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
 
 
-  0                   1                   2                   3
-  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-  |            LS age             |     Options   |  9, 10, or 11 |
-  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-  |  Opaque Type  |               Opaque ID                       |
-  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-  |                      Advertising Router                       |
-  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-  |                      LS Sequence Number                       |
-  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-  |         LS checksum           |           Length              |
-  +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-  |                                                               |
-  +                                                               +
-  |                      Opaque Information                       |
-  +                                                               +
-  |                              ...                              |
- # 
+ 
+ 0                   1                   2                   3
+ 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+ +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ |            LS age             |     Options   |  9, 10, or 11 |
+ +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ |  Opaque Type  |               Opaque ID                       |
+ +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ |                      Advertising Router                       |
+ +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ |                      LS Sequence Number                       |
+ +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ |         LS checksum           |           Length              |
+ +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+ |                                                               |
+ +                                                               +
+ |                      Opaque Information                       |
+ +                                                               +
+ |                              ...                              |
+# 
 
 
 
@@ -137,15 +116,12 @@ require 'infra/to_s'
 
 module OSPFv2
   
-  class Lsa
+  class Lsa_Base
     include Comparable
     
-    unless const_defined?(:AdvertisingRouter)
-      AdvertisingRouter = Class.new(Id)
-      LsId = Class.new(Id)
-      LsAge = Class.new(LsAge)
-      MODX=4102
-    end
+    AdvertisingRouter = Class.new(Id)
+    LsId = Class.new(Id)
+    LsAge = Class.new(LsAge)
 
     class << self
       def new_ntop(arg)
@@ -177,7 +153,7 @@ module OSPFv2
     alias :acked? :is_acked?
     alias :ack? :acked?
     
-    attr_reader :ls_age, :options
+    attr_reader :ls_age, :options, :ls_type
     attr_reader :ls_id
     attr_reader :advertising_router
     attr_reader :sequence_number
@@ -189,15 +165,11 @@ module OSPFv2
       @ls_age = LsAge.new
       @sequence_number = SequenceNumber.new
       @options = Options.new
+      @ls_type = LsType.new klass_to_ls_type
       @ls_id = LsId.new
       @advertising_router = AdvertisingRouter.new
       @_length = 0
       @_rxmt_ = false
-      
-      # unless @ls_type
-      #   # raise if caller[-2].grep(/test\/unit/).empty?
-      #   @ls_type = LsType.new(1)
-      # end
       
       if arg.is_a?(Hash)
         set arg
@@ -211,21 +183,15 @@ module OSPFv2
       
     end
     
-    def ls_type
-      @ls_type ||= LsType.new(1)
-    end
-    
     def sequence_number=(seqn)
       @sequence_number = SequenceNumber.new(seqn)
     end
 
     def to_s_default
       len = encode.size
-      if is_opaque?
-      else
-        sprintf("%-4.0d  0x%2.2x  %-8s  %-15.15s %-15.15s 0x%8.8x  0x%4.4x   %-7d", 
-        ls_age.to_i, options.to_i, ls_type.to_s_short, ls_id.to_ip, advertising_router.to_ip, seqn.to_I,csum_to_i,len)
-      end
+      ls_type_to_s = ls_type.to_sym.to_s.chomp('_lsa')
+      sprintf("%-4.0d  0x%2.2x  %-8s  %-15.15s %-15.15s 0x%8.8x  0x%4.4x   %-7d", 
+      ls_age.to_i, options.to_i, ls_type.to_s_short, ls_id.to_ip, advertising_router.to_ip, seqn.to_I,csum_to_i,len)
     end
     alias :to_s_dd :to_s_default
     
@@ -237,11 +203,7 @@ module OSPFv2
       s << options.to_s
       s << ls_type.to_s
       s << advertising_router.to_s
-      if is_opaque?
-        # s << ls_id.to_s
-      else
-        s << ls_id.to_s
-      end
+      s << ls_id.to_s
       s << "SequenceNumber: " + sequence_number.to_s
       s << "LS checksum: #{format "%4x", csum_to_i}" if @_csum
       s << "length: #{@_size.unpack('n')}" if @_size
@@ -252,39 +214,21 @@ module OSPFv2
     
     def to_s_junos
       len = encode.size
-      if is_opaque?
-      else
-        sprintf("%-7s %-1.1s%-15.15s  %-15.15s  0x%8.8x  %4.0d  0x%2.2x 0x%4.4x %3d", ls_type.to_junos, '', ls_id.to_ip, advertising_router.to_ip, seqn.to_I, ls_age.to_i, options.to_i, csum_to_i, len)
-      end
+      sprintf("%-7s %-1.1s%-15.15s  %-15.15s  0x%8.8x  %4.0d  0x%2.2x 0x%4.4x %3d", LsType.to_junos(ls_type.to_i), '', ls_id.to_ip, advertising_router.to_ip, seqn.to_I, ls_age.to_i, options.to_i, csum_to_i, len)
     end
     include OSPFv2::TO_S  
     alias :to_s_junos_verbose :to_s_junos
-    
-    def is_opaque?
-      ls_type.is_opaque?
-    end
-    
+      
     def encode_header
       header = []
       header << ls_age.encode
       header << [options.to_i].pack('C')
       header << ls_type.encode
-      if is_opaque?
-        header << [(@opaque_type << 24) + @opaque_id].pack('N')
-      else
-        header << ls_id.encode
-      end
+      header << ls_id.encode
       header << advertising_router.encode
       header << sequence_number.encode
       header << [''].pack('a4')
       header.join
-    rescue => e
-      p ls_age
-      p ls_type
-      p ls_id
-      p advertising_router
-      p sequence_number
-      raise
     end
     alias :header_encode :encode_header
     
@@ -318,12 +262,7 @@ module OSPFv2
       @ls_age = LsAge.new ls_age
       @sequence_number = SequenceNumber.new seqn
       @advertising_router = AdvertisingRouter.new advr
-      if is_opaque?
-        @opaque_id   = ls_id >> 24
-        @opaque_type = ls_id & 0xffffff
-      else
-        @ls_id = LsId.new ls_id
-      end
+      @ls_id = LsId.new ls_id
       lsa
     end
     
@@ -334,6 +273,7 @@ module OSPFv2
     # -1  self older than other
     #  0  self equivalent to other
     # +1  self newer than other
+    # FIXME: rename to 'newer'
     # TODO: compare advr router id.
     def <=>(other)
       raise RuntimeError unless self.key == other.key
@@ -367,7 +307,7 @@ module OSPFv2
       return unless advertised_routers.has?(advertising_router)
       return unless refresh?(refresh_time)
       @sequence_number = SequenceNumber.new(seqn) if seqn
-      @sequence_number.incr
+      @sequence_number + 1
       @ls_age = LsAge.new
       retransmit
       self
@@ -375,7 +315,7 @@ module OSPFv2
     
     def force_refresh(seqn)
       @sequence_number = SequenceNumber.new(seqn) if seqn
-      @sequence_number.incr
+      @sequence_number + 1
       @ls_age = LsAge.new
       retransmit
       self
@@ -436,7 +376,21 @@ module OSPFv2
         puts "*** checksum error ? #{cheksum(s[2..-1], 0)}"
       end
     end
-
+    
+    #FIXME
+    def klass_to_ls_type
+      case self.class
+      when OSPFv2::Router   ; 1
+      when OSPFv2::Network  ; 2
+      when OSPFv2::Summary  ; 3
+      # when AsExternal ; 5
+      else
+        raise
+      end
+    end
+    
+    MODX=4102
+     
     def cheksum(mess, k=0)
       len = mess.size
       
@@ -457,7 +411,7 @@ module OSPFv2
       c0 = c0%255
       c1 = c1%255
       
-      ip = (c1<<8) + c0
+      ip = (c1 <<8) + c0
       
       if k>0
         iq = ((len-k)*c0 - c1)%255 ; iq += 255 if (iq <= 0) 

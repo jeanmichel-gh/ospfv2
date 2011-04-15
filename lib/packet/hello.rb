@@ -241,7 +241,6 @@ module OSPFv2
         @neighbors = nil
         @hello_interval, @router_dead_interval = 10, 40
         set arg
-        
       elsif arg.is_a?(String)
         parse arg
       elsif arg.is_a?(Hello)
@@ -296,7 +295,6 @@ module OSPFv2
     
     private
     
-    
     def neighbors_to_s
       ["Neighbors:", neighbors.collect { |x| x.to_s(nil) } ].join("\n  ")
     end
@@ -304,23 +302,15 @@ module OSPFv2
       ["Neighbors:", neighbors.collect { |x| x.to_s(nil) } ].join("\n  ")
     end
     
-    def parse(s)
-      hello = super(s)
+    def parse(_s)
+      s = super(_s)
+      hello, _ = s.unpack("a#{@packet_len-24}a*")
       netmask, @hello_interval, options, @rtr_pri, @router_dead_interval, dr, bdr = hello.slice!(0,20).unpack('NnCCNNN')
       @netmask = Netmask.new netmask
       @options = Options.new options
       @designated_router_id = DesignatedRouterId.new dr
       @backup_designated_router_id = BackupDesignatedRouterId.new bdr
-      if @options.l?
-        puts "OPTION L BIT SET!"
-        puts "OPTION L BIT SET!"
-        puts "OPTION L BIT SET!"
-        puts "OPTION L BIT SET!"
-        puts "OPTION L BIT SET!"
-        lls_csum, lls_len = s.slice!(0,4).unpack('nn')
-        s.slice!(0,lls_len)
-      end
-      @neighbors ||=Hello::Neighbors.new
+      @neighbors ||=Hello::Neighbors.new      
       while hello.size>0
         self.neighbors= hello.slice!(0,4).unpack('N')[0]
       end
@@ -332,55 +322,88 @@ end
 
 load "../../../test/ospfv2/packet/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if __FILE__ == $0
 
+
 __END__
 
+0201002c
+01010101
+00000000
+8be60000
+00000000
+00000000
 
-# 
-#     0                   1                   2                   3
-#     0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
-#    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-#    |   Version #   |       1       |         Packet length         |
-#    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-#    |                          Router ID                            |
-#    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-#    |                           Area ID                             |
-#    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-#    |           Checksum            |             AuType            |
-#    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-#    |                       Authentication                          |
-#    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-#    |                       Authentication                          |
-#    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-#    |                        Network Mask                           |
-#    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-#    |         HelloInterval         |    Options    |    Rtr Pri    |
-#    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-#    |                     RouterDeadInterval                        |
-#    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-#    |                      Designated Router                        |
-#    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-#    |                   Backup Designated Router                    |
-#    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-#    |                          Neighbor                             |
-#    +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-#    |                              ...                              |
-# 
+ffffff00
+000a1201
+00000028
+c0a89e0d
+00000000
 
-0201002c  4 
-01010101  8 
-00000000  12
-8bf10000  16
-00000000  20
-00000000  24
-ffffff00  28
-000a1201  32
-00000028  36
-c0a89e02  40
-00000000  44
 
-<< garbadge ...
+fff600030001000400000001
 
-fff60003  48
-00010004  52
-00000001  56
+>> ["0201002c01010101000000008be600000000000000000000ffffff00000a120100000028c0a89e0d00000000fff600030001000400000001"]
+["ffffff00000a120100000028c0a89e0d00000000fff600030001000400000001"]
+44
+["0001000400000001"]
+[""]
+
+
+   Source: 192.168.158.13 (192.168.158.13)
+    Destination: 224.0.0.5 (224.0.0.5)
+Open Shortest Path First
+    OSPF Header
+        OSPF Version: 2
+        Message Type: Hello Packet (1)
+        Packet Length: 44
+        Source OSPF Router: 1.1.1.1 (1.1.1.1)
+        Area ID: 0.0.0.0 (Backbone)
+        Packet Checksum: 0x8be6 [correct]
+        Auth Type: Null
+        Auth Data (none)
+    OSPF Hello Packet
+        Network Mask: 255.255.255.0
+        Hello Interval: 10 seconds
+        Options: 0x12 (L, E)
+            0... .... = DN: DN-bit is NOT set
+            .0.. .... = O: O-bit is NOT set
+            ..0. .... = DC: Demand circuits are NOT supported
+            ...1 .... = L: The packet contains LLS data block
+            .... 0... = NP: Nssa is NOT supported
+            .... .0.. = MC: NOT multicast capable
+            .... ..1. = E: ExternalRoutingCapability
+        Router Priority: 1
+        Router Dead Interval: 40 seconds
+        Designated Router: 192.168.158.13
+        Backup Designated Router: 0.0.0.0
+    OSPF LLS Data Block
+        Checksum: 0xfff6
+        LLS Data Length: 12 bytes
+        Extended options TLV
+            Type: 1
+            Length: 4
+            Options: 0x00000001 (LR)
+                .... .... .... .... .... .... .... ..0. = RS: Restart Signal (RS-bit) is NOT set
+                .... .... .... .... .... .... .... ...1 = LR: LSDB Resynchronization (LR-bit) is SET
+
+
+0000  01 00 5e 00 00 05 cc 00 09 41 00 10 08 00 45 c0   ..^......A....E.
+0010  00 4c 1b 86 00 00 01 59 5e 58 c0 a8 9e 0d e0 00   .L.....Y^X......
+0020  00 05 02 01 00 2c 01 01 01 01 00 00 00 00 8b e6   .....,..........
+0030  00 00 00 00 00 00 00 00 00 00 ff ff ff 00 00 0a   ................
+0040  12 01 00 00 00 28 c0 a8 9e 0d 00 00 00 00 ff f6   .....(..........
+0050  00 03 00 01 00 04 00 00 00 01                     ..........
+
+
+2c
+
+
+      02 01 00 2c 01 01 01 01 00 00 00 00 8b e6    14
+00 00 00 00 00 00 00 00 00 00 ff ff ff 00 00 0a    16 30
+12 01 00 00 00 28 c0 a8 9e 0d 00 00 00 00 ff f6    16 46
+00 03 00 01 00 04 00 00 00 01                      10 56
+
+
+
+
+
 

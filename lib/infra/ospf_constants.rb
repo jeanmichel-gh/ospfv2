@@ -23,14 +23,14 @@
 module OSPFv2
 
   module Constant
-     V2=2
-     V3=3
-     HELLO = 1
-     DATABASE_DESCRIPTION = 2
-     LINK_STATE_REQUEST = 3
-     LINK_STATE_UPDATE = 4
-     LINK_STATE_ACKNOWLEDGEMENT = 5
-   end
+    V2=2
+    V3=3
+    HELLO = 1
+    DATABASE_DESCRIPTION = 2
+    LINK_STATE_REQUEST = 3
+    LINK_STATE_UPDATE = 4
+    LINK_STATE_ACKNOWLEDGEMENT = 5
+  end
 
   VERSION=2
   LSRefreshTime = 30*60 
