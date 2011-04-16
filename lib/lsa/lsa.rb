@@ -133,8 +133,6 @@ require 'ie/sequence_number'
 require 'ie/options'
 require 'ls_db/advertised_routers'
 
-require 'infra/to_s'
-
 module OSPFv2
   
   class Lsa
@@ -194,11 +192,6 @@ module OSPFv2
       @_length = 0
       @_rxmt_ = false
       
-      # unless @ls_type
-      #   # raise if caller[-2].grep(/test\/unit/).empty?
-      #   @ls_type = LsType.new(1)
-      # end
-      
       if arg.is_a?(Hash)
         set arg
       elsif arg.is_a?(String)
@@ -219,7 +212,7 @@ module OSPFv2
       @sequence_number = SequenceNumber.new(seqn)
     end
 
-    def to_s_default
+    def to_s
       len = encode.size
       if is_opaque?
       else
@@ -227,7 +220,7 @@ module OSPFv2
         ls_age.to_i, options.to_i, ls_type.to_s_short, ls_id.to_ip, advertising_router.to_ip, seqn.to_I,csum_to_i,len)
       end
     end
-    alias :to_s_dd :to_s_default
+    alias :to_s_dd :to_s
     
     def to_s_verbose
       len = encode.size
@@ -257,8 +250,6 @@ module OSPFv2
         sprintf("%-7s %-1.1s%-15.15s  %-15.15s  0x%8.8x  %4.0d  0x%2.2x 0x%4.4x %3d", ls_type.to_junos, '', ls_id.to_ip, advertising_router.to_ip, seqn.to_I, ls_age.to_i, options.to_i, csum_to_i, len)
       end
     end
-    include OSPFv2::TO_S  
-    alias :to_s_junos_verbose :to_s_junos
     
     def is_opaque?
       ls_type.is_opaque?
@@ -397,10 +388,10 @@ module OSPFv2
     end
     
     def method_missing(method, *args, &block)
-      # puts "&&&&&  #{self.class}: method: #{method}"
-      # p caller[0]
       if method == :to_s_junos
-        :to_s_default
+        :to_s
+      elsif method == :to_s_junos_verbose
+        __send__ :to_s_junos, *args, &block
       else
         super
       end

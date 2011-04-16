@@ -112,8 +112,6 @@ require 'ie/sequence_number'
 require 'ie/options'
 require 'ls_db/advertised_routers'
 
-require 'infra/to_s'
-
 module OSPFv2
   
   class Lsa_Base
@@ -187,13 +185,13 @@ module OSPFv2
       @sequence_number = SequenceNumber.new(seqn)
     end
 
-    def to_s_default
+    def to_s
       len = encode.size
       ls_type_to_s = ls_type.to_sym.to_s.chomp('_lsa')
       sprintf("%-4.0d  0x%2.2x  %-8s  %-15.15s %-15.15s 0x%8.8x  0x%4.4x   %-7d", 
       ls_age.to_i, options.to_i, ls_type.to_s_short, ls_id.to_ip, advertising_router.to_ip, seqn.to_I,csum_to_i,len)
     end
-    alias :to_s_dd :to_s_default
+    alias :to_s_dd :to_s
     
     def to_s_verbose
       len = encode.size
@@ -216,7 +214,6 @@ module OSPFv2
       len = encode.size
       sprintf("%-7s %-1.1s%-15.15s  %-15.15s  0x%8.8x  %4.0d  0x%2.2x 0x%4.4x %3d", LsType.to_junos(ls_type.to_i), '', ls_id.to_ip, advertising_router.to_ip, seqn.to_I, ls_age.to_i, options.to_i, csum_to_i, len)
     end
-    include OSPFv2::TO_S  
     alias :to_s_junos_verbose :to_s_junos
       
     def encode_header
@@ -340,7 +337,7 @@ module OSPFv2
       # puts "&&&&&  #{self.class}: method: #{method}"
       # p caller[0]
       if method == :to_s_junos
-        :to_s_default
+        :to_s
       else
         super
       end

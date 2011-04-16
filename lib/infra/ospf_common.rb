@@ -80,7 +80,6 @@ class Symbol
   end
 end
 
-
 class Object
   def to_shex(*args)
     self.respond_to?(:encode) ? self.encode(*args).unpack('H*')[0] : ""
@@ -98,16 +97,6 @@ class Object
       self.enc.unpack('B*')[0]
     else
       ""
-    end
-  end
-  
-  def define_to_s
-    if defined?($style)
-      self.class.class_eval { eval("alias :to_s :to_s_#{$style}") }
-    elsif respond_to?(:to_s_default)
-      self.class.class_eval { alias :to_s :to_s_default }
-    else
-      puts "You're screwed!"
     end
   end
 end

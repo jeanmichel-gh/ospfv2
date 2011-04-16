@@ -74,17 +74,14 @@ require 'lsa/lsa_factory'
 require 'ls_db/common'
 require 'ls_db/advertised_routers'
 
-require 'infra/to_s'
-
 module OSPFv2
 module LSDB
 
   class LinkStateDatabase
     include OSPFv2
     include OSPFv2::Common
-    include TO_S
     
-    AreaId = Class.new(OSPFv2::Id)
+    AreaId = Class.new(OSPFv2::Id) unless const_defined?(:AreaId)
     
     attr_reader :area_id
     attr_writer_delegate :area_id
@@ -118,7 +115,6 @@ module LSDB
     end
     alias :lsas :all
     
-    #TODO: add opaque and external type 7
     LsType.all.each do |type|
       define_method("all_#{type}") do
         @ls_db.find_all { |k,v| k[0]== LsType.to_i(type) }.collect { |k,v| v  }.sort_by { |l| l.advertising_router.to_i  }
@@ -214,34 +210,16 @@ module LSDB
       each {|lsa| lsa.ack }
       @offset=0
     end
- 
-    def to_s_default
-      s = []
-      s << "    OSPF link state database, Area #{area_id.to_ip}"
-      s << "Age  Options  Type    Link-State ID   Advr Router     Sequence   Checksum  Length"
-       LsType.all.each do |type|
-         s << (__send__ "all_#{type}").collect { |l| l.to_s  }
-       end
-      s.join("\n")
+    
+    def to_s verbose=false
+      _to_s '', verbose
     end
     
-    def to_s_junos(verbose=false)
-      lsas = []
-      lsas << "    OSPF link state database, Area #{area_id.to_ip}"
-      lsas << " Type       ID               Adv Rtr           Seq      Age  Opt  Cksum  Len "
-       LsType.all.each do |type|
-         lsas << "    OSPF AS SCOPE link state database"  if type == :external
-         lsas << (__send__ "all_#{type}").collect { |l| 
-           if verbose
-             l.to_s_junos_verbose 
-           else 
-             l.to_s_junos
-           end
-         }
-       end
-      lsas.join("\n")
+    def to_s_junos verbose=false
+      _to_s 'junos', verbose
     end
-    alias :to_j :to_s_junos
+    
+    alias :to_sj :to_s_junos
     
     def [](*key)
       lookup(*key)
@@ -284,10 +262,22 @@ module LSDB
       end 
     end
     
+    def _to_s_hdr
+      s = []
+      s << "    OSPF link state database, Area #{area_id.to_ip}"
+      s << "Age  Options  Type    Link-State ID   Advr Router     Sequence   Checksum  Length"
+      s
+    end
+    def _to_s_hdr_junos
+      s = []
+      s << "    OSPF link state database, Area #{area_id.to_ip}"
+      s << " Type       ID               Adv Rtr           Seq      Age  Opt  Cksum  Len "
+      s
+    end
+    
     def has?(obj)
       lookup(obj)
     end
-      
     
     def recv_dd(dd, ls_req_list)
       raise ArgumentError, "lss nil" unless ls_req_list
@@ -306,6 +296,32 @@ module LSDB
         
     private
     
+    def _to_s(style, verbose)
+      s = []
+      to_s_hdr     = '_to_s_hdr'
+      to_s         = 'to_s'
+      to_s_verbose = 'to_s_verbose'
+      if style.length>0
+        to_s_hdr     = "_to_s_hdr_#{style}"
+        to_s         = "to_s_#{style}"
+        to_s_verbose = "to_s_#{style}_verbose"
+      end
+      s << __send__(to_s_hdr)
+      LsType.all.each do |type|
+        all = __send__ "all_#{type}"
+        next if all.empty?
+        s << all.collect { |l| 
+          if verbose
+            l.send to_s_verbose
+          else 
+            l.send to_s
+          end
+        }
+      end
+      s.join("\n")
+    end
+
+    #FIXME: should come from Lsa .....
     def lsa_types
       [:router, :network, :summary, :asbr_summary, :as_external]
     end

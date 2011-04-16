@@ -193,12 +193,16 @@ module OSPFv2
       super
     end
     
-    def to_s_default
+    def to_s
+      super
+    end
+
+    def to_s_verbose
       mt_metrics = self.mt_metrics.collect
       super  +
       ['',netmask, external_route, *mt_metrics ].collect { |x| x.to_s }.join("\n   ")
     end
-    
+   
     def to_s_junos
       super
     end

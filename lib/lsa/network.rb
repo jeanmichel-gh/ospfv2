@@ -135,7 +135,7 @@ class Network < Lsa
   #    NetworkMask: 255.255.255.0
   #    AttachRouter: 192.168.1.200
   #    AttachRouter: 193.0.0.0
-  def to_s_default(*args)
+  def to_s(*args)
     super  +
     ['', network_mask, *attached_routers].join("\n   ")
   end

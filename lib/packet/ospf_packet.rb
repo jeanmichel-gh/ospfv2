@@ -204,7 +204,7 @@ module OSPFv2
 
     def method_missing(method, *args, &block)
       if method == :to_s_junos
-        to_s_default(*args)
+        to_s(*args)
       else
         super
       end

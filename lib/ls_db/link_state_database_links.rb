@@ -27,6 +27,8 @@ require 'lsa/lsa'
 module OSPFv2
 
 
+  #FIXME extend class Lsa instead...
+
   class Lsa
     def lsdb_link_id
       @_lsdb_link_id

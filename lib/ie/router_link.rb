@@ -82,19 +82,12 @@ module OSPFv2
       rlink.join
     end
     
-    def to_s(ident=2)
+    def to_s(ident=4)
       encode unless @router_link_type
       self.class.to_s.split('::').last + ":" +
       ['',link_id, link_data, router_link_type, metric, *mt_metrics].compact.collect { |x| x.to_s }.join("\n"+" "*ident)
     end
     
-    def to_s_junos_style
-      s = "  id #{id}, data #{data}, Type #{RouterLink.type_to_s_junos_style[@type]} (#{@type})"
-      s +="\n    Topology count: #{@mt_id.size}, Default metric: #{@metric}"
-      s += @mt_id.collect { |mt| "\n    #{mt.to_s_junos_style}" }.join
-      s      
-    end
- 
     def to_s_junos
       s = "  id #{link_id.to_ip}, data #{link_data.to_ip}, Type #{RouterLinkType.to_junos(router_link_type.to_i)} (#{router_link_type.to_i})"
       s +="\n    Topology count: #{@mt_metrics.size}, Default metric: #{metric.to_i}"
