@@ -39,6 +39,9 @@ module OSPFv2::LSDB
     def has?(id)
       routers.include?(router_id(id))
     end
+    def to_s
+      @set.collect { |r| IPAddr.new_ntoh([r].pack('N')).to_s  }
+    end
     def -(id)
       @set.delete router_id(id)
     end

@@ -115,7 +115,7 @@ module OSPFv2
   
   class Options
      
-    attr :options
+    attr_accessor :options
 
     def initialize(arg={})
       @options=0

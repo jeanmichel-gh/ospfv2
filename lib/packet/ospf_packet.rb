@@ -232,7 +232,7 @@ module OSPFv2
       @router_id = RouterId.new(rid)
       @area_id = AreaId.new(aid)
       @au_type = AuType.new(au_type)
-      @packet_len = len
+      @_packet_len = len
       packet
     end
     

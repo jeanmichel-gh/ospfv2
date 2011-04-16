@@ -6,7 +6,7 @@ Gem::Specification.new do |spec|
   spec.email        = "ospfv2@esnault.org"
   spec.summary      = "An OSPFv2 Emulator."
   spec.files        =  Dir['lib/**/*.rb']
+  spec.files        << 'changelog.txt'
   spec.require_paths << 'lib'
-  spec.has_rdoc     = false
   spec.executables << 'ospfv2'
 end

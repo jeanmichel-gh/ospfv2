@@ -269,7 +269,7 @@ module OSPFv2
     
     def parse(_s)
       s = super(_s)
-      db, _ = s.unpack("a#{@packet_len-24}a*")
+      db, _ = s.unpack("a#{@_packet_len-24}a*")
       interface_mtu, options, @imms, @dd_sequence_number, headers = db.unpack('nCCNa*')
       self.options = Options.new options
       @interface_mtu = InterfaceMtu.new interface_mtu

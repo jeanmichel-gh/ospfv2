@@ -304,7 +304,7 @@ module OSPFv2
     
     def parse(_s)
       s = super(_s)
-      hello, _ = s.unpack("a#{@packet_len-24}a*")
+      hello, _ = s.unpack("a#{@_packet_len-24}a*")
       netmask, @hello_interval, options, @rtr_pri, @router_dead_interval, dr, bdr = hello.slice!(0,20).unpack('NnCCNNN')
       @netmask = Netmask.new netmask
       @options = Options.new options
