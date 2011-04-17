@@ -118,6 +118,15 @@ module OSPFv2
     def to_s
       "#{type.to_s.upcase} (ID #{mt_id}) Metric: #{metric.to_i} Forwarding: #{forwarding_address.to_ip} Tag: #{tag}"
     end
+    
+    def to_s_ios
+      #       Metric Type: 1 (Comparable directly to link state metric)
+      #       TOS: 0 
+      #       Metric: 0 
+      #       Forward Address: 0.0.0.0
+      #       External Route Tag: 0
+      #TODO: implement...
+    end
    
     private
     

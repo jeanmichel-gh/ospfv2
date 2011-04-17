@@ -37,24 +37,23 @@ cli = Thread.new do
   # It's a p2p connection
   #   we need to describe a p2p link and a stub link
   rlsa = Router.new :ls_id=> options.router_id, 
-                    :advertising_router=>options.router_id, 
+                    :advertising_router=>options.router_id,
                     :options=>0x22
   rlsa << RouterLink.new_point_to_point(:link_id=>options.neighbor_id,
                                         :link_data=> options.ipaddr,
-                                        :metric=>1)     
-  rlsa << RouterLink.new_stub_network(:link_id=>options.network, 
-                                      :link_data=>options.netmask, 
+                                        :metric=>1)
+  rlsa << RouterLink.new_stub_network(:link_id=>options.network,
+                                      :link_data=>options.netmask,
                                       :metric=>1)
   ls_db << rlsa
-
-
+  
   rid1 = OSPFv2::LSDB::LinkStateDatabase.router_id(1,1,options.base_router_id)
   rid2 = OSPFv2::LSDB::LinkStateDatabase.router_id(2,1,options.base_router_id)
   rid3 = OSPFv2::LSDB::LinkStateDatabase.router_id(1,1,options.base_router_id)
-
+  
   # add a  a p2p link between router_id and rid1
   ls_db.new_link :router_id=> options.router_id, :neighbor_id=>rid1
-
+  
   # Link.all.values.each { |lnk| @ls_db.link lnk, :down  }
   
   # Add some Summary LSAs
@@ -72,7 +71,6 @@ cli = Thread.new do
   
   ls_db << AsbrSummary.new(:advertising_router=> rid3, :ls_id=> rid3)
   
-  
   neighbor = OSPFv2::Neighbor.new :src_addr => options.ipaddr, 
                                   :router_id => options.router_id, 
                                   :area_id=>options.area_id, 
@@ -82,18 +80,32 @@ cli = Thread.new do
   neighbor.dead_int
   neighbor.ls_db = ls_db
   
-  # Add option to parse
-  ls_db.ls_refresh_time=2000
-  ls_db.ls_refresh_interval=10
+  ls_db.ls_refresh_time= options.ls_refresh_time
+  ls_db.ls_refresh_interval=options.ls_refresh_interval
   
   help= <<-"end;"
   start 
   stop
   puts ls_db 
-  puts ls_db.to_js_unos
+  puts ls_db.to_junos | to_junos_v 
+  puts ls_db.to_ios   | to_ios_v
+  ls_db.aging?
+  ls_db.aging :on | :off
   end;
   
   def prompt() ; ">> " ; end
+  def ls_db.aging(arg=nil)
+    Lsa::LsAge.aging(arg)
+    all.collect { |l| l.ls_age.to_i }
+    aging?
+  end
+  def ls_db.aging?
+    Lsa::LsAge.aging? ? :on : :off
+  end
+  def ls_db.age_reset(age=nil)
+    all.each  { |l| l.ls_age.reset(age) }
+    ''
+  end
   
   sleep(1)
   ue=nil
@@ -115,8 +127,8 @@ cli = Thread.new do
     next if cmd.size == 0
     ary = cmd.downcase.split(' ')
     case ary[0]
-    when 'start' ; neighbor.start
-    when 'stop'  ; neighbor.stop
+    when 'start'; ls_db.aging(:on); neighbor.start
+    when 'stop'                   ; neighbor.stop
     when 'help', '?'
       print help
     when nil

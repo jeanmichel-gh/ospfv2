@@ -24,20 +24,47 @@ require 'infra/ospf_constants'
 
 module OSPFv2
 class LsAge
+  
+  class << self
+    attr_accessor :_aging
+    def aging?
+      _aging
+    end
+    def aging(arg=nil)
+      if arg
+        case arg
+        when :on  ; self._aging = true
+        when :off ; self._aging = false
+        end
+      else
+        self._aging = ! _aging
+      end
+    end
+  end
+  
   include Comparable
   
   def initialize(age=0)
     @age=age
-    @time = Time.now
     raise ArgumentError, "Invalid Argument #{age}" unless age.is_a?(Integer)
   end
   
   def to_i
-    aging? ? (Time.new - @time + @age).to_int : @age
+    if aging?
+      @time ||= Time.now
+      (Time.new - @time + @age).to_int
+    else
+      @age
+    end
+  end
+  
+  def reset(age=nil)
+    @age = age if age
+    @time=nil
   end
   
   def aging?
-    true
+    self.class.aging?
   end
   
   def maxage
@@ -58,6 +85,10 @@ class LsAge
   
   def to_s
     self.class.to_s.split('::').last + ": #{to_i}"
+  end
+  
+  def to_s_ios
+    "LS age: #{to_i}"
   end
   
   def encode

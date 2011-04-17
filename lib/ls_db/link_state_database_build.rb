@@ -69,7 +69,7 @@ module OSPFv2::LSDB
          rlsa = OSPFv2::Lsa.factory \
          :advertising_router=> router_id, 
          :ls_id=> router_id,
-         :ls_type=>:router_lsa, 
+         :ls_type=>:router, 
          :options=> 0x22
          
         advertised_routers << router_id
@@ -136,7 +136,7 @@ module OSPFv2::LSDB
           :advertising_router=> router_id,
           :ls_id=> router_id,
           :nwveb=>2, 
-          :ls_type=>:router_lsa,
+          :ls_type=>:router,
           :options=> 0x22
         
         advertised_routers << router_id

@@ -20,6 +20,7 @@
 # along with OSPFv2.  If not, see <http://www.gnu.org/licenses/>.
 #++
 
+require 'ie/ie'
 require 'infra/ospf_constants'
 
 module OSPFv2
@@ -27,6 +28,7 @@ module OSPFv2
   class SequenceNumber
     include OSPFv2
     include Comparable
+    include IE
     
     def SequenceNumber.initial
       [N + 1].pack('I').unpack('i')[0]
@@ -74,6 +76,10 @@ module OSPFv2
 
     def to_s
       "0x"+ sprintf("%08.8x", to_I)
+    end
+    
+    def to_s_ios
+      "LS Seq Number: " + sprintf("%08.8x", to_I)
     end
     
     def +(num)

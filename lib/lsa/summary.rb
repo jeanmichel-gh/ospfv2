@@ -38,7 +38,7 @@ module OSPFv2
     attr_reader :metric, :netmask, :mt_metrics
     
     def initialize(type, arg={})
-      @netmask=nil
+      @netmask=Netmask.new(0)
       @metric=nil
       @mt_metrics=[]
       @ls_type = LsType.new(type)
@@ -68,16 +68,29 @@ module OSPFv2
       super
     end
     
-    def to_s_default(*args)
+    def to_s_verbose
       super  +
       ['',netmask, metric, *mt_metrics].collect { |x| x.to_s }.join("\n   ")
+    end
+    
+    def to_s_ios_verbose
+      s = []
+      s << super
+      s << "Network Mask: " + netmask.to_s(false)
+      s << "      TOS 0 Metrics: #{metric.to_i}"
+      s << @mt_metrics.collect { |mt| "\n      #{mt.to_s}" }.join unless @mt_metrics.empty?
+      s.join("\n  ")
     end
     
     def to_s_junos_verbose
       mask = "mask #{netmask.to_ip}"
       super +
       ['', mask, metric.to_s_junos, *mt_metrics.collect{|m| m.to_s_junos}].join("\n  ")
+    rescue
+      p netmask
+      p self
     end
+    
     def to_s_junos
       super
     end
@@ -117,7 +130,7 @@ module OSPFv2
     def initialize(arg={})
       case arg
       when Hash
-        arg = fix_hash(arg).merge!({:ls_type => :summary_lsa,})
+        arg = fix_hash(arg).merge!({:ls_type => :summary,})
       end
       super 3, arg
     end

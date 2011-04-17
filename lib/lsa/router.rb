@@ -205,7 +205,7 @@ module OSPFv2
       super
       @links=[]
       @nwveb ||=0
-      @ls_type = LsType.new(:router_lsa)
+      @ls_type = LsType.new(:router)
       
       # arg.merge!({:ls_type => 1}) if arg.is_a?(Hash)
       [[:abr,1],[:asbr,2],[:vl,4],[:wild,8],[:nssa,16]].each { |x| def_bit(*x) } unless respond_to? :set_abr
@@ -242,13 +242,25 @@ module OSPFv2
       end
     end
 
-    def to_s_default
+    def to_s_verbose
       super  +
       ['', nwveb_to_s, *links.collect {|x| x.to_s }].join("\n   ")
     end
 
     def to_s_junos
       super
+    end
+
+    def to_s_ios
+      super + links.size.to_s
+    end
+    
+    def to_s_ios_verbose
+      s = []
+      s << super
+      s << "Number of Links: #{links.size.to_s}"
+      s << links.collect {|l| l.to_s_ios_verbose }.join
+      s.join("\n  ")
     end
 
     def to_s_junos_verbose

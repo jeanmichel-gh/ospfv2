@@ -139,8 +139,16 @@ module OSPFv2
     include Comparable
     
     unless const_defined?(:AdvertisingRouter)
-      AdvertisingRouter = Class.new(Id)
-      LsId = Class.new(Id)
+      AdvertisingRouter = Class.new(Id) do
+        def to_s_ios
+          "Advertising Router: " + to_ip
+        end
+      end
+      LsId = Class.new(Id) do
+        def to_s_ios
+          "Link State ID: " + to_ip
+        end
+      end
       LsAge = Class.new(LsAge)
       MODX=4102
     end
@@ -182,6 +190,12 @@ module OSPFv2
     
     attr_writer_delegate :advertising_router, :ls_id, :ls_age
     
+    LsType.all.each do |type|
+      define_method("#{type}?") do
+        type == LsType.to_sym(@ls_type.to_i)
+      end
+    end
+    
     def initialize(arg={})
       arg = arg.dup
       @ls_age = LsAge.new
@@ -212,6 +226,23 @@ module OSPFv2
       @sequence_number = SequenceNumber.new(seqn)
     end
 
+    def to_s_ios
+      if is_opaque?
+      else
+        # Link ID         ADV Router      Age         Seq#       Checksum Link count
+        # 0.0.0.1         0.0.0.1         10          0x80000003 0x00E88F 4
+        # 0.1.0.1         0.1.0.1         10          0x80000003 0x00708C 8
+        # 123456789.123456789.123456789.123456789.123456789.
+                       #  123456789.123456789.123456789.123456789.123456789.
+        sprintf("%-15.15s %-15.15s %-4.0d        0x%8.8X 0x%6.6X ", 
+              ls_id.to_ip, 
+              advertising_router.to_ip, 
+              ls_age.to_i, 
+              seqn.to_I, 
+              csum_to_i)
+      end
+    end
+
     def to_s
       len = encode.size
       if is_opaque?
@@ -221,6 +252,30 @@ module OSPFv2
       end
     end
     alias :to_s_dd :to_s
+    
+    def to_s_ios_verbose
+      len = encode.size
+      # LS age: 1860
+      # Options: (No TOS-capability, DC)
+      # LS Type: Router Links
+      # Link State ID: 1.1.1.1
+      # Advertising Router: 1.1.1.1
+      # LS Seq Number: 80000012
+      # Checksum: 0x1DB6
+      # Length: 72
+      # Number of Links: 4
+      s = []
+      s << ''
+      s << ls_age.to_s_ios
+      s << options.to_s_ios
+      s << ls_type.to_s_ios
+      s << "#{ls_id.to_s_ios} #{summary? ? "(summary Network Number)" : ''}"
+      s << advertising_router.to_s_ios
+      s << sequence_number.to_s_ios
+      s << "Checksum: #{format "0x%4X", csum_to_i}" if @_csum
+      s << "Length: #{len}"
+      s.join("\n  ")
+    end
     
     def to_s_verbose
       len = encode.size
@@ -249,6 +304,10 @@ module OSPFv2
       else
         sprintf("%-7s %-1.1s%-15.15s  %-15.15s  0x%8.8x  %4.0d  0x%2.2x 0x%4.4x %3d", ls_type.to_junos, '', ls_id.to_ip, advertising_router.to_ip, seqn.to_I, ls_age.to_i, options.to_i, csum_to_i, len)
       end
+    end
+
+    def to_s_junos_verbose
+      to_s_junos
     end
     
     def is_opaque?
@@ -372,6 +431,14 @@ module OSPFv2
       self
     end
     
+    def refresh2(advertised_routers, age)
+      return unless advertised_routers.has?(advertising_router)
+      @sequence_number.incr
+      @ls_age = LsAge.new(age)
+      retransmit
+      self
+    end
+    
     def maxage
       ls_age.maxage and retransmit
       self
@@ -388,12 +455,14 @@ module OSPFv2
     end
     
     def method_missing(method, *args, &block)
-      if method == :to_s_junos
-        :to_s
-      elsif method == :to_s_junos_verbose
-        __send__ :to_s_junos, *args, &block
+      if method.to_s =~ /^to_s_(ios|junos)_verbose/
+        p " #{self.class}: #{method} IS MISSING!!! defaulting to :to_s_verbose"
+        __send__ :to_s_verbose, *args, &block
+      elsif method.to_s =~ /^to_s_(ios|junos)$/
+        p $1
+        __send__ :to_s, *args, &block
       else
-        super
+        raise "missing: #{method}"
       end
     end
 

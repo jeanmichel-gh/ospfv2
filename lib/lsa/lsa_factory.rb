@@ -44,12 +44,12 @@ module OSPFv2
           end
         elsif arg.is_a?(Hash)
           case arg[:ls_type]
-          when :router_lsa        ; OSPFv2::Router.new_hash(arg)
-          when :network_lsa       ; OSPFv2::Network.new_hash(arg)
-          when :summary_lsa       ; OSPFv2::Summary.new_hash(arg)
-          when :asbr_summary_lsa  ; OSPFv2::AsbrSummary.new_hash(arg)
-          when :as_external_lsa   ; OSPFv2::AsExternal.new_hash(arg)
-          when :as_external7_lsa  ; OSPFv2::AsExternal7.new_hash(arg)
+          when :router        ; OSPFv2::Router.new_hash(arg)
+          when :network       ; OSPFv2::Network.new_hash(arg)
+          when :summary       ; OSPFv2::Summary.new_hash(arg)
+          when :asbr_summary  ; OSPFv2::AsbrSummary.new_hash(arg)
+          when :as_external   ; OSPFv2::AsExternal.new_hash(arg)
+          when :as_external7  ; OSPFv2::AsExternal7.new_hash(arg)
           else
             raise
           end

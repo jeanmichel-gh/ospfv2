@@ -110,10 +110,12 @@ A.2 The Options field
 =end
 
 require 'infra/ospf_common'
+require 'ie/ie'
 module OSPFv2
   
   
   class Options
+    include IE
      
     attr_accessor :options
 

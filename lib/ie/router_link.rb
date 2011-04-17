@@ -88,6 +88,34 @@ module OSPFv2
       ['',link_id, link_data, router_link_type, metric, *mt_metrics].compact.collect { |x| x.to_s }.join("\n"+" "*ident)
     end
     
+    def link_id_to_s(link_type)
+      RouterLinkType.link_id_to_s(link_type)
+    end
+    
+    def link_data_to_s(link_type)
+      RouterLinkType.link_data_to_s(link_type)
+    end
+    
+    # Link connected to: another Router (point-to-point)
+    #  (Link ID) Neighboring Router ID: 1.1.1.1
+    #  (Link Data) Router Interface address: 192.168.158.1
+    #   Number of TOS metrics: 0
+    #    TOS 0 Metrics: 1
+    def to_s_ios
+      s = []
+      s << ''
+      s << "Link connected to: #{router_link_type.to_s_ios}"
+      s << "  (Link ID) #{link_id_to_s(router_link_type.to_i)}: #{link_id.to_ip}"
+      s << "  (Link Data) #{link_data_to_s(router_link_type.to_i)}: #{link_data.to_ip}"
+      s << "   Number of TOS metrics: #{@mt_metrics.size}"
+      s << "   TOS 0 Metrics: #{metric.to_i}"
+      s << @mt_metrics.collect { |mt| "\n    #{mt.to_s}" }.join unless @mt_metrics.empty?
+      s << ''
+      s.join("\n    ")
+    end
+    alias :to_s_ios_verbose :to_s_ios
+    
+    
     def to_s_junos
       s = "  id #{link_id.to_ip}, data #{link_data.to_ip}, Type #{RouterLinkType.to_junos(router_link_type.to_i)} (#{router_link_type.to_i})"
       s +="\n    Topology count: #{@mt_metrics.size}, Default metric: #{metric.to_i}"
@@ -137,3 +165,5 @@ end
 
 
 load "../../../test/ospfv2/ie/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if __FILE__ == $0
+
+

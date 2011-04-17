@@ -20,8 +20,10 @@
 # along with OSPFv2.  If not, see <http://www.gnu.org/licenses/>.
 #++
 
+require 'ie/ie'
 module OSPFv2
 class LsType
+  include IE
 
   @ls_type_junos = {
     1 => 'Router'  ,
@@ -29,6 +31,17 @@ class LsType
     3 => 'Summary' ,
     4 => 'ASBRSum' ,
     5 => 'Extern'  ,
+    9 => 'OpaqLoca',
+    10=> 'OpaqArea',
+    11=> 'OpaqAS'  ,
+  }
+
+  @ls_type_ios = {
+    1 => 'Router Links',
+    2 => 'Network Links',
+    3 => 'Summary Links(Network)',
+    4 => 'Summary Links(AS Boundary Router)',
+    5 => 'AS External Link',
     9 => 'OpaqLoca',
     10=> 'OpaqArea',
     11=> 'OpaqAS'  ,
@@ -47,15 +60,15 @@ class LsType
   }
 
   @ls_type_sym = {
-    1  => :router_lsa      ,
-    2  => :network_lsa     ,
-    3  => :summary_lsa     ,
-    4  => :asbr_summary_lsa,
-    5  => :as_external_lsa ,
-    7  => :as_external7_lsa,
-    9  => :link_local_lsa  ,
-    10 => :area_lsa        ,
-    11 => :domain_lsa      ,
+    1  => :router      ,
+    2  => :network     ,
+    3  => :summary     ,
+    4  => :asbr_summary,
+    5  => :as_external ,
+    7  => :as_external7,
+    9  => :link_local  ,
+    10 => :area        ,
+    11 => :domain      ,
   }
   
   @ls_type_sym_to_i = @ls_type_sym.invert
@@ -112,6 +125,15 @@ class LsType
       end
     end
 
+    def to_s_ios(arg)
+      return arg unless arg.is_a?(Fixnum)
+      if @ls_type_ios.has_key?(arg)
+        @ls_type_ios[arg]
+      else
+        raise
+      end
+    end
+
     def to_short(arg)
       return arg unless arg.is_a?(Fixnum)
       if @ls_type_short.has_key?(arg)
@@ -121,7 +143,7 @@ class LsType
       end
     end
   end
-  
+
   def initialize(ls_type=1)
     @ls_type = case ls_type
     when Symbol
@@ -156,7 +178,12 @@ class LsType
     LsType.to_short(to_i)
   end
   
+  def to_s_ios
+    "LS Type: " + LsType.to_s_ios(to_i)
+  end
+  
   def to_junos
+    #FIXME: rename to_junos -> to_s_junos
     LsType.to_junos(to_i)
   end
   

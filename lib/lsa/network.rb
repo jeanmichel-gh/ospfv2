@@ -93,7 +93,7 @@ class Network < Lsa
   
   def initialize(arg={})
     @network_mask, @attached_routers = nil, []
-    @ls_type = LsType.new(:network_lsa)
+    @ls_type = LsType.new(:network)
     super
   end
   
@@ -135,19 +135,54 @@ class Network < Lsa
   #    NetworkMask: 255.255.255.0
   #    AttachRouter: 192.168.1.200
   #    AttachRouter: 193.0.0.0
-  def to_s(*args)
+  # FIXME:
+  #  when not verbose, only header is displayed and this is taken care of by parent method
+  def to_s_verbose(*args)
     super  +
     ['', network_mask, *attached_routers].join("\n   ")
   end
-  
-  # Network *192.168.1.200    192.168.1.200    0x80000001    98  0x22 0x2dc   32
-  #   mask 255.255.255.0
-  #   attached router 192.168.1.200
-  #   attached router 193.0.0.0
+  #   
+  # R1#show ip ospf database network 
   # 
-  def to_s_junos
-    super
+  #             OSPF Router with ID (1.1.1.1) (Process ID 1)
+  # 
+  #                 Net Link States (Area 0)
+  # 
+  #   Routing Bit Set on this LSA
+  #   LS age: 949
+  #   Options: (No TOS-capability, DC)
+  #   LS Type: Network Links
+  #   Link State ID: 192.168.0.2 (address of Designated Router)
+  #   Advertising Router: 2.2.2.2
+  #   LS Seq Number: 8000000E
+  #   Checksum: 0xF9B3
+  #   Length: 32
+  #   Network Mask: /24
+  #         Attached Router: 2.2.2.2
+  #         Attached Router: 1.1.1.1
+  # 
+  # R1#
+  # def to_s_ios
+  #   attrs = attached_routers.collect { |ar| "      Attached Router #{ar.to_ip}"}
+  #   s = []
+  #   s << super
+  #   s << "Network Mask: " + network_mask.to_s(false)
+  #   s << attached_routers.collect { |ar| "      Attached Router #{ar.to_ip}"}
+  #   s.join("\n")
+  # end
+  def to_s_ios_verbose
+    attrs = attached_routers.collect { |ar| "      Attached Router #{ar.to_ip}"}
+    s = []
+    s << super
+    s << "Network Mask: " + network_mask.to_s(false)
+    s << attached_routers.collect { |ar| "      Attached Router #{ar.to_ip}"}
+    s.join("\n  ")
   end
+
+  # FIXME: should be removed and parent take care of it.
+  # def to_s_junos
+  #   super
+  # end
 
   def to_s_junos_verbose
     mask = "mask #{network_mask.to_ip}"

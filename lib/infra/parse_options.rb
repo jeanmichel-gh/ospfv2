@@ -42,6 +42,8 @@ class OptParse
     options.grid = [2,2]
     options.num_sum = 10
     options.num_ext = 10
+    options.ls_refresh_time = 2000
+    options.ls_refresh_interval = 180
 
     options.parse  = Proc.new do |filename|
       y_conf = YAML::load_file(filename)
@@ -59,34 +61,30 @@ class OptParse
     dead_int = lambda { options.dead_int || (options.hello_int * 4) }
 
     option_help = "blabla ...."
-    hlp_address =    "IP Address of the OSPF Interface."
-    hlp_base_link_addr = "base p2p links addres [#{options.base_link_addr}]"
-    hlp_base_router_id   = "base router-id [#{to_ip.call(options.base_router_id)}]"
-    hlp_neighbor_id= "Neighbor Id. [#{to_ip.call(options.neighbor_id)}]"
-    hlp_router_id =  "Router Id.   [#{to_ip.call(options.router_id)}]"
-    hlp_area_id =    "Area Id.     [#{to_ip.call(options.area_id)}]"
-    hlp_grid =       "Area Grid.   [#{options.grid.join('x')}]"
-    hlp_hello_int =  "Hello Int.   [#{options.hello_int}]"
-    hlp_dead_int =   "Dead Int.    [#{dead_int.call}]"
-    hlp_sum =        "\#Summary.   [#{options.num_sum}]"
-    hlp_ext =        "\#External.  [#{options.num_ext}]"
+    hlp_address =             "IP Address of the OSPF Interface."
+    hlp_base_link_addr=       "base p2p links address           Default: #{options.base_link_addr}"
+    hlp_base_router_id =      "base router-id                   Default: #{to_ip.call(options.base_router_id)}"
+    hlp_neighbor_id=          "Neighbor Id.                     Default: #{to_ip.call(options.neighbor_id)}"
+    hlp_router_id =           "Router Id.                       Default: #{to_ip.call(options.router_id)}"
+    hlp_area_id =             "Area Id.                         Default: #{to_ip.call(options.area_id)}"
+    hlp_grid =                "Area Grid.                       Default: #{options.grid.join('x')}"
+    hlp_hello_int =           "Hello Int.                       Default: #{options.hello_int}"
+    hlp_dead_int =            "Dead Int.                        Default: #{dead_int.call}"
+    hlp_sum =                 "Number of Summary LSA            Default: #{options.num_sum}"
+    hlp_ext =                 "Number AsExternal                Default: #{options.num_ext}"
+    hlp_ls_refresh_time =     "LS Refresh Time                  Default: #{options.ls_refresh_time}"
+    hlp_ls_refresh_interval = "LS Refresh Interval              Default: #{options.ls_refresh_interval}"
 
     optparse = OptionParser.new do |opts|
 
       opts.banner = "Usage: #{$0} [options]"
 
-      opts.on( "--base-p2p-addr [PREFIX]", hlp_base_link_addr) { |x| 
-        options.base_link_addr = x
-      }
       opts.on("-i", "--address [PREFIX]", hlp_address) { |x| 
         options.ipaddr = x
         options.ipaddr = x.split('/')[0]
         _addr = IPAddr.new x
         options.network = _addr.to_s
         options.netmask = _addr.netmask
-      }
-      opts.on("--base-router-id [ID]", hlp_base_router_id) { |id| 
-        options.base_router_id = id.to_i
       }
       opts.on("-r", "--router-id [ID]", hlp_router_id) { |id| 
         options.router_id = OSPFv2::Id.to_i(id) 
@@ -100,23 +98,35 @@ class OptParse
       opts.on("-g", "--grid [colxrow]", hlp_grid) { |grid| 
         options.grid = grid.split('x').collect { |x| x.to_i }
       }
+      opts.on("-g", "--grid [colxrow]", hlp_grid) { |grid| 
+        options.grid = grid.split('x').collect { |x| x.to_i }
+      }
+      opts.on('-S', "--number-of-summary [INT]", hlp_sum) { |x| 
+        options.num_sum = x.to_i
+      }
+      opts.on('-E',"--number-of-external [INT]", hlp_ext) { |x| 
+        options.num_ext = x.to_i
+      }
+      opts.on( '-f', "--log-fname [FILENAME]", "To redirect logs to a file.") { |fname|
+        options.log_fname = fname 
+      }
+      opts.on("--base-router-id [ID]", hlp_base_router_id) { |id| 
+        options.base_router_id = id.to_i
+      }
+      opts.on( "--base-p2p-addr [PREFIX]", hlp_base_link_addr) { |x| 
+        options.base_link_addr = x
+      }
       opts.on( "--hello-interval [INT]", hlp_hello_int) { |int| 
         options.hello_int = int.to_i
       }
       opts.on("--dead-interval [INT]", hlp_dead_int) { |int| 
         options.dead_int = int.to_i
       }
-      opts.on("-g", "--grid [colxrow]", hlp_grid) { |grid| 
-        options.grid = grid.split('x').collect { |x| x.to_i }
+      opts.on("--ls-refresh-time", hlp_ls_refresh_time) { |x| 
+        options.ls_refresh_time = x.to_i
       }
-      opts.on('-S', "--number-of-summary [INT]", "Number of Summary LSA.") { |x| 
-        options.num_sum = x.to_i
-      }
-      opts.on('-E',"--number-of-external [INT]", "Number AsExternal") { |x| 
-        options.num_ext = x.to_i
-      }
-      opts.on( '-f', "--log-fname [FILENAME]", "To redirect logs to a file.") { |fname|
-        options.log_fname = fname 
+      opts.on("--ls-refresh-interval", hlp_ls_refresh_interval) { |x| 
+        options.ls_refresh_interval = x.to_i
       }
       opts.on_tail("-h", "--help", "Show this message") { puts "\n  #{opts}\n" ; exit }
       opts.on_tail("-?", "--help") { puts "\n  #{opts}\n" ; exit }

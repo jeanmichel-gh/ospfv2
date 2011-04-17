@@ -196,6 +196,35 @@ module OSPFv2
     def to_s
       super
     end
+    
+    # Network Mask: /24
+    #       Metric Type: 1 (Comparable directly to link state metric)
+    #       TOS: 0 
+    #       Metric: 0 
+    #       Forward Address: 0.0.0.0
+    #       External Route Tag: 0
+    #       Metric Type: 1 (Comparable directly to link state metric)
+    #       TOS: 10 
+    #       Metric: 20 
+    #       Forward Address: 0.0.0.0
+    #       External Route Tag: 10
+
+    def to_s_ios
+      super + external_route.tag.to_s
+    end
+
+    def to_s_ios_verbose
+      s = []
+      mt_metrics = self.mt_metrics.collect
+      s << super
+      s << "Network Mask: #{netmask}"
+      ext = []
+      ext << "    #{external_route}"
+      ext << mt_metrics.collect { |x| x.to_s }
+      s << ext.join("\n      ")
+      s.join("\n  ")
+    end
+    
 
     def to_s_verbose
       mt_metrics = self.mt_metrics.collect

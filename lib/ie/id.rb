@@ -23,9 +23,11 @@
 
 require 'ipaddr'
 require 'infra/ospf_common'
+require 'ie/ie'
 
 module OSPFv2
 class Id
+  include IE
 
   def self.new_ntoh(s)
     return unless s.is_a?(String)

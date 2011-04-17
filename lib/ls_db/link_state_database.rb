@@ -74,12 +74,16 @@ require 'lsa/lsa_factory'
 require 'ls_db/common'
 require 'ls_db/advertised_routers'
 
+require 'ls_db/lsdb_ios'
+
+
 module OSPFv2
 module LSDB
 
   class LinkStateDatabase
     include OSPFv2
     include OSPFv2::Common
+    include Ios
     
     AreaId = Class.new(OSPFv2::Id) unless const_defined?(:AreaId)
     
@@ -208,18 +212,23 @@ module LSDB
 
     def reset
       each {|lsa| lsa.ack }
-      @offset=0
+      @offset =0
     end
     
     def to_s verbose=false
       _to_s '', verbose
     end
     
-    def to_s_junos verbose=false
-      _to_s 'junos', verbose
+    [:ios, :junos].each do |style|
+      define_method("to_s_#{style}") do
+        _to_s style.to_s, false
+      end
+      alias_method "to_#{style}", "to_s_#{style}"
+      define_method("to_s_#{style}_verbose") do
+        _to_s style.to_s, true
+      end
+      alias_method "to_#{style}_v", "to_s_#{style}_verbose"
     end
-    
-    alias :to_sj :to_s_junos
     
     def [](*key)
       lookup(*key)
@@ -233,8 +242,14 @@ module LSDB
      all.find_all { |l| ! l.ack? }
     end
     
+    #FIXME: don't use find_all ?????
     def refresh
       all.find_all {|l| l.refresh(advertised_routers, ls_refresh_time) }
+    end 
+    
+    def refresh2(age)
+      all.each {|l| l.refresh2(advertised_routers, age) }
+      ''
     end 
     
     def ls_refresh?(ls)
@@ -262,19 +277,6 @@ module LSDB
       end 
     end
     
-    def _to_s_hdr
-      s = []
-      s << "    OSPF link state database, Area #{area_id.to_ip}"
-      s << "Age  Options  Type    Link-State ID   Advr Router     Sequence   Checksum  Length"
-      s
-    end
-    def _to_s_hdr_junos
-      s = []
-      s << "    OSPF link state database, Area #{area_id.to_ip}"
-      s << " Type       ID               Adv Rtr           Seq      Age  Opt  Cksum  Len "
-      s
-    end
-    
     def has?(obj)
       lookup(obj)
     end
@@ -293,9 +295,34 @@ module LSDB
       }
       nil
     end
-        
+
+    require 'ls_db/lsdb_ios'
+    include Ios
+
     private
     
+    def _to_s_hdr
+      s = []
+      s << "    OSPF link state database, Area #{area_id.to_ip}"
+      s << "Age  Options  Type    Link-State ID   Advr Router     Sequence   Checksum  Length"
+      s
+    end
+    def _to_s_hdr_junos
+      s = []
+      s << "    OSPF link state database, Area #{area_id.to_ip}"
+      s << " Type       ID               Adv Rtr           Seq      Age  Opt  Cksum  Len "
+      s
+    end
+
+    # FIXME: don't display header'
+    # >> puts ls_db.to_s(1)
+    #     OSPF link state database, Area 0.0.0.0
+    # Age  Options  Type    Link-State ID   Advr Router     Sequence   Checksum  Length
+    # Router:
+    #    LsAge: 19
+    #    Options:  0x22  [DC,E]
+    # 
+
     def _to_s(style, verbose)
       s = []
       to_s_hdr     = '_to_s_hdr'
@@ -310,6 +337,7 @@ module LSDB
       LsType.all.each do |type|
         all = __send__ "all_#{type}"
         next if all.empty?
+        s << __send__( "_to_s_hdr_#{type}_#{style}", verbose) if respond_to?("_to_s_hdr_#{type}_#{style}")
         s << all.collect { |l| 
           if verbose
             l.send to_s_verbose
@@ -318,12 +346,7 @@ module LSDB
           end
         }
       end
-      s.join("\n")
-    end
-
-    #FIXME: should come from Lsa .....
-    def lsa_types
-      [:router, :network, :summary, :asbr_summary, :as_external]
+      s.join("\n  ")
     end
     
     def id2i(id)
@@ -343,3 +366,4 @@ end
 require 'ls_db/link_state_database_build'
 
 load "../../../test/ospfv2/ls_db/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if __FILE__ == $0
+  
