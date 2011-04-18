@@ -25,6 +25,7 @@ require 'lsa/router'
 require 'lsa/network'
 require 'lsa/summary'
 require 'lsa/external'
+require 'lsa/traffic_engineering'
 
 module OSPFv2
   class Lsa
@@ -39,6 +40,11 @@ module OSPFv2
           when 4 ; OSPFv2::AsbrSummary.new_ntop(arg)
           when 5 ; OSPFv2::AsExternal.new_ntop(arg)
           when 7 ; OSPFv2::AsExternal7.new_ntop(arg)
+          when 9,10,11
+            _, opaque_type = arg.unpack('NC')
+            case opaque_type
+            when 1 ; OSPFv2::TrafficEngineering.new_ntop(arg)
+            end
           else 
             raise
           end
@@ -50,6 +56,13 @@ module OSPFv2
           when :asbr_summary  ; OSPFv2::AsbrSummary.new_hash(arg)
           when :as_external   ; OSPFv2::AsExternal.new_hash(arg)
           when :as_external7  ; OSPFv2::AsExternal7.new_hash(arg)
+          when :area, :link_local, :domain
+            case arg[:opaque_type]
+            when 1, :te_lsa
+              OSPFv2::TrafficEngineering.new_hash(arg)
+            else
+              raise
+            end
           else
             raise
           end

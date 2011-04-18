@@ -152,7 +152,27 @@ module OSPFv2
       LsAge = Class.new(LsAge)
       MODX=4102
     end
+    
+    
+    #  0                   1                   2                   3
+    #  0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
+    # +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    # |            LS age             |    Options    |    LS type    |
+    # +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    # |                        Link State ID                          |
+    # +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    # |                     Advertising Router                        |
+    # +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    # |                     LS sequence number                        |
+    # +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    # |         LS checksum           |             length            |
+    # +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
+    # 
+    class Header
+    end
+    
 
+    #FIXME: need to generate Router, Network, .. LSAs.
     class << self
       def new_ntop(arg)
         lsa = new
@@ -198,10 +218,18 @@ module OSPFv2
     
     def initialize(arg={})
       arg = arg.dup
+      
       @ls_age = LsAge.new
       @sequence_number = SequenceNumber.new
       @options = Options.new
       @ls_id = LsId.new
+      @ls_id = nil
+      if is_opaque?
+        @opaque_id   = OpaqueId.new
+        @opaque_type = OpaqueType.new
+      else
+        @ls_id=LsId.new
+      end
       @advertising_router = AdvertisingRouter.new
       @_length = 0
       @_rxmt_ = false
@@ -229,11 +257,6 @@ module OSPFv2
     def to_s_ios
       if is_opaque?
       else
-        # Link ID         ADV Router      Age         Seq#       Checksum Link count
-        # 0.0.0.1         0.0.0.1         10          0x80000003 0x00E88F 4
-        # 0.1.0.1         0.1.0.1         10          0x80000003 0x00708C 8
-        # 123456789.123456789.123456789.123456789.123456789.
-                       #  123456789.123456789.123456789.123456789.123456789.
         sprintf("%-15.15s %-15.15s %-4.0d        0x%8.8X 0x%6.6X ", 
               ls_id.to_ip, 
               advertising_router.to_ip, 
@@ -255,15 +278,6 @@ module OSPFv2
     
     def to_s_ios_verbose
       len = encode.size
-      # LS age: 1860
-      # Options: (No TOS-capability, DC)
-      # LS Type: Router Links
-      # Link State ID: 1.1.1.1
-      # Advertising Router: 1.1.1.1
-      # LS Seq Number: 80000012
-      # Checksum: 0x1DB6
-      # Length: 72
-      # Number of Links: 4
       s = []
       s << ''
       s << ls_age.to_s_ios
@@ -320,7 +334,8 @@ module OSPFv2
       header << [options.to_i].pack('C')
       header << ls_type.encode
       if is_opaque?
-        header << [(@opaque_type << 24) + @opaque_id].pack('N')
+        header << @opaque_type.encode
+        header << @opaque_id.encode
       else
         header << ls_id.encode
       end
@@ -369,8 +384,8 @@ module OSPFv2
       @sequence_number = SequenceNumber.new seqn
       @advertising_router = AdvertisingRouter.new advr
       if is_opaque?
-        @opaque_id   = ls_id >> 24
-        @opaque_type = ls_id & 0xffffff
+        @opaque_id   = OpaqueType.new(ls_id>>24)
+        @opaque_id = OpaqueId.new(ls_id & 0xffffff)
       else
         @ls_id = LsId.new ls_id
       end

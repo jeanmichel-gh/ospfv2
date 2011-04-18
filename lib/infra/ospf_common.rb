@@ -242,7 +242,7 @@ module OSPFv2
           # p ivar
           h.store(key,ivar.to_hash)
         elsif ivar.is_a?(Array)
-          h.store(key, ivar.collect { |x| x.to_hash })
+          h.store(key, ivar.collect { |x| x.respond_to?(:to_hash) ? x.to_hash : x })
         else
           # p "#{key} don't respond to hast"
           # p ivar

@@ -59,6 +59,7 @@ class LsType
     11=>'opaqAs'  ,
   }
 
+# FIXME: rename all opaque :opaque_area , :opaque_link_local, :opaque_domain
   @ls_type_sym = {
     1  => :router      ,
     2  => :network     ,
@@ -84,18 +85,19 @@ class LsType
 
     def to_i(arg)
       return arg unless arg.is_a?(Symbol)
-      case arg.to_s
-      when /^router(_lsa|)$/       ; @ls_type=1
-      when /^network(_lsa|)$/      ; @ls_type=2
-      when /^summary(_lsa|)$/      ; @ls_type=3
-      when /^asbr_summary(_lsa|)$/ ; @ls_type=4
-      when /^as_external(_lsa|)$/  ; @ls_type=5
-        #FIXME: finish and unit-test
-        # when :as_external7_lsa ; @ls_type=7
-        # when :opaque_link      ; @ls_type=9
-        # when :opaque_area      ; @ls_type=10
-        # when :opaque_as        ; @ls_type=11
-      end    
+      ls_type_sym_to_i(arg)
+      # case arg.to_s
+      # when /^router(_lsa|)$/       ; @ls_type=1
+      # when /^network(_lsa|)$/      ; @ls_type=2
+      # when /^summary(_lsa|)$/      ; @ls_type=3
+      # when /^asbr_summary(_lsa|)$/ ; @ls_type=4
+      # when /^as_external(_lsa|)$/  ; @ls_type=5
+      #   #FIXME: finish and unit-test
+      #   # when :as_external7_lsa ; @ls_type=7
+      #   # when :opaque_link      ; @ls_type=9
+      #   # when :opaque_area      ; @ls_type=10
+      #   # when :opaque_as        ; @ls_type=11
+      # end    
     end
 
     def to_sym(arg)
@@ -183,7 +185,6 @@ class LsType
   end
   
   def to_junos
-    #FIXME: rename to_junos -> to_s_junos
     LsType.to_junos(to_i)
   end
   
@@ -192,17 +193,5 @@ end
 
 load "../../../test/ospfv2/ie/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if __FILE__ == $0
 
-__END__
-
-LSA_Header.aging=false
-LSA_Header.lstype_to_s = Hash.new("unknown")
-LSA_Header.lstype_to_s.store(1,"Router")
-LSA_Header.lstype_to_s.store(2,"Network")
-LSA_Header.lstype_to_s.store(3,"Summary")
-LSA_Header.lstype_to_s.store(4,"ASBR_Sum")
-LSA_Header.lstype_to_s.store(5,"External")
-LSA_Header.lstype_to_s.store(9,"OpaqLink")
-LSA_Header.lstype_to_s.store(10,"OpaqArea")
-LSA_Header.lstype_to_s.store(11,"OpaqAS")
 
 
