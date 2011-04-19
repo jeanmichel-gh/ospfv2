@@ -20,16 +20,16 @@ module OSPFv2
     include Common
 
     IpAddress = Class.new(Id) unless const_defined?(:IpAddress)
-    attr_reader :tlv_type, :length, :ip_address
+    attr_reader :tlv_type, :ip_address
 
     attr_writer_delegate :ip_address
 
     def initialize(arg={})
-      @tlv_type, @length,  = 3,4
+      @tlv_type = 3
       @ip_address = IpAddress.new
 
       if arg.is_a?(Hash) then
-        set(arg)
+        set(arg.dup)
       elsif arg.is_a?(String)
         __parse(arg)
       else
@@ -38,7 +38,7 @@ module OSPFv2
     end
 
     def encode
-      [@tlv_type, @length, @ip_address.encode].pack('nna*')
+      [@tlv_type, 4, @ip_address.encode].pack('nna*')
     end
 
     def __parse(s)
@@ -58,18 +58,4 @@ module OSPFv2
   end
 end
 
-if __FILE__ == $0
-  require "test/unit"
-
-class IpAddress_SubTLV_Test < Test::Unit::TestCase # :nodoc:
-  include OSPFv2
-  def test_init
-    assert_equal("0003000400000000", LocalInterfaceIpAddress_Tlv.new().to_shex)
-    assert_equal("OSPFv2::LocalInterfaceIpAddress_Tlv: 1.1.1.1", LocalInterfaceIpAddress_Tlv.new({:ip_address=>"1.1.1.1"}).to_s)
-    assert_equal("1.1.1.1", LocalInterfaceIpAddress_Tlv.new({:ip_address=>"1.1.1.1"}).to_hash[:ip_address])
-    assert_equal("0003000401010101", LocalInterfaceIpAddress_Tlv.new({:ip_address=>"1.1.1.1"}).to_shex)
-    assert_equal("0003000401010101", LocalInterfaceIpAddress_Tlv.new(LocalInterfaceIpAddress_Tlv.new({:ip_address=>"1.1.1.1"}).encode).to_shex)
-  end
-end
-
-end
+load "../../../../test/ospfv2/lsa/tlv/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if __FILE__ == $0

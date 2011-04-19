@@ -43,7 +43,8 @@ module OSPFv2
           when 9,10,11
             _, opaque_type = arg.unpack('NC')
             case opaque_type
-            when 1 ; OSPFv2::TrafficEngineering.new_ntop(arg)
+            when 1
+              OSPFv2::TrafficEngineering.new_ntop(arg)
             end
           else 
             raise
@@ -72,5 +73,4 @@ module OSPFv2
       end
     end
   end
-  
 end

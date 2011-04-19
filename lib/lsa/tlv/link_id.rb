@@ -23,16 +23,16 @@ module OSPFv2
     include Common
 
     LinkId = Class.new(Id) unless const_defined?(:LinkId)
-    attr_reader :tlv_type, :length, :link_id
+    attr_reader :tlv_type, :link_id
 
     attr_writer_delegate :link_id
 
     def initialize(arg={})
-      @tlv_type, @length,  = 2,4
+      @tlv_type, @_length,  = 2,4
       @link_id = LinkId.new
 
       if arg.is_a?(Hash) then
-        set(arg)
+        set(arg.dup)
       elsif arg.is_a?(String)
         __parse(arg)
       else
@@ -41,7 +41,7 @@ module OSPFv2
     end
 
     def encode
-      [@tlv_type, @length, @link_id.encode].pack('nna*')
+      [@tlv_type, @_length, @link_id.encode].pack('nna*')
     end
 
     def __parse(s)
@@ -61,19 +61,4 @@ module OSPFv2
   end
 end
 
-if __FILE__ == $0
-  require "test/unit"
-
-class LinkID_SubTLV_Test < Test::Unit::TestCase # :nodoc:
-  include OSPFv2
-  def test_init
-    assert_equal("0002000400000000", LinkId_Tlv.new().to_shex)
-    assert_equal("OSPFv2::LinkId_Tlv: 1.1.1.1", LinkId_Tlv.new({:link_id=>"1.1.1.1"}).to_s)
-    assert_equal("1.1.1.1", LinkId_Tlv.new({:link_id=>"1.1.1.1"}).to_hash[:link_id])
-    assert_equal("0002000401010101", LinkId_Tlv.new({:link_id=>"1.1.1.1"}).to_shex)
-    assert_equal("0002000401010101", LinkId_Tlv.new(LinkId_Tlv.new({:link_id=>"1.1.1.1"}).encode).to_shex)
-  end
-end
-
-end
-
+load "../../../../test/ospfv2/lsa/tlv/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if __FILE__ == $0

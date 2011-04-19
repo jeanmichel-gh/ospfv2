@@ -20,16 +20,16 @@ module OSPFv2
     include SubTlv
     include Common
 
-    attr_reader :tlv_type, :length, :te_metric
+    attr_reader :tlv_type, :te_metric
 
     attr_writer_delegate :ip_address
 
     def initialize(arg={})
-      @tlv_type, @length,  = 5,4
+      @tlv_type,  = 5
       @te_metric = 0
 
       if arg.is_a?(Hash) then
-        set(arg)
+        set(arg.dup)
       elsif arg.is_a?(String)
         __parse(arg)
       else
@@ -38,7 +38,7 @@ module OSPFv2
     end
 
     def encode
-      [@tlv_type, @length, @te_metric].pack('nnN')
+      [@tlv_type, 4, @te_metric].pack('nnN')
     end
 
     def __parse(s)
@@ -57,16 +57,5 @@ module OSPFv2
   end
 end
 
-if __FILE__ == $0
-  require "test/unit"
+load "../../../../test/ospfv2/lsa/tlv/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if __FILE__ == $0
 
-  class TE_MetricSubTLV_Test < Test::Unit::TestCase # :nodoc:
-    include OSPFv2
-    def test_init
-      assert_equal("0005000400000000", TrafficEngineeringMetric_Tlv.new().to_shex)
-      assert_equal("OSPFv2::TrafficEngineeringMetric_Tlv: 254", TrafficEngineeringMetric_Tlv.new({:te_metric=>254}).to_s)
-      assert_equal(255, TrafficEngineeringMetric_Tlv.new({:te_metric=>255}).to_hash[:te_metric])
-      assert_equal("000500040000ffff", TrafficEngineeringMetric_Tlv.new(TrafficEngineeringMetric_Tlv.new({:te_metric=>0xffff}).encode).to_shex)
-    end
-  end
-end

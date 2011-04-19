@@ -17,7 +17,6 @@ length.
 
 =end
 
-
 require 'lsa/tlv/tlv'
 
 module OSPFv2
@@ -27,14 +26,14 @@ module OSPFv2
     include Common
 
     LinkId = Class.new(Id) unless const_defined?(:LinkId)
-    attr_reader :tlv_type, :length, :unreserved_bw
+    attr_reader :tlv_type, :unreserved_bw
 
     def initialize(arg={})
-      @tlv_type, @length,  = 8,32
+      @tlv_type = 8
       @unreserved_bw = [0]*8
 
       if arg.is_a?(Hash) then
-        set(arg)
+        set(arg.dup)
       elsif arg.is_a?(String)
         __parse(arg)
       else
@@ -43,7 +42,7 @@ module OSPFv2
     end
 
     def encode
-      [@tlv_type, @length].pack('nn') +
+      [@tlv_type, 32].pack('nn') +
       unreserved_bw.collect { |bw|   bw / 8.0 }.pack('g*')      
     end
 
@@ -79,7 +78,6 @@ if __FILE__ == $0
                 UnreservedBandwidth_Tlv.new({:unreserved_bw=>[1, 2, 3, 4, 5, 6, 7, 8]}).to_hash[:unreserved_bw])
       assert_equal("000800203e0000003e8000003ec000003f0000003f2000003f4000003f6000003f800000".split.join,
                 UnreservedBandwidth_Tlv.new({:unreserved_bw=>[1, 2, 3, 4, 5, 6, 7, 8]}).to_shex)
-      assert_equal(32, UnreservedBandwidth_Tlv.new({:unreserved_bw=>[1, 2, 3, 4, 5, 6, 7, 8]}).length)
     end
   end
   

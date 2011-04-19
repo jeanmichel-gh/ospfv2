@@ -195,8 +195,6 @@ module OSPFv2
       end
     end
     
-    # AllSPFRouters = "224.0.0.5"
-    # AllDRouters = "224.0.0.6"
     def flood(lsas, dest=AllSPFRouters)
       send LinkStateUpdate.new_lsas(lsas), dest
     end

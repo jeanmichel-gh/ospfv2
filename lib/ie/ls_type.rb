@@ -114,7 +114,7 @@ class LsType
       if @ls_type_sym_to_i.has_key?(arg)
         @ls_type_sym_to_i[arg]
       else
-        raise
+        raise "cannot convert #{arg.inspect} to i"
       end
     end
 

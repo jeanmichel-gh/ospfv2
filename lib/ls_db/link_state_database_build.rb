@@ -96,7 +96,7 @@ module OSPFv2::LSDB
     
     
     def remove_adjacency(rid, neighbor_id, prefix)
-      if (rlsa = lookup(:router_lsa, rid))
+      if (rlsa = lookup(:router, rid))
         addr, source_address, plen, network, netmask = IPAddr.to_arr(prefix)
         rlsa.delete(:point_to_point,id2ip(neighbor_id))
         rlsa.delete(3,network)

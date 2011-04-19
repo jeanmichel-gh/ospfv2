@@ -23,14 +23,14 @@ module OSPFv2
     include Common
 
     LinkId = Class.new(Id) unless const_defined?(:LinkId)
-    attr_reader :tlv_type, :length, :max_resv_bw
+    attr_reader :tlv_type, :max_resv_bw
 
     def initialize(arg={})
-      @tlv_type, @length,  = 6,4
-      @max_resv_bw = 0.0
+      @tlv_type, = 7
+      @max_resv_bw = 0
 
       if arg.is_a?(Hash) then
-        set(arg)
+        set(arg.dup)
       elsif arg.is_a?(String)
         __parse(arg)
       else
@@ -39,12 +39,12 @@ module OSPFv2
     end
 
     def encode
-      [@tlv_type, @length, @max_resv_bw/8.0].pack('nng')
+      [@tlv_type, 4, @max_resv_bw/8.0].pack('nng')
     end
 
     def __parse(s)
-      @tlv_type, _, max_resv_bw = s.unpack('nna*')
-      @max_resv_bw = max_resv_bw * 8.0
+      @tlv_type, _, max_resv_bw = s.unpack('nng')
+      @max_resv_bw = (max_resv_bw*8).to_int
     end
 
 
@@ -59,18 +59,4 @@ module OSPFv2
   end
 end
 
-if __FILE__ == $0
-  require "test/unit"
-
-  class MaximumBandwidth_SubTLV_Test < Test::Unit::TestCase # :nodoc:
-    include OSPFv2
-    def test_init
-      assert_equal("0006000400000000", MaximumReservableBandwidth_Tlv.new().to_shex)
-      assert_equal("OSPFv2::MaximumReservableBandwidth_Tlv: 10000.0", MaximumReservableBandwidth_Tlv.new({:max_resv_bw=>10_000.0}).to_s)
-      assert_equal(255, MaximumReservableBandwidth_Tlv.new({:max_resv_bw=>255}).to_hash[:max_resv_bw])
-      assert_equal("0006000445ffff00", MaximumReservableBandwidth_Tlv.new({:max_resv_bw=>0xffff}).to_shex)
-    end
-  end
-
-end
-
+load "../../../../test/ospfv2/lsa/tlv/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if __FILE__ == $0

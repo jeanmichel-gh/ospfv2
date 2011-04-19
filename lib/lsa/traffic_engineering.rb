@@ -13,14 +13,11 @@
 require 'lsa/opaque'
 require 'ie/opaque_id'
 require 'ie/opaque_type'
-require 'lsa/tlv/router_address_tlv'
-require 'lsa/tlv/link_tlv'
-require 'lsa/tlv/link_type_tlv'
-require 'lsa/tlv/link_id_tlv'
-
+require 'lsa/tlv/tlv_factory'
 
 module OSPFv2
   class TrafficEngineering < Lsa
+    include Tlv
     #FIXME: move this under OpaqueId ?????
     @_opaque_id = 0
     class << self
@@ -32,40 +29,85 @@ module OSPFv2
         @_opaque_id=0
       end
       def new_hash(h)
-        r = new(h)
+        r = new(h.dup)
         r
       end
     end
     
     attr_accessor :top_lvl_tlv
 
-    def initialize(arg={})
+    def initialize(_arg={})
+      arg = _arg.dup
       @ls_type = LsType.new(:area)
-      @top_lvl_tlv=nil
+      case arg
+      when Hash
+        _arg.delete(:top_lvl_tlv) # or else super will attempt to set to_lvl_tlv
+          set arg
+      when String
+        parse arg
+      end
       super
     end
 
+    def set(h)
+      return if h.empty?
+      if h.has_key?(:top_lvl_tlv)
+        tlv = h[:top_lvl_tlv]
+        case tlv
+        when Hash
+          @top_lvl_tlv = OSPFv2::Tlv.factory(tlv)
+        when Tlv
+          @top_lvl_tlv = tlv
+        else
+          raise
+        end
+      end
+    end
+
+    def encode
+      if top_lvl_tlv
+        super top_lvl_tlv.encode
+      else
+        super
+      end
+    end
+    
+    def to_s
+      super +
+      top_lvl_tlv.to_s
+    rescue => e
+      # p top_lvl_tlv
+      raise
+    end
+
     def parse(s)
-      super(s)
+      @top_lvl_tlv = Tlv.factory(super(s))
     end
     
   end
+  
 end
+
+load "../../../test/ospfv2/lsa/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if __FILE__ == $0
+
+
+__END__
+
 
 require "test/unit"
 
 
 class TestTra < Test::Unit::TestCase
   include OSPFv2
-  def test_case_name
-    p TrafficEngineering.opaque_id
-    p TrafficEngineering.opaque_id
-    p TrafficEngineering.opaque_id
-    p TrafficEngineering.reset_opaque_id
-    p TrafficEngineering.opaque_id
-    p TrafficEngineering.opaque_id
-    p TrafficEngineering.opaque_id
-  end
+  # def _test_case_name
+  #   p TrafficEngineering.opaque_id
+  #   p TrafficEngineering.opaque_id
+  #   p TrafficEngineering.opaque_id
+  #   p TrafficEngineering.reset_opaque_id
+  #   p TrafficEngineering.opaque_id
+  #   p TrafficEngineering.opaque_id
+  #   p TrafficEngineering.opaque_id
+  # end
   
           # 0                   1                   2                   3
   #        0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
@@ -80,7 +122,7 @@ class TestTra < Test::Unit::TestCase
   #       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
   #       |         LS checksum           |           Length              |
   #       +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-   def test_new
+   def _test_new
     assert TrafficEngineering.new
     assert_equal('0000 00 0a 01 000000 00000000 80000001 0a55 0014'.split.join,
                 TrafficEngineering.new.to_shex)
@@ -93,7 +135,14 @@ class TestTra < Test::Unit::TestCase
     
   end
   
-  def test_new_te_rid
+  def test_new_hash
+    h = {:advertising_router=>"0.0.0.1", :sequence_number=>2147483649, :opaque_id=>255, :opaque_type=>:te_lsa, :top_lvl_tlv=>{:tlv_type=>2, :tlvs=>[{:tlv_type=>1, :length=>1, :link_type=>1}]}, :ls_age=>0, :ls_type=>:area, :options=>0}
+    p TrafficEngineering.new_hash h
+  end
+  
+  
+  
+  def _test_new_te_rid
     # Open Shortest Path First
     #     OSPF Header
     #         OSPF Version: 2

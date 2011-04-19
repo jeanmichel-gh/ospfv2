@@ -33,22 +33,21 @@ require 'lsa/tlv/tlv'
 
 module OSPFv2
   
-
   class RouterAddress_Tlv
     include SubTlv
     include Common
     
     RouterId = Class.new(Id) unless const_defined?(:RouterId)
-    attr_reader :tlv_type, :length, :router_id
+    attr_reader :tlv_type, :router_id
     
     attr_writer_delegate :router_id
 
     def initialize(arg={})
-      @tlv_type, @length,  = 1,4
+      @tlv_type = 1
       @router_id = RouterId.new
 
       if arg.is_a?(Hash) then
-        set(arg)
+        set(arg.dup)
       elsif arg.is_a?(String)
         __parse(arg)
       else
@@ -57,7 +56,7 @@ module OSPFv2
     end
 
     def encode
-      [@tlv_type, @length, @router_id.encode].pack('nna*')
+      [@tlv_type, 4, @router_id.encode].pack('nna*')
     end
 
     def __parse(s)
@@ -77,19 +76,4 @@ module OSPFv2
   end
 end
 
-if __FILE__ == $0
-  require "test/unit"
-  # require "tlv/tlv"
-  class RouterAddress_TlvTlv_Test < Test::Unit::TestCase # :nodoc:
-    include OSPFv2
-    def test_init
-      assert_equal("0001000400000000", RouterAddress_Tlv.new().to_shex)
-      assert_equal("RouterID TLV: 1.1.1.1", RouterAddress_Tlv.new(:router_id=>"1.1.1.1").to_s)
-      assert_equal("1.1.1.1", RouterAddress_Tlv.new(:router_id=>"1.1.1.1").to_hash[:router_id])
-      assert_equal("0001000401010101", RouterAddress_Tlv.new(:router_id=>"1.1.1.1").to_shex)
-      assert_equal("0001000401010101", RouterAddress_Tlv.new(RouterAddress_Tlv.new(:router_id=>"1.1.1.1").encode).to_shex)
-      assert_equal(true, RouterAddress_Tlv.new(:router_id=>"1.1.1.1").is_a?(Tlv))
-      assert_equal(1, RouterAddress_Tlv.new(:router_id=>"1.1.1.1").tlv_type)
-    end
-  end
-end
+load "../../../../test/ospfv2/lsa/tlv/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if __FILE__ == $0

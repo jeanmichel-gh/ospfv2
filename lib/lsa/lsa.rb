@@ -269,9 +269,12 @@ module OSPFv2
     def to_s
       len = encode.size
       if is_opaque?
-      else
+        ls_id = Id.new_ntoh(@opaque_type.encode + @opaque_id.encode)
         sprintf("%-4.0d  0x%2.2x  %-8s  %-15.15s %-15.15s 0x%8.8x  0x%4.4x   %-7d", 
         ls_age.to_i, options.to_i, ls_type.to_s_short, ls_id.to_ip, advertising_router.to_ip, seqn.to_I,csum_to_i,len)
+      else
+        sprintf("%-4.0d  0x%2.2x  %-8s  %-15.15s %-15.15s 0x%8.8x  0x%4.4x   %-7d", 
+        ls_age.to_i, options.to_i, ls_type.to_s_short, self.ls_id.to_ip, advertising_router.to_ip, seqn.to_I,csum_to_i,len)
       end
     end
     alias :to_s_dd :to_s
@@ -384,7 +387,7 @@ module OSPFv2
       @sequence_number = SequenceNumber.new seqn
       @advertising_router = AdvertisingRouter.new advr
       if is_opaque?
-        @opaque_id   = OpaqueType.new(ls_id>>24)
+        @opaque_type = OpaqueType.new(ls_id>>24)
         @opaque_id = OpaqueId.new(ls_id & 0xffffff)
       else
         @ls_id = LsId.new ls_id
