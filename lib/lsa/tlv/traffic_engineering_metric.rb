@@ -1,16 +1,12 @@
-=begin rdoc
-
-2.5.5.  Traffic Engineering Metric
-
-The Traffic Engineering Metric sub-TLV specifies the link metric for
-traffic engineering purposes.  This metric may be different than the
-standard OSPF link metric.  Typically, this metric is assigned by a
-network administrator.
-
-The Traffic Engineering Metric sub-TLV is TLV type 5, and is four
-octets in length.
-
-=end
+#--
+# Copyright 2011 Jean-Michel Esnault.
+# All rights reserved.
+# See LICENSE.txt for permissions.
+#
+#
+# This file is part of OSPFv2.
+# 
+#++
 
 require 'lsa/tlv/tlv'
 

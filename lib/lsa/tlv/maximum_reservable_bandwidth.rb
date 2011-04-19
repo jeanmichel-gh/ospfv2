@@ -1,18 +1,12 @@
-
-=begin rdoc
- 2.5.7.  Maximum Reservable Bandwidth
-
- The Maximum Reservable Bandwidth sub-TLV specifies the maximum
- bandwidth that may be reserved on this link, in this direction, in
- IEEE floating point format.  Note that this may be greater than the
- maximum bandwidth (in which case the link may be oversubscribed).
-   This SHOULD be user-configurable; the default value should be the
-   Maximum Bandwidth.  The units are bytes per second.
-
-   The Maximum Reservable Bandwidth sub-TLV is TLV type 7, and is four
-   octets in length.
-
-=end
+#--
+# Copyright 2011 Jean-Michel Esnault.
+# All rights reserved.
+# See LICENSE.txt for permissions.
+#
+#
+# This file is part of OSPFv2.
+# 
+#++
 
 require 'lsa/tlv/tlv'
 

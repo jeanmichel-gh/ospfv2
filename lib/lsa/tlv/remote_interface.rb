@@ -1,20 +1,12 @@
-
-=begin rdoc
-
-2.5.4.  Remote Interface IP Address
-
-The Remote Interface IP Address sub-TLV specifies the IP address(es)
-of the neighbor's interface corresponding to this link.  This and the
-Remote address are used to discern multiple parallel links between
-systems.  If the Link Type of the link is Multi-access, the Remote
-Interface IP Address is set to 0.0.0.0; alternatively, an
-implementation MAY choose not to send this sub-TLV.
-
-The Remote Interface IP Address sub-TLV is TLV type 4, and is 4N
-octets in length, where N is the number of neighbor addresses.
-
-=end
-
+#--
+# Copyright 2011 Jean-Michel Esnault.
+# All rights reserved.
+# See LICENSE.txt for permissions.
+#
+#
+# This file is part of OSPFv2.
+# 
+#++
 
 require 'lsa/tlv/tlv'
 

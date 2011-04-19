@@ -1,15 +1,12 @@
-=begin rdoc  
-
-2.5.3.  Local Interface IP Address
-
-The Local Interface IP Address sub-TLV specifies the IP address(es)
-of the interface corresponding to this link.  If there are multiple
-local addresses on the link, they are all listed in this sub-TLV.
-
-The Local Interface IP Address sub-TLV is TLV type 3, and is 4N
-octets in length, where N is the number of local addresses.
-
-=end
+#--
+# Copyright 2011 Jean-Michel Esnault.
+# All rights reserved.
+# See LICENSE.txt for permissions.
+#
+#
+# This file is part of OSPFv2.
+# 
+#++
 
 require 'lsa/tlv/tlv'
 

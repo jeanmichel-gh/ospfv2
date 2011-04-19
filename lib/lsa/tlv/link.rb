@@ -1,56 +1,12 @@
-
-=begin rdoc
-
- 2.4.2.  Link TLV
-
- The Link TLV describes a single link.  It is constructed of a set of
- sub-TLVs.  There are no ordering requirements for the sub-TLVs.
-
- Only one Link TLV shall be carried in each LSA, allowing for fine
- granularity changes in topology.
-
- The Link TLV is type 2, and the length is variable.
-
- The following sub-TLVs of the Link TLV are defined:
-
- 1 - Link type (1 octet)
- 2 - Link ID (4 octets)
- 3 - Local interface IP address (4 octets)
- 4 - Remote interface IP address (4 octets)
- 5 - Traffic engineering metric (4 octets)
- 6 - Maximum bandwidth (4 octets)
- 7 - Maximum reservable bandwidth (4 octets)
- 8 - Unreserved bandwidth (32 octets)
- 9 - Administrative group (4 octets)
-
- This memo defines sub-Types 1 through 9.  See the IANA Considerations
- section for allocation of new sub-Types.
-
- The Link Type and Link ID sub-TLVs are mandatory, i.e., must appear
- exactly once.
-
- All other sub-TLVs defined here may occur at most
- once.  These restrictions need not apply to future sub-TLVs.
- Unrecognized sub-TLVs are ignored.
-
- Various values below use the (32 bit) IEEE Floating Point format.
- For quick reference, this format is as follows:
-
- 0                   1                   2                   3
- 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1 2 3 4 5 6 7 8 9 0 1
- +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
- |S|    Exponent   |                  Fraction                   |
- +-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+-+
-
- S is the sign, Exponent is the exponent base 2 in "excess 127"
- notation, and Fraction is the mantissa - 1, with an implied binary
- point in front of it.  Thus, the above represents the value:
-
- (-1)**(S) * 2**(Exponent-127) * (1 + Fraction)
-
- For more details, refer to [4].
-
-=end
+#--
+# Copyright 2011 Jean-Michel Esnault.
+# All rights reserved.
+# See LICENSE.txt for permissions.
+#
+#
+# This file is part of OSPFv2.
+# 
+#++
 
 require 'lsa/tlv/tlv'
 

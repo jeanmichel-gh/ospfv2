@@ -1,50 +1,29 @@
-
-=begin rdoc
-2.4.1.  Router Address TLV
-
-The Router Address TLV specifies a stable IP address of the
-advertising router that is always reachable if there is any
-connectivity to it; this is typically implemented as a "loopback
-address".  The key attribute is that the address does not become
-unusable if an interface is down.  In other protocols, this is known
-as the "router ID," but for obvious reasons this nomenclature is
-avoided here.  If a router advertises BGP routes with the BGP next
-hop attribute set to the BGP router ID, then the Router Address
-SHOULD be the same as the BGP router ID.
-
-If IS-IS is also active in the domain, this address can also be used
-to compute the mapping between the OSPF and IS-IS topologies.  For
-example, suppose a router R is advertising both IS-IS and OSPF
-Traffic Engineering LSAs, and suppose further that some router S is
-building a single Traffic Engineering Database (TED) based on both
-IS-IS and OSPF TE information.  R may then appear as two separate
-nodes in S's TED.  However, if both the IS-IS and OSPF LSAs generated
-by R contain the same Router Address, then S can determine that the
-IS-IS TE LSA and the OSPF TE LSA from R are indeed from a single
-router.
-
-The router address TLV is type 1, has a length of 4, and a value that
-is the four octet IP address.  It must appear in exactly one Traffic
-Engineering LSA originated by a router.
-
-=end  
+#--
+# Copyright 2011 Jean-Michel Esnault.
+# All rights reserved.
+# See LICENSE.txt for permissions.
+#
+#
+# This file is part of OSPFv2.
+# 
+#++
 
 require 'lsa/tlv/tlv'
 
 module OSPFv2
-  
+
   class RouterAddress_Tlv
     include SubTlv
     include Common
-    
-    RouterId = Class.new(Id) unless const_defined?(:RouterId)
-    attr_reader :tlv_type, :router_id
-    
-    attr_writer_delegate :router_id
+
+    IpAddress = Class.new(Id) unless const_defined?(:IpAddress)
+    attr_reader :tlv_type, :ip_address
+
+    attr_writer_delegate :ip_address
 
     def initialize(arg={})
       @tlv_type = 1
-      @router_id = RouterId.new
+      @ip_address = IpAddress.new
 
       if arg.is_a?(Hash) then
         set(arg.dup)
@@ -56,21 +35,21 @@ module OSPFv2
     end
 
     def encode
-      [@tlv_type, 4, @router_id.encode].pack('nna*')
+      [@tlv_type, 4, @ip_address.encode].pack('nna*')
     end
 
     def __parse(s)
-      @tlv_type, _, router_id = s.unpack('nna*')
-      @router_id = RouterId.new_ntoh(router_id)
+      @tlv_type, _, ip_address = s.unpack('nna*')
+      @ip_address = IpAddress.new_ntoh(ip_address)
     end
 
 
     def to_s
-      "RouterID TLV: #{router_id.to_ip}"
+      "RouterID TLV: #{ip_address.to_ip}"
     end
 
     def to_s_junos_style(ident=0)
-      "  "*ident + "RtrAddr (1), length #{@length}: #{router_id.to_ip}"
+      "  "*ident + "RtrAddr (1), length #{@length}: #{ip_address.to_ip}"
     end
 
   end

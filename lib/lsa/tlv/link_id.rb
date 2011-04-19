@@ -1,18 +1,12 @@
-
-=begin rdoc  
-
-2.5.2.  Link ID
-
-The Link ID sub-TLV identifies the other end of the link.  For
-point-to-point links, this is the Router ID of the neighbor.  For
-multi-access links, this is the interface address of the designated
-router.  The Link ID is identical to the contents of the Link ID
-field in the Router LSA for these link types.
-
-The Link ID sub-TLV is TLV type 2, and is four octets in length.
-
-=end
-
+#--
+# Copyright 2011 Jean-Michel Esnault.
+# All rights reserved.
+# See LICENSE.txt for permissions.
+#
+#
+# This file is part of OSPFv2.
+# 
+#++
 
 require 'lsa/tlv/tlv'
 
@@ -28,7 +22,7 @@ module OSPFv2
     attr_writer_delegate :link_id
 
     def initialize(arg={})
-      @tlv_type, @_length,  = 2,4
+      @tlv_type  = 2
       @link_id = LinkId.new
 
       if arg.is_a?(Hash) then
@@ -41,7 +35,7 @@ module OSPFv2
     end
 
     def encode
-      [@tlv_type, @_length, @link_id.encode].pack('nna*')
+      [@tlv_type, 4, @link_id.encode].pack('nna*')
     end
 
     def __parse(s)

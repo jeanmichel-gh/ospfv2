@@ -1,15 +1,12 @@
-=begin rdoc  
-
-2.5.1.  Link Type
-
-The Link Type sub-TLV defines the type of the link:
-
-1 - Point-to-point
-2 - Multi-access
-
-The Link Type sub-TLV is TLV type 1, and is one octet in length.
-
-=end
+#--
+# Copyright 2011 Jean-Michel Esnault.
+# All rights reserved.
+# See LICENSE.txt for permissions.
+#
+#
+# This file is part of OSPFv2.
+# 
+#++
 
 require 'lsa/tlv/tlv'
 

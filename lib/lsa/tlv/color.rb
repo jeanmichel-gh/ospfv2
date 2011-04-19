@@ -1,11 +1,12 @@
-
-=begin rdoc
-
-The Traffic Engineering Color sub-TLV is TLV type 9, and is four
-octets in length.
-
-=end
-
+#--
+# Copyright 2011 Jean-Michel Esnault.
+# All rights reserved.
+# See LICENSE.txt for permissions.
+#
+#
+# This file is part of OSPFv2.
+# 
+#++
 
 require 'lsa/tlv/tlv'
 

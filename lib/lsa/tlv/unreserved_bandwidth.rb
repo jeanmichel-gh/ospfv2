@@ -1,21 +1,12 @@
-=begin rdoc
-  
-2.5.8.  Unreserved Bandwidth
-
-The Unreserved Bandwidth sub-TLV specifies the amount of bandwidth
-not yet reserved at each of the eight priority levels in IEEE
-floating point format.  The values correspond to the bandwidth that
-can be reserved with a setup priority of 0 through 7, arranged in
-increasing order with priority 0 occurring at the start of the sub-
-TLV, and priority 7 at the end of the sub-TLV.  The initial values
-(before any bandwidth is reserved) are all set to the Unreserved
-Reservable Bandwidth.  Each value will be less than or equal to the
-Unreserved Reservable Bandwidth.  The units are bytes per second.
-
-The Unreserved Bandwidth sub-TLV is TLV type 8, and is 32 octets in
-length.
-
-=end
+#--
+# Copyright 2011 Jean-Michel Esnault.
+# All rights reserved.
+# See LICENSE.txt for permissions.
+#
+#
+# This file is part of OSPFv2.
+# 
+#++
 
 require 'lsa/tlv/tlv'
 
