@@ -46,5 +46,14 @@ module Ios
     s << "Link ID         ADV Router      Age         Seq#       Checksum Tag" unless verbose
     s
   end
+  def _to_s_hdr_area_ios(verbose=false)
+    s=[]
+    s << ""
+    s << "                Type-10 Opaque Link Area Link States (Area #{area_id.to_i})"
+    s << ""
+    s << "Link ID         ADV Router      Age         Seq#       Checksum Opaque ID" unless verbose
+    s
+  end
+
 end
 end

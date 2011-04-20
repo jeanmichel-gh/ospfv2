@@ -207,8 +207,9 @@ module OSPFv2
     attr_reader :ls_id
     attr_reader :advertising_router
     attr_reader :sequence_number
+    attr_reader :opaque_id, :opaque_type
     
-    attr_writer_delegate :advertising_router, :ls_id, :ls_age
+    attr_writer_delegate :advertising_router, :ls_id, :ls_age, :opaque_id, :opaque_type
     
     LsType.all.each do |type|
       define_method("#{type}?") do
@@ -255,15 +256,12 @@ module OSPFv2
     end
 
     def to_s_ios
-      if is_opaque?
-      else
-        sprintf("%-15.15s %-15.15s %-4.0d        0x%8.8X 0x%6.6X ", 
-              ls_id.to_ip, 
-              advertising_router.to_ip, 
-              ls_age.to_i, 
-              seqn.to_I, 
-              csum_to_i)
-      end
+      sprintf("%-15.15s %-15.15s %-4.0d        0x%8.8X 0x%6.6X ", 
+            is_opaque? ? ls_id = Id.new_ntoh(@opaque_type.encode + @opaque_id.encode).to_ip : self.ls_id.to_ip, 
+            advertising_router.to_ip, 
+            ls_age.to_i, 
+            seqn.to_I, 
+            csum_to_i)
     end
 
     def to_s
@@ -279,6 +277,17 @@ module OSPFv2
     end
     alias :to_s_dd :to_s
     
+    # LS age: 44
+    # Options: (No TOS-capability, No DC)
+    # LS Type: Opaque Area Link
+    # Link State ID: 1.0.0.0
+    # Opaque Type: 1
+    # Opaque ID: 0
+    # Advertising Router: 0.0.0.3
+    # LS Seq Number: 80000001
+    # Checksum: 0xD12
+    # Length: 116
+    # Fragment number : 0
     def to_s_ios_verbose
       len = encode.size
       s = []
@@ -286,7 +295,12 @@ module OSPFv2
       s << ls_age.to_s_ios
       s << options.to_s_ios
       s << ls_type.to_s_ios
-      s << "#{ls_id.to_s_ios} #{summary? ? "(summary Network Number)" : ''}"
+      if is_opaque?
+        s << "Opaque Type: #{opaque_type.to_i}"
+        s << "Opaque ID: #{opaque_id.to_i}"
+      else
+        s << "#{ls_id.to_s_ios} #{summary? ? "(summary Network Number)" : ''}"
+      end
       s << advertising_router.to_s_ios
       s << sequence_number.to_s_ios
       s << "Checksum: #{format "0x%4X", csum_to_i}" if @_csum
@@ -480,7 +494,7 @@ module OSPFv2
         p $1
         __send__ :to_s, *args, &block
       else
-        raise "missing: #{method}"
+        raise "missing: #{method} #{caller[0..2]}"
       end
     end
 

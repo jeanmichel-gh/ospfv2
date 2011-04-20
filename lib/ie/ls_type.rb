@@ -43,7 +43,7 @@ class LsType
     4 => 'Summary Links(AS Boundary Router)',
     5 => 'AS External Link',
     9 => 'OpaqLoca',
-    10=> 'OpaqArea',
+    10=> 'Opaque Area Link',
     11=> 'OpaqAS'  ,
   }
 
@@ -80,7 +80,7 @@ class LsType
 
   class << self
     def all
-      [:router, :network, :summary, :asbr_summary, :as_external]
+      [:router, :network, :summary, :asbr_summary, :as_external, :area]
     end
 
     def to_i(arg)
