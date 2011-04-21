@@ -38,7 +38,7 @@ module OSPFv2
       @tlv_type, _, @link_type= s.unpack('nnC')
     end
     def to_s
-      self.class.to_s + ": " + LinkType_Tlv.type_to_s(link_type)
+      "Link Type : #{LinkType_Tlv.type_to_s(link_type)}"
     end
   end
 end

@@ -47,29 +47,10 @@ module OSPFv2
       h[:unreserved_bw] = unreserved_bw
       h
     end
-
     def to_s
-      self.class.to_s + ": " + unreserved_bw.collect { |bw| bw }.join(", ")
+      "Unreserved bandwidth : " + unreserved_bw.collect { |bw| "%s" % bw }.join(", ")
     end
 
   end
 end
 
-if __FILE__ == $0
-  require "test/unit"
-
-  class UnreservedBandwidth_Tlv_Test < Test::Unit::TestCase # :nodoc:
-    include OSPFv2
-    def test_init
-      assert_equal("000800200000000000000000000000000000000000000000000000000000000000000000",
-                UnreservedBandwidth_Tlv.new().to_shex)
-      assert_equal("OSPFv2::UnreservedBandwidth_Tlv: 0, 0, 0, 0, 0, 0, 0, 0",
-                        UnreservedBandwidth_Tlv.new({:unreserved_bw=>[0,0,0,0,0,0,0,0]}).to_s)
-      assert_equal([1, 2, 3, 4, 5, 6, 7, 8], 
-                UnreservedBandwidth_Tlv.new({:unreserved_bw=>[1, 2, 3, 4, 5, 6, 7, 8]}).to_hash[:unreserved_bw])
-      assert_equal("000800203e0000003e8000003ec000003f0000003f2000003f4000003f6000003f800000".split.join,
-                UnreservedBandwidth_Tlv.new({:unreserved_bw=>[1, 2, 3, 4, 5, 6, 7, 8]}).to_shex)
-    end
-  end
-  
-end

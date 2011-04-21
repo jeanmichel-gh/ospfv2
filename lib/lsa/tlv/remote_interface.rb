@@ -10,6 +10,8 @@
 
 require 'lsa/tlv/tlv'
 
+#TODO interface_adrress base tlv : DRY
+
 module OSPFv2
 
   class RemoteInterfaceIpAddress_Tlv
@@ -45,7 +47,7 @@ module OSPFv2
 
 
     def to_s
-      self.class.to_s + ": " + ip_address.to_ip
+      "Neighbor Address : #{ip_address.to_ip}"
     end
 
     def to_s_junos_style(ident=0)

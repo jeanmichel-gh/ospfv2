@@ -18,7 +18,6 @@ module OSPFv2
     include SubTlv
     include Common
 
-    LinkId = Class.new(Id) unless const_defined?(:LinkId)
     attr_reader :tlv_type, :max_bw
 
     def initialize(arg={})
@@ -44,7 +43,7 @@ module OSPFv2
     end
 
     def to_s
-      self.class.to_s + ": " + max_bw.to_s
+      "Maximum bandwidth : #{max_bw.to_i}"
     end
 
     def to_s_junos_style(ident=0)

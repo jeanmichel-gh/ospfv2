@@ -117,12 +117,14 @@ require 'ie/au_type'
 
 module OSPFv2
   
-  RouterId = Class.new(Id)
-  AreaId   = Class.new(Id)
-  
   class OspfPacket
     include OSPFv2
     include OSPFv2::Common
+    
+    unless const_defined?(:RouterId)
+      RouterId = Class.new(Id)
+      AreaId   = Class.new(Id)
+    end
     
     attr_reader :area_id, :router_id, :version, :ospf_version, :packet_type, :au_type
     attr_writer_delegate :area_id, :router_id, :packet_type, :au_type
@@ -260,11 +262,13 @@ module OSPFv2
     include OSPFv2
     include OSPFv2::Common
     
-    HELLO = 1
-    DATABASE_DESCRIPTION = 2
-    LINK_STATE_REQUEST = 3
-    LINK_STATE_UPDATE = 4
-    LINK_STATE_ACKNOWLEDGMENT = 5
+    unless const_defined?(:HELLO)
+      HELLO = 1
+      DATABASE_DESCRIPTION = 2
+      LINK_STATE_REQUEST = 3
+      LINK_STATE_UPDATE = 4
+      LINK_STATE_ACKNOWLEDGMENT = 5
+    end
     
     class << self
       

@@ -42,6 +42,7 @@ require 'lsa/tlv/maximum_bandwidth'
 require 'lsa/tlv/maximum_reservable_bandwidth'
 require 'lsa/tlv/unreserved_bandwidth'
 require 'lsa/tlv/traffic_engineering_metric'
+require 'lsa/tlv/color.rb'
 
 module OSPFv2::SubTlv
   def self.factory(arg={})

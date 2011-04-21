@@ -86,18 +86,6 @@ class LsType
     def to_i(arg)
       return arg unless arg.is_a?(Symbol)
       ls_type_sym_to_i(arg)
-      # case arg.to_s
-      # when /^router(_lsa|)$/       ; @ls_type=1
-      # when /^network(_lsa|)$/      ; @ls_type=2
-      # when /^summary(_lsa|)$/      ; @ls_type=3
-      # when /^asbr_summary(_lsa|)$/ ; @ls_type=4
-      # when /^as_external(_lsa|)$/  ; @ls_type=5
-      #   #FIXME: finish and unit-test
-      #   # when :as_external7_lsa ; @ls_type=7
-      #   # when :opaque_link      ; @ls_type=9
-      #   # when :opaque_area      ; @ls_type=10
-      #   # when :opaque_as        ; @ls_type=11
-      # end    
     end
 
     def to_sym(arg)

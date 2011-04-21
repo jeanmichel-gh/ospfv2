@@ -43,7 +43,7 @@ module OSPFv2
 
 
     def to_s
-      self.class.to_s + ": " + te_metric.to_s
+      "Admin Metric : #{te_metric}"
     end
 
     def to_s_junos_style(ident=0)

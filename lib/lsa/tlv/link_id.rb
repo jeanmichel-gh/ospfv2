@@ -45,7 +45,7 @@ module OSPFv2
 
 
     def to_s
-      self.class.to_s + ": " + link_id.to_ip
+      "Link ID : " + link_id.to_ip
     end
 
     def to_s_junos_style(ident=0)

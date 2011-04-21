@@ -52,15 +52,17 @@ module OSPFv2
     include OSPFv2
     attr_reader :address, :inactivity_timer, :hello, :dd_rxmt_interval
     
-    InactivityTimer = Class.new(Timer)
-    HelloTimer = Class.new(PeriodicTimer)
-    RxmtIntervalTimer = Class.new(PeriodicTimer)
-    RefreshTimer = Class.new(PeriodicTimer)
-    RouterId = Class.new(Id)
-    AreadId = Class.new(Id)
-
     attr_writer :hello_int, :dead_int
     
+    unless const_defined?(:AreaId)
+      InactivityTimer = Class.new(Timer)
+      HelloTimer = Class.new(PeriodicTimer)
+      RxmtIntervalTimer = Class.new(PeriodicTimer)
+      RefreshTimer = Class.new(PeriodicTimer)
+      RouterId = Class.new(Id)
+      AreaId = Class.new(Id)
+    end
+
     def initialize(arg={})
       #TODO: accept prefix arg and set @address and @netmask in hello...
       @address = arg[:src_addr] || '127.0.0.1'

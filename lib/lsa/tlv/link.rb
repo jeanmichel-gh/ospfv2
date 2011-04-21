@@ -106,29 +106,15 @@ module OSPFv2
       encoded_tlvs.size
     end
     
-    # 
-    # Link connected to Point-to-Point network
-    #   Link ID : 1.2.3.4
-    #   Interface Address : 1.1.1.1
-    #   Neighbor Address : 2.2.2.2
-    #   Admin Metric : 255
-    #   Maximum bandwidth : 1250
-    #   Maximum reservable bandwidth : 875
-    #   Number of Priority : 8
-    #   Priority 0 : 12          Priority 1 : 12        
-    #   Priority 2 : 12          Priority 3 : 12        
-    #   Priority 4 : 12          Priority 5 : 12        
-    #   Priority 6 : 12          Priority 7 : 12        
-    # 
-    # Number of Links : 1
-    # 
     def to_s_ios
       #TODO
       tlvs.collect { |tlv| tlv.to_s }.join("\n  ")
     end
 
-    def to_s
-      self.class.to_s + "(2): " + "\n" + tlvs.collect { |tlv| tlv.to_s }.join("\n")
+    def to_s(args={})
+      ident = [' ']* (args[:ident] || 0)
+      "Link TLV (#{tlv_type}), length: #{encoded_tlvs.size}" +
+      ['',tlvs].flatten.collect { |tlv| tlv.to_s }.join("\n#{ident}")
     end
 
   end
@@ -136,106 +122,3 @@ end
 
 load "../../../../test/ospfv2/lsa/tlv/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if __FILE__ == $0
 
-__END__
-
-
-TODO: to_s_ios
-
-                Type-10 Opaque Link Area Link States (Area 0)
-
-Link ID         ADV Router      Age         Seq#       Checksum Opaque ID
-1.0.0.0         0.0.0.3         23          0x80000001 0x000D12 0       
-1.0.0.255       0.0.0.1         23          0x80000001 0x00ACB1 255     
-
-
-
-
-R1#show ip ospf database opaque-area 
-
-            OSPF Router with ID (1.1.1.1) (Process ID 1)
-
-                Type-10 Opaque Link Area Link States (Area 0)
-
-  LS age: 44
-  Options: (No TOS-capability, No DC)
-  LS Type: Opaque Area Link
-  Link State ID: 1.0.0.0
-  Opaque Type: 1
-  Opaque ID: 0
-  Advertising Router: 0.0.0.3
-  LS Seq Number: 80000001
-  Checksum: 0xD12
-  Length: 116
-  Fragment number : 0
-
-    Link connected to Point-to-Point network
-      Link ID : 5.6.7.8
-      Interface Address : 111.111.111.111
-      Neighbor Address : 222.222.222.222
-      Admin Metric : 255
-      Maximum bandwidth : 1250
-      Maximum reservable bandwidth : 875
-      Number of Priority : 8
-      Priority 0 : 12          Priority 1 : 12        
-      Priority 2 : 12          Priority 3 : 12        
-      Priority 4 : 12          Priority 5 : 12        
-      Priority 6 : 12          Priority 7 : 12        
-
-    Number of Links : 1
-
-  LS age: 45
-  Options: (No TOS-capability, No DC)
-  LS Type: Opaque Area Link
-  Link State ID: 1.0.0.255
-  Opaque Type: 1
-  Opaque ID: 255
-  Advertising Router: 0.0.0.1
-  LS Seq Number: 80000001
-  Checksum: 0xACB1
-  Length: 116
-  Fragment number : 255
-
-    Link connected to Point-to-Point network
-      Link ID : 1.2.3.4
-      Interface Address : 1.1.1.1
-      Neighbor Address : 2.2.2.2
-      Admin Metric : 255
-      Maximum bandwidth : 1250
-      Maximum reservable bandwidth : 875
-      Number of Priority : 8
-      Priority 0 : 12          Priority 1 : 12        
-      Priority 2 : 12          Priority 3 : 12        
-      Priority 4 : 12          Priority 5 : 12        
-      Priority 4 : 12          Priority 5 : 12        
-      Priority 6 : 12          Priority 7 : 12        
-
-    Number of Links : 1
-
-  LS age: 45
-  Options: (No TOS-capability, No DC)
-  LS Type: Opaque Area Link
-  Link State ID: 1.0.0.255
-  Opaque Type: 1
-  Opaque ID: 255
-  Advertising Router: 0.0.0.1
-  LS Seq Number: 80000001
-  Checksum: 0xACB1
-  Length: 116
-  Fragment number : 255
-
-    Link connected to Point-to-Point network
-      Link ID : 1.2.3.4
-      Interface Address : 1.1.1.1
-      Neighbor Address : 2.2.2.2
-      Admin Metric : 255
-      Maximum bandwidth : 1250
-      Maximum reservable bandwidth : 875
-      Number of Priority : 8
-      Priority 0 : 12          Priority 1 : 12        
-      Priority 2 : 12          Priority 3 : 12        
-      Priority 4 : 12          Priority 5 : 12        
-      Priority 6 : 12          Priority 7 : 12        
-
-    Number of Links : 1
-
-R1#
