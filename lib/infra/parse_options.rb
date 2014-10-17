@@ -26,8 +26,15 @@ require 'ostruct'
 require 'ie/id'
 
 class OptParse
+  
+  def self.pry_installed?
+    require 'pry'
+  rescue LoadError
+    false
+  end
+  
   def self.parse(args)
-
+        
     options = OpenStruct.new
     options.ipaddr = '192.168.1.123'
     options.network = '192.168.1.0'
@@ -144,9 +151,17 @@ class OptParse
       opts.on( '-f', "--log-fname [FILENAME]", "To redirect logs to a file.") { |fname|
         options.log_fname = fname 
       }
-      opts.on( '-c', "--console [TYPE]", [:irb, :pry, :none], "Console (irb, pry, none)") { |t|
-        options.console = t || :irb
-      }
+      
+      if pry_installed?
+        opts.on( '-c', "--console [TYPE]", [:irb, :pry, :none], "Console (irb, pry, none)") { |t|
+          options.console = t || :irb
+        }
+      else
+        opts.on( '-c', "--console [TYPE]", [:irb, :none], "Console (irb, none)") { |t|
+          options.console = t || :irb
+        }
+      end
+      
       opts.on_tail("-h", "--help", "Show this message") { puts "\n  #{opts}\n" ; exit }
       opts.on_tail("-?", "--help") { puts "\n  #{opts}\n" ; exit }
       opts.on
