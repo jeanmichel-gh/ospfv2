@@ -124,14 +124,14 @@ length
 
 =end
 
-require 'infra/ospf_common'
-require 'infra/ospf_constants'
-require 'ie/id'
-require 'ie/ls_type'
-require 'ie/ls_age'
-require 'ie/sequence_number'
-require 'ie/options'
-require 'ls_db/advertised_routers'
+require_relative '../infra/ospf_common'
+require_relative '../infra/ospf_constants'
+require_relative '../ie/id'
+require_relative '../ie/ls_type'
+require_relative '../ie/ls_age'
+require_relative '../ie/sequence_number'
+require_relative '../ie/options'
+require_relative '../ls_db/advertised_routers'
 
 module OSPFv2
   
@@ -189,14 +189,17 @@ module OSPFv2
     
     include OSPFv2::Common
     include OSPFv2::Constant
-    
-    # FIXME: when adding LSA in LSDB should be acked when init, rxmt otherwise ....
+        
     def ack
       @_rxmt_=false
     end
     def retransmit
       @_rxmt_=true
     end
+    
+    #  returns
+    #          true  if lsa has been acked by neighbor
+    #          false otherwise
     def is_acked?
       @_rxmt_ == false
     end
@@ -564,5 +567,3 @@ module OSPFv2
   end
 
 end
-
-load "../../../test/ospfv2/lsa/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if __FILE__ == $0

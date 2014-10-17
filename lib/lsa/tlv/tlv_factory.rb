@@ -8,8 +8,8 @@
 # 
 #++
 
-require 'lsa/tlv/router_address'
-require 'lsa/Tlv/link_type'
+require_relative 'router_address'
+require_relative 'link_type'
 
 module OSPFv2::Tlv
   def self.factory(arg={})
@@ -33,16 +33,16 @@ module OSPFv2::Tlv
   end
 end
 
-require 'lsa/tlv/link'
-require 'lsa/tlv/link_type'
-require 'lsa/tlv/link_id'
-require 'lsa/tlv/local_interface'
-require 'lsa/tlv/remote_interface'
-require 'lsa/tlv/maximum_bandwidth'
-require 'lsa/tlv/maximum_reservable_bandwidth'
-require 'lsa/tlv/unreserved_bandwidth'
-require 'lsa/tlv/traffic_engineering_metric'
-require 'lsa/tlv/color.rb'
+require_relative 'link'
+require_relative 'link_type'
+require_relative 'link_id'
+require_relative 'local_interface'
+require_relative 'remote_interface'
+require_relative 'maximum_bandwidth'
+require_relative 'maximum_reservable_bandwidth'
+require_relative 'unreserved_bandwidth'
+require_relative 'traffic_engineering_metric'
+require_relative 'color.rb'
 
 module OSPFv2::SubTlv
   def self.factory(arg={})
@@ -69,6 +69,4 @@ module OSPFv2::SubTlv
     end
   end
 end
-
-load "../../../../test/ospfv2/lsa/tlv/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if __FILE__ == $0
 

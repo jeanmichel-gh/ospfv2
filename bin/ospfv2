@@ -1,6 +1,10 @@
 #!/usr/bin/env ruby
+require 'timeout'
 
-raise "Not working with 1.9, use ruby 1.8.7"  if RUBY_VERSION.split('.')[0..1].join > '18'
+if Object.const_defined? :Encoding
+  Encoding.default_internal="BINARY"
+  Encoding.default_external="BINARY"
+end
 
 require 'neighbor/neighbor'
 require 'packet/ospf_packet'
@@ -11,135 +15,126 @@ require 'pp'
 
 include OSPFv2
 
-Thread.current["name"]  = "#{self}"
+# Parse command line
+begin
+  options = OptParse.parse(ARGV)
+rescue OptionParser::InvalidOption => e
+  STDERR.puts e.to_s.gsub(/at\s*$/,'')
+  exit(1)
+end
 
-cli = Thread.new do
-  Thread.current["name"]  = "CLI"
-  
-  # Parse command line
-  begin
-    options = OptParse.parse(ARGV)
-  rescue OptionParser::InvalidOption => e
-    STDERR.puts e.to_s.gsub(/at\s*$/,'')
-    exit(1)
-  end
-  
-  ls_db = OSPFv2::LSDB::LinkStateDatabase.create :columns=> options.grid[0], 
-                                                 :rows=> options.grid[1], 
-                                                 :base_prefix => options.base_link_addr, 
-                                                 :base_router_id=> options.base_router_id
+ls_db = OSPFv2::LSDB::LinkStateDatabase.create :columns=> options.grid[0],
+:rows=> options.grid[1],
+:base_prefix => options.base_link_addr,
+:base_router_id=> options.base_router_id
 
-  #  Up all links
-  OSPFv2::LSDB::Link.all.each { |id,lnk| ls_db.link lnk, :up  }
+#  Up all links
+LSDB::Link.all.each { |id,lnk| ls_db.link lnk, :up  }
 
+
+rlsa = Router.new :ls_id=> options.router_id, :advertising_router=>options.router_id, :options=>0x22
+if options.network_type == :broadcast
+  # 
+  # o   If the state of the interface is Waiting, add a Type
+  #     3 link (stub network) with Link ID set to the IP
+  #     network number of the attached network, Link Data
+  #     set to the attached network's address mask, and cost
+  #     equal to the interface's configured output cost.
+  # 
+  # o   Else, there has been a Designated Router elected for
+  #     the attached network.  If the router is fully
+  #     adjacent to the Designated Router, or if the router
+  #     itself is Designated Router and is fully adjacent to
+  #     at least one other router, add a single Type 2 link
+  #     (transit network) with Link ID set to the IP
+  #     interface address of the attached network's
+  #     Designated Router (which may be the router itself),
+  #     Link Data set to the router's own IP interface
+  #     address, and cost equal to the interface's
+  #     configured output cost.  Otherwise, add a link as if
+  #     the interface state were Waiting (see above).
+  # 
+  # 
+  rlsa << RouterLink.new_stub_network(:link_id=>options.network, :link_data=>options.netmask, :metric=>20)
+
+else
+  # Assume p2p:
+  #   add p2p link and a stub link
+  rlsa << RouterLink.new_point_to_point(:link_id=>options.neighbor_id, :link_data=> options.ipaddr, :metric=>1)
+  rlsa << RouterLink.new_stub_network(:link_id=>options.network, :link_data=>options.netmask, :metric=>1)
+  rlsa << RouterLink.new_stub_network(:link_id=>'0.0.0.0', :link_data=>'0.0.0.0', :metric=>1)
   
-  # Describe the connection to our neighbor
-  # It's a p2p connection
-  #   we need to describe a p2p link and a stub link
-  rlsa = Router.new :ls_id=> options.router_id, 
-                    :advertising_router=>options.router_id,
-                    :options=>0x22
-  rlsa << RouterLink.new_point_to_point(:link_id=>options.neighbor_id,
-                                        :link_data=> options.ipaddr,
-                                        :metric=>1)
-  rlsa << RouterLink.new_stub_network(:link_id=>options.network,
-                                      :link_data=>options.netmask,
-                                      :metric=>1)
-  ls_db << rlsa
-  
-  rid1 = OSPFv2::LSDB::LinkStateDatabase.router_id(1,1,options.base_router_id)
-  rid2 = OSPFv2::LSDB::LinkStateDatabase.router_id(2,1,options.base_router_id)
-  rid3 = OSPFv2::LSDB::LinkStateDatabase.router_id(1,1,options.base_router_id)
-  
+end
+
+# ls_db << rlsa
+
+rid1 = OSPFv2::LSDB::LinkStateDatabase.router_id(1,1,options.base_router_id)
+rid2 = OSPFv2::LSDB::LinkStateDatabase.router_id(2,1,options.base_router_id)
+rid3 = OSPFv2::LSDB::LinkStateDatabase.router_id(1,1,options.base_router_id)
+
+unless options.grid == [0,0]
   # add a  a p2p link between router_id and rid1
-  ls_db.new_link :router_id=> options.router_id, :neighbor_id=>rid1
-  
-  # Link.all.values.each { |lnk| @ls_db.link lnk, :down  }
-  
-  # Add some Summary LSAs
+  ls_db.new_link :router_id=> options.router_id, :neighbor_id=>rid1 
+end
+
+
+# Add some Summary LSAs
+if options.num_sum>0
   [rid1,rid2].each  do |rid|
     ls_db.lookup(1,rid).set_abr
     (options.num_sum/2).times { ls_db << OSPFv2::Summary.new_lsdb( :advertising_router=> rid ) }
   end
-  
-  # Add some External LSAs
-  ls_db.find_router_lsa(rid3).set_asbr
-  options.num_ext.times { \
-          ls_db << OSPFv2::AsExternal.new_lsdb(:advertising_router=> rid3, 
-                                               :mt_metrics=>[{:mt_id=>10, :metric=>20,
-                                                              :tag=>10}])}
-  
   ls_db << AsbrSummary.new(:advertising_router=> rid3, :ls_id=> rid3)
-  
-  neighbor = OSPFv2::Neighbor.new :src_addr => options.ipaddr, 
-                                  :router_id => options.router_id, 
-                                  :area_id=>options.area_id, 
-                                  :log_fname => options.log_fname
-                                  
-  neighbor.hello_int
-  neighbor.dead_int
-  neighbor.ls_db = ls_db
-  
-  ls_db.ls_refresh_time= options.ls_refresh_time
-  ls_db.ls_refresh_interval=options.ls_refresh_interval
-  
-  help= <<-"end;"
-  start 
-  stop
-  puts ls_db 
-  puts ls_db.to_junos | to_junos_v 
-  puts ls_db.to_ios   | to_ios_v
-  ls_db.aging?
-  ls_db.aging :on | :off
-  end;
-  
-  def prompt() ; ">> " ; end
-  def ls_db.aging(arg=nil)
-    Lsa::LsAge.aging(arg)
-    all.collect { |l| l.ls_age.to_i }
-    aging?
-  end
-  def ls_db.aging?
-    Lsa::LsAge.aging? ? :on : :off
-  end
-  def ls_db.age_reset(age=nil)
-    all.each  { |l| l.ls_age.reset(age) }
-    ''
-  end
-  
-  sleep(1)
-  ue=nil
-
-  def eval_cmd(cmd,binding)
-    s = eval(cmd,binding)
-    print "=> #{s.inspect}" if s
-    puts
-  rescue SyntaxError, NameError => e
-    puts "% syntax error\n"
-  rescue => e
-    puts "% error: #{e}\n"
-  end
-  
-  loop do
-    print prompt() ; $stdout.flush
-    cmd = STDIN.gets
-    break unless cmd
-    next if cmd.size == 0
-    ary = cmd.downcase.split(' ')
-    case ary[0]
-    when 'start'; ls_db.aging(:on); neighbor.start
-    when 'stop'                   ; neighbor.stop
-    when 'help', '?'
-      print help
-    when nil
-    when /^(exit|quit|x|q|fin|end)$/  ; exit
-    else
-      eval_cmd cmd, binding()
-    end
-  end
-
 end
 
-cli.join
+# Add some External LSAs
+ls_db.find_router_lsa(rid3).set_asbr if options.num_ext>0
+options.num_ext.times do
+  ls_db << OSPFv2::AsExternal.new_lsdb(:advertising_router=> rid3,
+  :mt_metrics=>[{:mt_id=>10, :metric=>20,:tag=>10}])
+end
 
-exit
+
+neighbor = OSPFv2::Neighbor.new :src_addr => options.ipaddr,
+:router_id => options.router_id,
+:area_id=>options.area_id,
+:log_fname => options.log_fname
+
+neighbor.hello_int
+neighbor.dead_int
+neighbor.ls_db = ls_db
+
+ls_db.ls_refresh_time= options.ls_refresh_time
+ls_db.ls_refresh_interval=options.ls_refresh_interval
+
+def ls_db.aging(arg=nil)
+  Lsa::LsAge.aging(arg)
+  all.collect { |l| l.ls_age.to_i }
+  aging?
+end
+def ls_db.aging?
+  Lsa::LsAge.aging? ? :on : :off
+end
+def ls_db.age_reset(age=nil)
+  all.each  { |l| l.ls_age.reset(age) }
+  ''
+end
+
+case options.console
+when :pry
+  require 'pry'
+  binding.pry
+when :irb
+  require 'irb'
+  puts "*** cb $binding ***"
+  puts "Once in irb> enter \"cb $binding\" to access local variables: ls_db, neighbor, options"
+  puts "Use ls_db object to access generated link state database."
+  puts "Use neighbor object to start or stop ospfv2 neighboring."
+  puts ""
+  $binding = binding
+  IRB.start(__FILE__)
+else
+  ls_db.aging(:on); neighbor.start
+  sleep 30_000
+end
+

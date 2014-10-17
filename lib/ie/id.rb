@@ -22,8 +22,8 @@
 
 
 require 'ipaddr'
-require 'infra/ospf_common'
-require 'ie/ie'
+require_relative '../infra/ospf_common'
+require_relative 'ie'
 
 module OSPFv2
 class Id
@@ -94,6 +94,3 @@ class Id
 end
 
 end
-
-load "../../../test/ospfv2/ie/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if __FILE__ == $0
-

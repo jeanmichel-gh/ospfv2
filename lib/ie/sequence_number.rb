@@ -20,8 +20,8 @@
 # along with OSPFv2.  If not, see <http://www.gnu.org/licenses/>.
 #++
 
-require 'ie/ie'
-require 'infra/ospf_constants'
+require_relative 'ie'
+require_relative '../infra/ospf_constants'
 
 module OSPFv2
 
@@ -109,8 +109,6 @@ module OSPFv2
   end
 
 end
-
-load "../../../test/ospfv2/ie/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if __FILE__ == $0
 
 __END__
 

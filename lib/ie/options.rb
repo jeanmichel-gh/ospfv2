@@ -109,8 +109,8 @@ A.2 The Options field
 
 =end
 
-require 'infra/ospf_common'
-require 'ie/ie'
+require_relative '../infra/ospf_common'
+require_relative 'ie'
 module OSPFv2
   
   
@@ -151,6 +151,8 @@ module OSPFv2
           end
         end
       end
+
+
       unless arg[:DC].nil? and arg[:dc].nil?
         _flag = arg[:DC] ||= arg[:dc]
         if _flag.is_a?(TrueClass)
@@ -375,5 +377,3 @@ module OSPFv2
   end
   
 end
-
-load "../../../test/ospfv2/ie/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if __FILE__ == $0

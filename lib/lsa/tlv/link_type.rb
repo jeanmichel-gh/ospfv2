@@ -8,7 +8,7 @@
 # 
 #++
 
-require 'lsa/tlv/tlv'
+require_relative 'tlv'
 
 module OSPFv2
   class LinkType_Tlv
@@ -42,5 +42,3 @@ module OSPFv2
     end
   end
 end
-
-load "../../../../test/ospfv2/lsa/tlv/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if __FILE__ == $0

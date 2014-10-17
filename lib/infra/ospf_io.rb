@@ -5,12 +5,12 @@
 #
 #
 # This file is part of OSPFv2.
-# 
+#
 # OSPFv2 is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
-# 
+#
 # OSPFv2 is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
@@ -23,6 +23,9 @@
 
 require 'observer'
 require 'thread'
+
+Thread.abort_on_exception = true
+
 
 module OSPFv2
 
@@ -40,7 +43,7 @@ module OSPFv2
     end
 
     attr_reader :thread
-    
+
     def our_address
       @neighbor.address
     end
@@ -52,13 +55,15 @@ module OSPFv2
     end
 
     def start
+
       @thread = Thread.new(@sock) do |s|
         Thread.current['name'] = self.class.to_s
         begin
           while @continue
             from, port, data = s.recv
             hdr = header(data)
-            if hdr[:ip_proto] == 89 and data[20] == 2
+
+            if hdr[:ip_proto] == 89 and (data[20] == 2 or data[20] == "\x02")
               if from != our_address
                 changed and notify_observers(:ev_recv, data, from, port) # * @sock.recv ....
               end
@@ -71,11 +76,11 @@ module OSPFv2
     end
 
     private
-    
+
 
     def long2ip(ip)
       return ip if ip.is_a?(String)
-      [ip].pack('N').unpack('CCCC').collect {|c| c}.join('.') 
+      [ip].pack('N').unpack('CCCC').collect {|c| c}.join('.')
     end
     def header(_h)
       h = _h.unpack('CCnnnCCnNN')
@@ -93,7 +98,7 @@ module OSPFv2
         :ip_dst  => long2ip(h[9]),
       }
     end
-    
+
   end
 
   class OutputQ < Queue
@@ -118,9 +123,10 @@ module OSPFv2
       @thread = Thread.new(@sock) do |s|
         Thread.current['name'] = self.class.to_s
         begin
-          while @continue 
+          while @continue
             el = deq
             @sock.send(*el)
+            Thread.pass
           end
         rescue => e
           p e

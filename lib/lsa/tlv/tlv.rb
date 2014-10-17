@@ -8,8 +8,8 @@
 # 
 #++
 
-require 'infra/ospf_common'
-require 'ie/id'
+require_relative '../../infra/ospf_common'
+require_relative '../../ie/id'
 
 module OSPFv2
   module Tlv

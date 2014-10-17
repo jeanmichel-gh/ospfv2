@@ -5,12 +5,12 @@
 #
 #
 # This file is part of OSPFv2.
-# 
+#
 # OSPFv2 is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
-# 
+#
 # OSPFv2 is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
@@ -71,7 +71,7 @@
       A.4.1. Detailed formats of the different types of LSAs are described
       in Section A.4.
 
-  
+
 =end
 
 require 'packet/ospf_packet'
@@ -79,11 +79,11 @@ require 'lsa/lsa'
 require 'lsa/lsa_factory'
 require 'packet/link_state_ack'
 module OSPFv2
-  
+
   class LinkStateUpdate < OspfPacket
-    
+
     attr_reader :lsas
-    
+
     def initialize(_arg={})
       arg = _arg.dup
       @lsas=[]
@@ -98,11 +98,11 @@ module OSPFv2
         raise ArgumentError, "Invalid argument", caller
       end
     end
-    
+
     def number_of_lsa
       lsas.size
     end
-    
+
     def encode
       headers = []
       headers << [lsas.size].pack('N')
@@ -123,9 +123,9 @@ module OSPFv2
         end
       end
     end
-    
+
     def [](val)
-      lsas[val] 
+      lsas[val]
     end
 
     # def to_s
@@ -144,11 +144,11 @@ module OSPFv2
       s.join("\n ")
     end
 
-    
+
     def each
       lsas.each { |ls| yield ls }
     end
-    
+
     def keys
       lsas.collect { |ls| ls.key }
     end
@@ -167,7 +167,7 @@ module OSPFv2
         lsas = arg[:lsas]
         arg.delete(:lsas)
         lsu = new(arg)
-        [lsas].flatten.compact.each do |lsa|
+        lsas.each do |lsa|
           lsa_len = lsa.encode.size
           if (len + lsa_len) > (1476-56-20)
             lsus << lsu
@@ -179,11 +179,13 @@ module OSPFv2
         end
         lsus << lsu
         lsus
+      rescue
+        raise
       end
     end
 
   end
-  
+
 end
 
 load "../../../test/ospfv2/packet/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if __FILE__ == $0

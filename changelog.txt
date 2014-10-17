@@ -1,3 +1,10 @@
+=== 0.0.3
+
+* Opaque LSA
+  + Traffic Engineering TLVs
+
+
+
 === 0.0.2 Fri Apr 15 18:22:26 PDT 2011
 
 * Work with Cisco Routers that enable LLS by default

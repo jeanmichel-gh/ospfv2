@@ -5,10 +5,10 @@
 #
 #
 # This file is part of OSPFv2.
-# 
+#
 #++
 
-require 'lsa/tlv/tlv'
+require_relative 'tlv'
 
 module OSPFv2
 
@@ -16,7 +16,6 @@ module OSPFv2
     include SubTlv
     include Common
 
-    LinkId = Class.new(Id) unless const_defined?(:LinkId)
     attr_reader :tlv_type, :unreserved_bw
 
     def initialize(arg={})
@@ -34,7 +33,7 @@ module OSPFv2
 
     def encode
       [@tlv_type, 32].pack('nn') +
-      unreserved_bw.collect { |bw|   bw / 8.0 }.pack('g*')      
+      unreserved_bw.collect { |bw|   bw / 8.0 }.pack('g*')
     end
 
     def __parse(s)

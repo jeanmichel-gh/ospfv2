@@ -8,10 +8,10 @@
 # 
 #++
 
-require 'lsa/opaque'
+require_relative 'opaque'
 require 'ie/opaque_id'
 require 'ie/opaque_type'
-require 'lsa/tlv/tlv_factory'
+require_relative 'tlv/tlv_factory'
 
 module OSPFv2
   class TrafficEngineering < Lsa
@@ -93,6 +93,3 @@ module OSPFv2
   end
   
 end
-
-load "../../../test/ospfv2/lsa/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if __FILE__ == $0
-

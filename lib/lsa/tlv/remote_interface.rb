@@ -8,7 +8,7 @@
 # 
 #++
 
-require 'lsa/tlv/tlv'
+require_relative 'tlv'
 
 #TODO interface_adrress base tlv : DRY
 
@@ -56,5 +56,3 @@ module OSPFv2
 
   end
 end
-
-load "../../../../test/ospfv2/lsa/tlv/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if __FILE__ == $0

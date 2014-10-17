@@ -8,7 +8,7 @@
 # 
 #++
 
-require 'lsa/tlv/tlv'
+require_relative 'tlv'
 
 module OSPFv2
 
@@ -43,7 +43,6 @@ module OSPFv2
       @link_id = LinkId.new_ntoh(link_id)
     end
 
-
     def to_s
       "Link ID : " + link_id.to_ip
     end
@@ -54,5 +53,3 @@ module OSPFv2
 
   end
 end
-
-load "../../../../test/ospfv2/lsa/tlv/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if __FILE__ == $0

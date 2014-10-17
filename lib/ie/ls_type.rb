@@ -20,7 +20,7 @@
 # along with OSPFv2.  If not, see <http://www.gnu.org/licenses/>.
 #++
 
-require 'ie/ie'
+require_relative 'ie'
 module OSPFv2
 class LsType
   include IE
@@ -179,7 +179,6 @@ class LsType
 end
 end
 
-load "../../../test/ospfv2/ie/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if __FILE__ == $0
 
 
 

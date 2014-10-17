@@ -26,7 +26,6 @@ require 'lsa/lsa'
 
 module OSPFv2
 
-
   #FIXME extend class Lsa instead...
 
   class Lsa
@@ -51,10 +50,14 @@ module OSPFv2::LSDB
       (row << 16) + col + base_rid      
     end
 
+    #FIXME: 9/24/2014 ???????
+    # check where this is used? 
+    # should create an infinite loop?
     def router_id(*args)
       LinkStateDatabase.router_id(*args)
     end  
 
+    # FIXME: should be moved to base
     # lsdb = LinkStateDatabase.create 10, 10, :prefix => '192.168.0.0/24'
     # lsdb = LinkStateDatabase.create 10, 10, :prefix_base => '192.168.0.0/24', :router_id_base => 
     def self.create(arg={})
@@ -140,11 +143,11 @@ module OSPFv2::LSDB
     end
 
     def link_refresh
-
+      #TODO implement link_refresh
     end
 
     def link_maxage
-
+      #TODO implement link_maxage
     end
 
   end

@@ -40,10 +40,12 @@ class OptParse
     options.area_id = 0
     options.log_fname = $stdout
     options.grid = [2,2]
-    options.num_sum = 10
-    options.num_ext = 10
+    options.num_sum = 3
+    options.num_ext = 3
     options.ls_refresh_time = 2000
     options.ls_refresh_interval = 180
+    options.console = :irb
+    options.network_type = :broadcast
 
     options.parse  = Proc.new do |filename|
       y_conf = YAML::load_file(filename)
@@ -79,6 +81,8 @@ class OptParse
 
       opts.banner = "Usage: #{$0} [options]"
 
+      opts.separator ""
+      opts.separator "Neighbor:"
       opts.on("-i", "--address [PREFIX]", hlp_address) { |x| 
         options.ipaddr = x
         options.ipaddr = x.split('/')[0]
@@ -95,6 +99,20 @@ class OptParse
       opts.on("-a", "--area-id [ID]", hlp_area_id) { |id| 
         options.area_id = to_id.call(id) 
       }
+      opts.on( "--hello-interval [INT]", hlp_hello_int) { |int| 
+        options.hello_int = int.to_i
+      }
+      opts.on("--dead-interval [INT]", hlp_dead_int) { |int| 
+        options.dead_int = int.to_i
+      }
+      opts.on( '-c', "--network [TYPE]", [:broadcast, :p2p], "Network type (broadcast, p2p)") { |t|
+        options.network_type = t || :broadcast
+        
+      }
+      
+      opts.separator ""
+      opts.separator ""
+      opts.separator "Link State Dabatabse:"
       opts.on("-g", "--grid [colxrow]", hlp_grid) { |grid| 
         options.grid = grid.split('x').collect { |x| x.to_i }
       }
@@ -107,26 +125,27 @@ class OptParse
       opts.on('-E',"--number-of-external [INT]", hlp_ext) { |x| 
         options.num_ext = x.to_i
       }
-      opts.on( '-f', "--log-fname [FILENAME]", "To redirect logs to a file.") { |fname|
-        options.log_fname = fname 
-      }
       opts.on("--base-router-id [ID]", hlp_base_router_id) { |id| 
         options.base_router_id = id.to_i
       }
       opts.on( "--base-p2p-addr [PREFIX]", hlp_base_link_addr) { |x| 
         options.base_link_addr = x
       }
-      opts.on( "--hello-interval [INT]", hlp_hello_int) { |int| 
-        options.hello_int = int.to_i
+
+      opts.separator "\n"
+      opts.on("--refresh-time [SECOND]", OptionParser::DecimalInteger, hlp_ls_refresh_time) { |x| 
+        options.ls_refresh_time = x
       }
-      opts.on("--dead-interval [INT]", hlp_dead_int) { |int| 
-        options.dead_int = int.to_i
+      opts.on("--refresh-interval [SECOND]", OptionParser::DecimalInteger, hlp_ls_refresh_interval) { |x| 
+        options.ls_refresh_interval = x
       }
-      opts.on("--ls-refresh-time", hlp_ls_refresh_time) { |x| 
-        options.ls_refresh_time = x.to_i
+      
+      opts.separator "\n"
+      opts.on( '-f', "--log-fname [FILENAME]", "To redirect logs to a file.") { |fname|
+        options.log_fname = fname 
       }
-      opts.on("--ls-refresh-interval", hlp_ls_refresh_interval) { |x| 
-        options.ls_refresh_interval = x.to_i
+      opts.on( '-c', "--console [TYPE]", [:irb, :pry, :none], "Console (irb, pry, none)") { |t|
+        options.console = t || :irb
       }
       opts.on_tail("-h", "--help", "Show this message") { puts "\n  #{opts}\n" ; exit }
       opts.on_tail("-?", "--help") { puts "\n  #{opts}\n" ; exit }

@@ -8,7 +8,7 @@
 # 
 #++
 
-require 'lsa/tlv/tlv'
+require_relative 'tlv'
 
 module OSPFv2
 
@@ -54,5 +54,3 @@ module OSPFv2
 
   end
 end
-
-load "../../../../test/ospfv2/lsa/tlv/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if __FILE__ == $0

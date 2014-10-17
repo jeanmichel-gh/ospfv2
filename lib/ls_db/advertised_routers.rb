@@ -21,7 +21,7 @@
 #++
 
 require 'set'
-require 'ie/id'
+require_relative '../ie/id'
 
 module OSPFv2::LSDB
   class AdvertisedRouters

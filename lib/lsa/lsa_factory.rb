@@ -25,7 +25,7 @@ require 'lsa/router'
 require 'lsa/network'
 require 'lsa/summary'
 require 'lsa/external'
-require 'lsa/traffic_engineering'
+# require 'lsa/traffic_engineering'
 
 module OSPFv2
   class Lsa

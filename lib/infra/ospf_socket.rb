@@ -5,12 +5,12 @@
 #
 #
 # This file is part of OSPFv2.
-# 
+#
 # OSPFv2 is free software: you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
 # the Free Software Foundation, either version 3 of the License, or
 # (at your option) any later version.
-# 
+#
 # OSPFv2 is distributed in the hope that it will be useful,
 # but WITHOUT ANY WARRANTY; without even the implied warranty of
 # MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
@@ -28,9 +28,9 @@ require 'infra/ospf_constants'
 module OSPFv2
 
   class SendSocket
-    
+
     attr_reader :sock
-    
+
     def initialize(src, options={})
       @src = src
       @sock = Socket.open(Socket::PF_INET, Socket::SOCK_RAW, IPPROTO_OSPF)
@@ -45,34 +45,34 @@ module OSPFv2
       STDERR.puts "#{e} Cannot Open Socket!"
       exit(1)
     end
-    
+
     #TODO: use all_spf_routers, all_dr_routers, ...
     #     8.1      Sending protocol packets .............................. 58
-    
-    
+
+
     def send_all_spf_routers
       _send_((packet.respond_to?(:encode) ? packet.encode : packet), 0, @sock_addr_all_spf_routers)
     end
-    
+
     def send_all_dr_routers
       _send_((packet.respond_to?(:encode) ? packet.encode : packet), 0, @send_all_dr_routers)
     end
-    
+
     def send_to(packet, dest)
       _send_((packet.respond_to?(:encode) ? packet.encode : packet), 0, Socket.pack_sockaddr_in(0, dest))
     end
-    
+
     def send(packet, dest)
       addr = Socket.pack_sockaddr_in(0, dest)
       @sock.send((packet.respond_to?(:encode) ? packet.encode : packet),0,addr)
     end
-    
+
     def close
       @sock.close unless @sock.closed?
     end
-    
+
     private
-    
+
     def add_membership(group)
       @sock.setsockopt(Socket::IPPROTO_IP, Socket::IP_ADD_MEMBERSHIP, (IPAddr.new(group).hton + IPAddr.new(@src).hton))
     rescue Errno::EADDRNOTAVAIL
@@ -82,7 +82,7 @@ module OSPFv2
       @sock.send(bits,0,addr)
     end
   end
-  
+
   class RecvSocket
     require 'socket'
     require 'ipaddr'

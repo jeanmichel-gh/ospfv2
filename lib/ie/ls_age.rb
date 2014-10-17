@@ -20,7 +20,7 @@
 # along with OSPFv2.  If not, see <http://www.gnu.org/licenses/>.
 #++
 
-require 'infra/ospf_constants'
+require_relative  '../infra/ospf_constants'
 
 module OSPFv2
 class LsAge
@@ -103,4 +103,3 @@ class LsAge
 end
 end
 
-load "../../../test/ospfv2/ie/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if __FILE__ == $0
