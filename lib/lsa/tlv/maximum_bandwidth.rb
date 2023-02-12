@@ -53,3 +53,6 @@ module OSPFv2
   end
 end
 
+
+load File.absolute_path("test/unit/lsa/tlv/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}") if __FILE__ == $0
+

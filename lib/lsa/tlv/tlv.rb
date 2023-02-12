@@ -29,4 +29,3 @@ module OSPFv2
     include Tlv
   end
 end
-

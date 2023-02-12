@@ -28,7 +28,7 @@ class OpaqueType
     end
     
     def to_sym(arg)
-      return arg unless arg.is_a?(Fixnum)
+      return arg unless arg.is_a?(Integer)
       if @opaque_type_sym.has_key?(arg)
         @opaque_type_sym[arg]
       else
@@ -37,7 +37,7 @@ class OpaqueType
     end
     
     def to_i(arg)
-      return arg if arg.is_a?(Fixnum)
+      return arg if arg.is_a?(Integer)
       if @opaque_type_sym_to_i.has_key?(arg)
         @opaque_type_sym_to_i[arg]
       else
@@ -51,7 +51,7 @@ class OpaqueType
     @opaque_type = case opaque_type
     when Symbol
       OpaqueType.to_i(opaque_type)
-    when Fixnum
+    when Integer
       opaque_type
     else
       raise ArgumentError, "Invalid OpaqueType #{opaque_type}"

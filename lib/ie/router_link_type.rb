@@ -83,7 +83,7 @@ class RouterLinkType
     end
 
     def to_sym(arg)
-      return arg unless arg.is_a?(Fixnum)
+      return arg unless arg.is_a?(Integer)
       if @router_link_sym.has_key?(arg)
         @router_link_sym[arg]
       else
@@ -92,7 +92,7 @@ class RouterLinkType
     end
 
     def router_link_sym_to_i(arg)
-      return arg if arg.is_a?(Fixnum)
+      return arg if arg.is_a?(Integer)
       if @router_link_sym_to_i.has_key?(arg)
         @router_link_sym_to_i[arg]
       else
@@ -101,7 +101,7 @@ class RouterLinkType
     end
     
     def link_id_to_s(arg)
-      return arg unless arg.is_a?(Fixnum)
+      return arg unless arg.is_a?(Integer)
       if @link_id_from_type.has_key?(arg)
         @link_id_from_type[arg]
       else
@@ -110,7 +110,7 @@ class RouterLinkType
     end
     
     def link_data_to_s(arg)
-      return arg unless arg.is_a?(Fixnum)
+      return arg unless arg.is_a?(Integer)
       if @link_data_from_type.has_key?(arg)
         @link_data_from_type[arg]
       else
@@ -119,7 +119,7 @@ class RouterLinkType
     end
 
     def to_junos(arg)
-      return arg unless arg.is_a?(Fixnum)
+      return arg unless arg.is_a?(Integer)
       if @router_link_type_junos.has_key?(arg)
         @router_link_type_junos[arg]
       else
@@ -128,7 +128,7 @@ class RouterLinkType
     end
 
     def to_s_ios(arg)
-      return arg unless arg.is_a?(Fixnum)
+      return arg unless arg.is_a?(Integer)
       if @router_link_type_ios.has_key?(arg)
         @router_link_type_ios[arg]
       else
@@ -141,7 +141,7 @@ class RouterLinkType
     @router_link_type = case arg
     when Symbol
       self.class.router_link_sym_to_i(arg)
-    when Fixnum
+    when Integer
       arg
     else
       raise ArgumentError, "Invalid RouterLinkType #{arg}"

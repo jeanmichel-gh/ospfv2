@@ -299,7 +299,7 @@ module OSPFv2
         [args[0].router_link_type.to_i, args[0].link_id.to_hash]
       elsif args.size==2 and args[0].is_a?(Symbol) and args[1].is_a?(String)
         [RouterLinkType.to_i(args[0]), args[1]]
-      elsif args.size==2 and args[0].is_a?(Fixnum) and args[1].is_a?(String)
+      elsif args.size==2 and args[0].is_a?(Integer) and args[1].is_a?(String)
         args
       end
     end

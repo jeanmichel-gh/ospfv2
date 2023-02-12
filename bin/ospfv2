@@ -126,10 +126,12 @@ when :pry
   binding.pry
 when :irb
   require 'irb'
+  require 'irb/completion'
   puts "*** cb $binding ***"
   puts "Once in irb> enter \"cb $binding\" to access local variables: ls_db, neighbor, options"
   puts "Use ls_db object to access generated link state database."
   puts "Use neighbor object to start or stop ospfv2 neighboring."
+  puts " puts File.read(neighbor.method(:start).source_location[0]) "
   puts ""
   $binding = binding
   IRB.start(__FILE__)

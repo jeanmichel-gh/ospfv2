@@ -223,7 +223,7 @@ module OSPFv2
     private
     
     def csum=(value)
-      raise if value.is_a?(Fixnum)
+      raise if value.is_a?(Integer)
       @_csum=value
     end
     

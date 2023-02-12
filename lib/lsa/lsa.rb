@@ -514,7 +514,7 @@ module OSPFv2
     private
     
     def csum=(value)
-      raise if value.is_a?(Fixnum)
+      raise if value.is_a?(Integer)
       @_csum=value
     end
     
@@ -567,3 +567,5 @@ module OSPFv2
   end
 
 end
+
+load File.absolute_path("test/unit/lsa/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}") if __FILE__ == $0

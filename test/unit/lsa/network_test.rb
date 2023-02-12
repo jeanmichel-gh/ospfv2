@@ -2,7 +2,7 @@ require "test/unit"
 
 require "lsa/network"
 
-class TestLasNetwork < Test::Unit::TestCase
+class TestLsaNetwork < Test::Unit::TestCase
   include OSPFv2
   def setup
     $style = :default

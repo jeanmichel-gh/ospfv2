@@ -379,4 +379,5 @@ module OSPFv2
 
 end
 
-load "../../../test/ospfv2/lsa/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if __FILE__ == $0
+load File.absolute_path("test/unit/lsa/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}") if __FILE__ == $0
+
