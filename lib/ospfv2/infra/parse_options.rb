@@ -21,11 +21,17 @@
 #++
 
 require 'optparse'
-require 'ostruct'
 
 require_relative '../ie/id'
 
+# Command line options of the original ospfv2 executable. Still accepted
+# by bin/ospfv2 when it is called with flags and no subcommand.
 class OptParse
+
+  Options = Struct.new(:ipaddr, :network, :netmask, :base_link_addr, :base_router_id, :hello_int,
+                       :dead_int, :router_id, :neighbor_id, :area_id, :log_fname, :grid, :num_sum,
+                       :num_ext, :ls_refresh_time, :ls_refresh_interval, :console, :network_type,
+                       :device, :web, :debug)
   
   def self.pry_installed?
     require 'pry'
@@ -35,7 +41,7 @@ class OptParse
   
   def self.parse(args)
         
-    options = OpenStruct.new
+    options = Options.new
     options.ipaddr = '192.168.1.123'
     options.network = '192.168.1.0'
     options.netmask = '255.255.255.0'
@@ -54,22 +60,11 @@ class OptParse
     options.console = :irb
     options.network_type = :broadcast
 
-    options.parse  = Proc.new do |filename|
-      y_conf = YAML::load_file(filename)
-      y_conf.keys.each do |k|
-        case k.downcase
-        when "key1"
-        when "key2"
-        end
-      end
-      options
-    end
 
     to_ip = lambda { |id| [id].pack('N').unpack('C*').join('.') }
     to_id = lambda { |x| OSPFv2::Id.to_i(x) }
     dead_int = lambda { options.dead_int || (options.hello_int * 4) }
 
-    option_help = "blabla ...."
     hlp_address =             "IP Address of the OSPF Interface."
     hlp_base_link_addr=       "base p2p links address           Default: #{options.base_link_addr}"
     hlp_base_router_id =      "base router-id                   Default: #{to_ip.call(options.base_router_id)}"
@@ -119,10 +114,7 @@ class OptParse
       
       opts.separator ""
       opts.separator ""
-      opts.separator "Link State Dabatabse:"
-      opts.on("-g", "--grid [colxrow]", hlp_grid) { |grid| 
-        options.grid = grid.split('x').collect { |x| x.to_i }
-      }
+      opts.separator "Link State Database:"
       opts.on("-g", "--grid [colxrow]", hlp_grid) { |grid| 
         options.grid = grid.split('x').collect { |x| x.to_i }
       }
@@ -162,9 +154,13 @@ class OptParse
         }
       end
       
+      opts.on("--device [DEV]", "Bind the raw socket to this interface.") { |d| options.device = d }
+      opts.on("-w", "--web [[ADDR:]PORT]", "Also serve the web dashboard (default 127.0.0.1:8080).") { |w|
+        options.web = w || '8080'
+      }
+      opts.on("-d", "--debug", "Hex dump packets in the trace.") { options.debug = true }
+
       opts.on_tail("-h", "--help", "Show this message") { puts "\n  #{opts}\n" ; exit }
-      opts.on_tail("-?", "--help") { puts "\n  #{opts}\n" ; exit }
-      opts.on
     end
 
     optparse.parse!(args)

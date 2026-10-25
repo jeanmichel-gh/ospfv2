@@ -37,7 +37,7 @@ module OSPFv2::LSDB
     end
     alias :ids :routers
     def has?(id)
-      routers.include?(router_id(id))
+      @set.include?(router_id(id))
     end
     def to_s
       @set.collect { |r| IPAddr.new_ntoh([r].pack('N')).to_s  }

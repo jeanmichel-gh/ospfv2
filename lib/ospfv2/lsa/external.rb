@@ -346,7 +346,7 @@ module OSPFv2
     end
 
     def initialize(arg={})
-      arg = fix_hash(arg) if arg.is_a?(Hash)
+      arg = fix_hash(arg.dup) if arg.is_a?(Hash)
       super 5, arg
     end
 

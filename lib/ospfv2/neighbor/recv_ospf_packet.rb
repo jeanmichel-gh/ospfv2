@@ -55,7 +55,7 @@ module OSPFv2
         return
       end
       ls_ack = LinkStateAck.ack_ls_update ls_update, area_id: @area_id, router_id: @router_id
-      send_packet ls_ack, OSPFv2::AllSPFRouters
+      send_packet ls_ack, flooding_address
       unless @ls_req_list.empty?
         ls_update.each do |l|
           next unless @ls_req_list.key?(l.key)

@@ -130,7 +130,7 @@ module OSPFv2
     def initialize(arg={})
       case arg
       when Hash
-        arg = fix_hash(arg).merge!({:ls_type => :summary,})
+        arg = fix_hash(arg.dup).merge!({:ls_type => :summary,})
       end
       super 3, arg
     end
@@ -146,10 +146,6 @@ module OSPFv2
         arg.store :ls_id, addr.to_s
       end
       arg
-    rescue => e
-      p 'HERE'
-      p arg
-      raise
     end
     
   end

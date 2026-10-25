@@ -53,8 +53,19 @@ class TestNeighborNeighbor < Test::Unit::TestCase
     assert_equal 1, t.sent.size
     pkt, dest = t.sent.first
     assert_instance_of LinkStateUpdate, pkt
-    assert_equal '224.0.0.5', dest
+    assert_equal '224.0.0.6', dest, 'a DROther floods to AllDRouters on broadcast'
     assert_equal 2, pkt.lsas.size
+  ensure
+    n&.stop
+  end
+
+  def test_flood_on_point_to_point_goes_to_all_spf_routers
+    t = CaptureTransport.new
+    n = new_neighbor(transport: t, hello_interval: 60, network_type: :p2p)
+    n.start
+    t.sent.clear
+    n.flood(Router.new(advertising_router: 1, ls_id: 1))
+    assert_equal '224.0.0.5', t.sent.first.last
   ensure
     n&.stop
   end

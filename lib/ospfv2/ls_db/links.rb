@@ -96,7 +96,7 @@ module OSPFv2::LSDB
       @prefix=nil
       @router_id= RouterId.new arg[:router_id] || '1.1.1.1'
       @neighbor_id= NeighborId.new arg[:neighbor_id] || '2.2.2.2'
-      @metric = 0
+      @metric = 1
       set arg
       @lsas=[]
       Link << self

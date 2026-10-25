@@ -62,7 +62,7 @@ module OSPFv2
     AreaId            = Class.new(Id)
 
     attr_reader :address, :netmask, :inactivity_timer, :hello, :dd_rxmt_interval
-    attr_reader :area_id, :neighbor_ip, :neighbor_router_id, :transport
+    attr_reader :area_id, :neighbor_ip, :neighbor_router_id, :transport, :network_type
     attr_writer :hello_int, :dead_int
 
     # Options (all optional):
@@ -72,6 +72,7 @@ module OSPFv2
     #   :area_id        area                                 (0)
     #   :hello_interval / :dead_interval  seconds            (10 / 4 x hello)
     #   :transport      a Transport, default raw IP socket on src_addr
+    #   :network_type   :broadcast (default) or :p2p
     #   :interface      device to bind the raw socket to
     #   :log / :log_fname  IO or file name for traces       ($stdout)
     #   :debug          true for verbose traces
@@ -82,6 +83,7 @@ module OSPFv2
       @hello_int = arg[:hello_interval] || arg[:hello_int]
       @dead_int  = arg[:dead_interval]  || arg[:dead_int]
       @interface = arg[:interface]
+      @network_type = (arg[:network_type] || :broadcast).to_sym
       @transport = arg[:transport]
       @debug     = arg[:debug]
       @trace     = Trace.new(arg[:log] || arg[:log_fname] || $stdout)
@@ -219,8 +221,14 @@ module OSPFv2
       end
     end
 
+    # Where updates and acks go: on a broadcast segment the simulator is a
+    # DROther (priority 0) and talks to the DR and BDR (RFC 2328 13.3).
+    def flooding_address
+      point_to_point? ? AllSPFRouters : AllDRouters
+    end
+
     # Floods +lsas+ in one or more Link State Updates.
-    def flood(lsas, dest = AllSPFRouters)
+    def flood(lsas, dest = flooding_address)
       lsas = [lsas].flatten.compact
       return if lsas.empty?
       send_packet LinkStateUpdate.new_lsas(router_id: @router_id, area_id: @area_id, lsas: lsas), dest
@@ -289,13 +297,14 @@ module OSPFv2
     end
 
     def point_to_point?
-      @netmask == '255.255.255.255'
+      @network_type == :p2p
     end
 
     def to_hash
       {
         router_id: @router_id.to_ip, area_id: @area_id.to_ip, address: @address, netmask: @netmask,
-        hello_interval: hello_int, dead_interval: dead_int, state: state,
+        hello_interval: hello_int, dead_interval: dead_int, state: state, network_type: @network_type,
+        designated_router: @hello.designated_router_id.to_ip,
         neighbor_ip: @neighbor_ip, neighbor_router_id: @neighbor_router_id&.to_ip,
         ls_request_pending: @ls_req_list.size
       }

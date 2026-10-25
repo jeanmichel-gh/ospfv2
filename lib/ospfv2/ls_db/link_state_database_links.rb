@@ -84,37 +84,33 @@ module OSPFv2::LSDB
     # link, :dir => :local_only
     # link_hash, :direction => :remote_only
 
-    def new_link(*args)
-
-      # get a link object
-      local, remote = true, true
-      if args.size==1 and args[0].is_a?(Hash)
-        link = Link.new args[0]
-      elsif args[0].is_a?(Link)
-        link = args[0]
+    # Adds a point-to-point link between two routers, creating their
+    # router LSAs if needed. Takes a Link or a Hash of Link options
+    # (:router_id, :neighbor_id, :metric, :direction). :direction is
+    # :both (default), :local_only or :remote_only. Returns the Link.
+    def new_link(arg)
+      case arg
+      when Link
+        link, dir = arg, :both
+      when Hash
+        dir = arg[:direction] || :both
+        link = Link.new(arg.reject { |k, _| k == :direction })
       else
-        raise ArgumentError, "invalid argument: #{args.inspect}"
+        raise ArgumentError, "invalid argument: #{arg.inspect}"
       end
-      
-      # local, remote or both
-      dir = args[0][:direction] ||= :both
-      local = false  if dir and dir == :remote_only
-      remote = false if dir and dir == :local_only
-      
-      if local
-        lsa = add_p2p_adjacency :router_id => link.router_id.to_i, :neighbor_router_id => link.neighbor_id.to_i, :prefix => link.local_prefix, :metric=>1
+      if dir != :remote_only
+        lsa = add_p2p_adjacency :router_id => link.router_id.to_i, :neighbor_router_id => link.neighbor_id.to_i, :prefix => link.local_prefix, :metric=>link.metric.to_i
         lsa.lsdb_link_id = link.id
         link.local_lsa = lsa.key
       end
-
-      if remote
-        lsa = add_p2p_adjacency :router_id => link.neighbor_id.to_i, :neighbor_router_id => link.router_id.to_i, :prefix => link.remote_prefix, :metric=>1
+      if dir != :local_only
+        lsa = add_p2p_adjacency :router_id => link.neighbor_id.to_i, :neighbor_router_id => link.router_id.to_i, :prefix => link.remote_prefix, :metric=>link.metric.to_i
         lsa.lsdb_link_id = link.id
         link.remote_lsa = lsa.key
       end
-      
+      link
     end
-    
+
     def link(link, action)
       raise ArgumentError, "invalid argument: #{link.class}" unless link.is_a?(Link)
       case action
@@ -123,23 +119,27 @@ module OSPFv2::LSDB
       end
     end
 
+    # Puts the link back in both router LSAs. Returns the changed LSAs.
     def link_up(link)
       raise ArgumentError, "invalid argument: #{link.class}" unless link.is_a?(Link)
-      add_adjacency :router_id=> link.router_id.to_i, 
-                    :neighbor_router_id => link.neighbor_id.to_i, 
-                    :prefix=> link.local_prefix, 
-                    :metric => link.metric 
-      add_adjacency :router_id=> link.neighbor_id.to_i, 
-                    :neighbor_router_id => link.router_id.to_i, 
-                    :prefix=> link.remote_prefix, 
-                    :metric => link.metric      
+      [
+        add_adjacency(router_id: link.router_id.to_i, neighbor_router_id: link.neighbor_id.to_i,
+                      prefix: link.local_prefix, metric: link.metric.to_i),
+        add_adjacency(router_id: link.neighbor_id.to_i, neighbor_router_id: link.router_id.to_i,
+                      prefix: link.remote_prefix, metric: link.metric.to_i)
+      ]
     end
 
-    def link_down(link)      
-      lsa = @ls_db[link.local_lsa]
-      lsa.delete(1, link.neighbor_id.to_ip)
-      lsa = @ls_db[link.remote_lsa]
-      lsa.delete(1, link.router_id.to_ip)
+    # Removes the point-to-point entries of +link+ from both router LSAs.
+    # The stub networks stay, as on a router whose neighbor went away.
+    # Returns the changed router LSAs.
+    def link_down(link)
+      [[link.local_lsa, link.neighbor_id], [link.remote_lsa, link.router_id]].filter_map do |key, nbr|
+        lsa = key && @ls_db[key]
+        next unless lsa
+        lsa.delete(1, nbr.to_ip)
+        lsa
+      end
     end
 
     def link_refresh
