@@ -60,4 +60,3 @@ class InterfaceMtu
 end
 end
 
-load "../../../test/ospfv2/ie/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if __FILE__ == $0

@@ -19,9 +19,10 @@ class TestLsDbLinks < Test::Unit::TestCase
     Link.all.values.each { |lnk| ls_db.link lnk, :down  }
     Link.all.values.each { |lnk| ls_db.link lnk, :up  }
 
+    rlsa = ls_db.find_router_lsa(1)
+    assert_equal 8, rlsa.links.size
     rlsa.delete(:point_to_point,'0.0.0.2')
-    assert_equal 7, rlsa.links.size      
-    puts ls_db
+    assert_equal 7, rlsa.links.size
     rlsa.delete(:point_to_point,'0.0.0.3')
     rlsa.delete(:point_to_point,'0.0.0.4')
     rlsa.delete(:point_to_point,'0.0.0.5')

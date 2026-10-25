@@ -178,4 +178,3 @@ module OSPFv2::LSDB
 
 end
 
-load "../../../test/ospfv2/ls_db/#{ File.basename($0.gsub(/.rb/,'_test.rb'))}" if __FILE__ == $0

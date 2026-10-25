@@ -259,7 +259,7 @@ module OSPFv2
     end
 
     def to_s_ios
-      sprintf("%-15.15s %-15.15s %-4.0d        0x%8.8X 0x%6.6X ", 
+      sprintf("%-15.15s %-15.15s %-4d        0x%8.8X 0x%6.6X ", 
             is_opaque? ? ls_id = Id.new_ntoh(@opaque_type.encode + @opaque_id.encode).to_ip : self.ls_id.to_ip, 
             advertising_router.to_ip, 
             ls_age.to_i, 
@@ -271,10 +271,10 @@ module OSPFv2
       len = encode.size
       if is_opaque?
         ls_id = Id.new_ntoh(@opaque_type.encode + @opaque_id.encode)
-        sprintf("%-4.0d  0x%2.2x  %-8s  %-15.15s %-15.15s 0x%8.8x  0x%4.4x   %-7d", 
+        sprintf("%-4d  0x%2.2x  %-8s  %-15.15s %-15.15s 0x%8.8x  0x%4.4x   %-7d", 
         ls_age.to_i, options.to_i, ls_type.to_s_short, ls_id.to_ip, advertising_router.to_ip, seqn.to_I,csum_to_i,len)
       else
-        sprintf("%-4.0d  0x%2.2x  %-8s  %-15.15s %-15.15s 0x%8.8x  0x%4.4x   %-7d", 
+        sprintf("%-4d  0x%2.2x  %-8s  %-15.15s %-15.15s 0x%8.8x  0x%4.4x   %-7d", 
         ls_age.to_i, options.to_i, ls_type.to_s_short, self.ls_id.to_ip, advertising_router.to_ip, seqn.to_I,csum_to_i,len)
       end
     end
@@ -336,7 +336,7 @@ module OSPFv2
       len = encode.size
       if is_opaque?
       else
-        sprintf("%-7s %-1.1s%-15.15s  %-15.15s  0x%8.8x  %4.0d  0x%2.2x 0x%4.4x %3d", ls_type.to_junos, '', ls_id.to_ip, advertising_router.to_ip, seqn.to_I, ls_age.to_i, options.to_i, csum_to_i, len)
+        sprintf("%-7s %-1.1s%-15.15s  %-15.15s  0x%8.8x  %4d  0x%2.2x 0x%4.4x %3d", ls_type.to_junos, '', ls_id.to_ip, advertising_router.to_ip, seqn.to_I, ls_age.to_i, options.to_i, csum_to_i, len)
       end
     end
 
@@ -363,13 +363,6 @@ module OSPFv2
       header << sequence_number.encode
       header << [''].pack('a4')
       header.join
-    rescue => e
-      p ls_age
-      p ls_type
-      p ls_id
-      p advertising_router
-      p sequence_number
-      raise
     end
     alias :header_encode :encode_header
     
@@ -489,32 +482,31 @@ module OSPFv2
       h
     end
     
+    # Vendor specific renderings fall back to the generic ones.
     def method_missing(method, *args, &block)
-      if method.to_s =~ /^to_s_(ios|junos)_verbose/
-        p " #{self.class}: #{method} IS MISSING!!! defaulting to :to_s_verbose"
-        __send__ :to_s_verbose, *args, &block
-      elsif method.to_s =~ /^to_s_(ios|junos)$/
-        p $1
-        __send__ :to_s, *args, &block
-      else
-        raise "missing: #{method} #{caller[0..2]}"
+      case method.to_s
+      when /\Ato_s_(ios|junos)_verbose\z/ then to_s_verbose(*args, &block)
+      when /\Ato_s_(ios|junos)\z/         then to_s(*args, &block)
+      else super
       end
+    end
+
+    def respond_to_missing?(method, include_private = false)
+      method.to_s.match?(/\Ato_s_(ios|junos)(_verbose)?\z/) || super
     end
 
     protected
     
     def csum_to_i
-      @_csum.unpack('n')[0]
-    rescue Exception => e
-      encode
-      retry
+      encode unless @_csum
+      @_csum.unpack1('n')
     end
     
 
     private
     
     def csum=(value)
-      raise if value.is_a?(Fixnum)
+      raise if value.is_a?(Integer)
       @_csum=value
     end
     
@@ -527,41 +519,36 @@ module OSPFv2
     end
     
     def validate_checksum(s)
-      if ! cheksum(s[2..-1], 0) == [0,0]
-        puts "*** checksum error ? #{cheksum(s[2..-1], 0)}"
+      length = s[18, 2].to_s.unpack1('n').to_i
+      return if s.bytesize < 20 || s.bytesize < length # header only, nothing to verify
+      if cheksum(s[2...length], 0) != [0,0]
+        warn "LSA checksum error: #{cheksum(s[2..-1], 0).inspect}"
       end
     end
 
-    def cheksum(mess, k=0)
-      len = mess.size
-      
-      if (k>0) 
-        mess[k-1] = [0].pack('C')
-        mess[k] = [0].pack('C')
+    # Fletcher checksum (RFC 2328 section 12.1.7, ISO 8473 annex C).
+    #
+    # mess: LSA bytes without the LS age field.
+    # k:    1 based offset of the checksum field in mess, or 0 to verify.
+    #
+    # With k > 0 returns the two checksum octets to store.
+    # With k == 0 returns [c0, c1], which is [0, 0] for a valid LSA.
+    def cheksum(mess, k = 0)
+      bytes = mess.bytes
+      bytes[k - 1] = bytes[k] = 0 if k > 0
+
+      c0 = c1 = 0
+      bytes.each do |b|
+        c0 = (c0 + b) % 255
+        c1 = (c1 + c0) % 255
       end
-      
-      c0,c1,n=0,0,0
-      
-      s = mess.dup
-      while s.size>0 and n <= 4102 # MODX
-        n +=1
-        c0 += s.slice!(0,1).unpack('C')[0]
-        c1 +=c0
-      end
-      
-      c0 = c0%255
-      c1 = c1%255
-      
-      ip = (c1<<8) + c0
-      
-      if k>0
-        iq = ((len-k)*c0 - c1)%255 ; iq += 255 if (iq <= 0) 
-        ir = (510 - c0 - iq) ; ir += -255 if (ir>255)
-        return [iq,ir]
-      else
-        [c0,c1]
-      end
-      
+      return [c0, c1] if k.zero?
+
+      x = ((bytes.size - k) * c0 - c1) % 255
+      x = 255 if x.zero?
+      y = 510 - c0 - x
+      y -= 255 if y > 255
+      [x, y]
     end
     
   end

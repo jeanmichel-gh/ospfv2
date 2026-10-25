@@ -125,7 +125,7 @@ module OSPFv2
         set(arg)
       elsif arg.is_a?(String)
         _parse_(arg)
-      elsif arg.is_a?(Fixnum) and (0..255) === arg
+      elsif arg.is_a?(Integer) and (0..255) === arg
         @options = arg
       elsif arg.is_a?(self.class)
         set(arg.to_hash)
@@ -143,7 +143,7 @@ module OSPFv2
           setO
         elsif _flag.is_a?(FalseClass)
           unsetO
-        elsif _flag.is_a?(Fixnum)
+        elsif _flag.is_a?(Integer)
           if _flag == 0
             unsetO
           else
@@ -159,7 +159,7 @@ module OSPFv2
           setDC
         elsif _flag.is_a?(FalseClass)
           unsetDC
-        elsif _flag.is_a?(Fixnum)
+        elsif _flag.is_a?(Integer)
           if _flag == 0
             unsetDC
           else
@@ -173,7 +173,7 @@ module OSPFv2
           setL
         elsif _flag.is_a?(FalseClass)
           unsetL
-        elsif _flag.is_a?(Fixnum)
+        elsif _flag.is_a?(Integer)
           if _flag == 0
             unsetL
           else
@@ -187,7 +187,7 @@ module OSPFv2
           setN
         elsif _flag.is_a?(FalseClass)
           unsetN
-        elsif _flag.is_a?(Fixnum)
+        elsif _flag.is_a?(Integer)
           if _flag == 0
             unsetN
           else
@@ -201,7 +201,7 @@ module OSPFv2
           setP
         elsif _flag.is_a?(FalseClass)
           unsetP
-        elsif _flag.is_a?(Fixnum)
+        elsif _flag.is_a?(Integer)
           if _flag == 0
             unsetP
           else
@@ -215,7 +215,7 @@ module OSPFv2
           setMC
         elsif _flag.is_a?(FalseClass)
           unsetMC
-        elsif _flag.is_a?(Fixnum)
+        elsif _flag.is_a?(Integer)
           if _flag == 0
             unsetMC
           else
@@ -229,7 +229,7 @@ module OSPFv2
           setE
         elsif _flag.is_a?(FalseClass)
           unsetE
-        elsif _flag.is_a?(Fixnum)
+        elsif _flag.is_a?(Integer)
           if _flag == 0
             unsetE
           else
@@ -243,7 +243,7 @@ module OSPFv2
           setV6
         elsif _flag.is_a?(FalseClass)
           unsetV6
-        elsif _flag.is_a?(Fixnum)
+        elsif _flag.is_a?(Integer)
           if _flag == 0
             unsetV6
           else

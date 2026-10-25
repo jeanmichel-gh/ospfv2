@@ -89,7 +89,7 @@ class LsType
     end
 
     def to_sym(arg)
-      return arg unless arg.is_a?(Fixnum)
+      return arg unless arg.is_a?(Integer)
       if @ls_type_sym.has_key?(arg)
         @ls_type_sym[arg]
       else
@@ -98,7 +98,7 @@ class LsType
     end
 
     def ls_type_sym_to_i(arg)
-      return arg if arg.is_a?(Fixnum)
+      return arg if arg.is_a?(Integer)
       if @ls_type_sym_to_i.has_key?(arg)
         @ls_type_sym_to_i[arg]
       else
@@ -107,7 +107,7 @@ class LsType
     end
 
     def to_junos(arg)
-      return arg unless arg.is_a?(Fixnum)
+      return arg unless arg.is_a?(Integer)
       if @ls_type_junos.has_key?(arg)
         @ls_type_junos[arg]
       else
@@ -116,7 +116,7 @@ class LsType
     end
 
     def to_s_ios(arg)
-      return arg unless arg.is_a?(Fixnum)
+      return arg unless arg.is_a?(Integer)
       if @ls_type_ios.has_key?(arg)
         @ls_type_ios[arg]
       else
@@ -125,7 +125,7 @@ class LsType
     end
 
     def to_short(arg)
-      return arg unless arg.is_a?(Fixnum)
+      return arg unless arg.is_a?(Integer)
       if @ls_type_short.has_key?(arg)
         @ls_type_short[arg]
       else
@@ -138,7 +138,7 @@ class LsType
     @ls_type = case ls_type
     when Symbol
       LsType.ls_type_sym_to_i(ls_type)
-    when Fixnum
+    when Integer
       ls_type
     else
       raise ArgumentError, "Invalid LsType #{ls_type}"

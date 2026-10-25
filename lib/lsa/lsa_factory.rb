@@ -25,7 +25,7 @@ require 'lsa/router'
 require 'lsa/network'
 require 'lsa/summary'
 require 'lsa/external'
-# require 'lsa/traffic_engineering'
+require 'lsa/traffic_engineering'
 
 module OSPFv2
   class Lsa
@@ -47,7 +47,7 @@ module OSPFv2
               OSPFv2::TrafficEngineering.new_ntop(arg)
             end
           else 
-            raise
+            raise ArgumentError, "unsupported LSA: #{arg.inspect[0,80]}"
           end
         elsif arg.is_a?(Hash)
           case arg[:ls_type]
@@ -62,10 +62,10 @@ module OSPFv2
             when 1, :te_lsa
               OSPFv2::TrafficEngineering.new_hash(arg)
             else
-              raise
+              raise ArgumentError, "unsupported LSA: #{arg.inspect[0,80]}"
             end
           else
-            raise
+            raise ArgumentError, "unsupported LSA: #{arg.inspect[0,80]}"
           end
         elsif arg.is_a?(Lsa)
           factory(arg.encode)
