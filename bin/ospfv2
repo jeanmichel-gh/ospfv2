@@ -4,4 +4,6 @@
 $LOAD_PATH.unshift File.expand_path('../lib', __dir__)
 require 'ospfv2/cli'
 
+$stdout.sync = true
+
 exit OSPFv2::CLI.start(ARGV)

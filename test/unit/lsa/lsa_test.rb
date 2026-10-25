@@ -1,5 +1,6 @@
 require "test/unit"
 
+require "ospfv2"
 require 'ospfv2/lsa/lsa'
 # require_relative "lsa/lsa"
 

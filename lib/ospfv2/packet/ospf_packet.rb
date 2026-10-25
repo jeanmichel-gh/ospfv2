@@ -254,10 +254,6 @@ module OSPFv2
     end
   end
   
-  require_relative './hello'
-  require_relative './database_description'
-  require_relative './link_state_update'
-  require_relative './link_state_request'
   
   class OspfPacket
     include OSPFv2

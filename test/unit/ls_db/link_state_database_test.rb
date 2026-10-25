@@ -1,4 +1,5 @@
 require "test/unit"
+require "ospfv2"
 require 'ospfv2/ls_db/link_state_database'
 require 'ospfv2/packet/ospf_packet'
 

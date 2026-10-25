@@ -79,8 +79,9 @@ module OSPFv2
       raise Error, "#{path}: #{e.message}"
     end
 
-    def self.from_hash(hash, source: 'topology')
-      new.tap { |t| t.send(:load_hash, hash, source) }
+    # Topology.from_hash({ grid: {...} }) or Topology.from_hash(grid: {...})
+    def self.from_hash(hash = nil, source: 'topology', **kw)
+      new.tap { |t| t.send(:load_hash, hash || kw, source) }
     end
 
     def self.build(&block)
@@ -280,10 +281,13 @@ module OSPFv2
       Array(h[:routers]).each_with_index do |r, i|
         raise Error, "routers[#{i}]: expected a mapping" unless r.is_a?(Hash)
         r = r.transform_keys(&:to_sym)
-        allowed = %i[name id abr asbr networks loopback loopbacks summaries asbr_summaries externals]
+        allowed = %i[name id abr asbr networks loopback loopbacks summaries asbr_summaries externals grid]
         unknown = r.keys - allowed
         raise Error, "routers[#{i}]: unknown key(s) #{unknown.join(', ')}" unless unknown.empty?
         raise Error, "routers[#{i}]: id is required" unless r[:id]
+        if r[:grid] && !(r[:grid].is_a?(Array) && r[:grid].size == 2 && r[:grid].all?(Integer))
+          raise Error, "routers[#{i}].grid: expected [row, column]"
+        end
         add_router(**r, where: "routers[#{i}]")
       end
       Array(h[:links]).each_with_index do |l, i|
@@ -384,9 +388,9 @@ module OSPFv2
         @t = topology
       end
 
-      def simulator(**opts) = @t.configure(opts)
-      def lsdb(**opts) = @t.configure_lsdb(opts)
-      def grid(**opts) = @t.add_grid(**opts)
+      def simulator(opts = {}, **kw) = @t.configure(opts.merge(kw))
+      def lsdb(opts = {}, **kw) = @t.configure_lsdb(opts.merge(kw))
+      def grid(opts = {}, **kw) = @t.add_grid(**opts.merge(kw).transform_keys(&:to_sym))
       def link(from, to, **opts) = @t.add_link(from, to, **opts)
 
       def router(name = nil, id:, **opts, &block)

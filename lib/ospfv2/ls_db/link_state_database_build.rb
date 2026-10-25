@@ -25,7 +25,6 @@ require 'set'
 require_relative '../ie/id'
 require_relative './links'
 
-require_relative './link_state_database'
 
 module OSPFv2::LSDB
   class LinkStateDatabase

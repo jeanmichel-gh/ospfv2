@@ -1,5 +1,6 @@
 require "test/unit"
 
+require "ospfv2"
 require 'ospfv2/packet/link_state_update'
 
 class TestPacketLinkStateUpdate < Test::Unit::TestCase

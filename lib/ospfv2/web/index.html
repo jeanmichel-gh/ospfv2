@@ -1,0 +1,489 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ospfv2 lab</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@500;600&display=swap">
+<style>
+:root {
+  --fog: #EDF1F4;
+  --panel: #FFFFFF;
+  --ink: #1B2631;
+  --muted: #5B6B7A;
+  --rule: #D3DCE3;
+  --up: #1F7A68;
+  --down: #B4321F;
+  --pending: #B7791F;
+  --sim: #2A5B8C;
+  --focus: #2A5B8C;
+  --radius-panel: 6px;
+  --radius-control: 4px;
+  color-scheme: light;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --fog: #141B22; --panel: #1C252E; --ink: #E3E9EE; --muted: #93A3B1; --rule: #2E3A45;
+    --up: #46B39A; --down: #E0644E; --pending: #E0A84A; --sim: #6FA3D6; --focus: #6FA3D6;
+    color-scheme: dark;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; }
+body {
+  background: var(--fog); color: var(--ink);
+  font: 400 15px/1.45 Barlow, "Segoe UI", system-ui, sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+h1, h2 { font-family: "Barlow Semi Condensed", Barlow, system-ui, sans-serif; font-weight: 600; margin: 0; }
+h1 { font-size: 22px; letter-spacing: .01em; }
+h2 { font-size: 17px; }
+button, input, select { font: inherit; color: inherit; }
+button {
+  background: var(--panel); border: 1px solid var(--rule); border-radius: var(--radius-control);
+  padding: 5px 11px; cursor: pointer;
+}
+button:hover { border-color: var(--muted); }
+button:disabled { opacity: .5; cursor: default; }
+:focus-visible { outline: 2px solid var(--focus); outline-offset: 2px; }
+.wrap { max-width: 1440px; margin: 0 auto; padding: 18px 20px 40px; }
+
+/* header */
+header { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 18px; }
+header .who { color: var(--muted); }
+header .who b { color: var(--ink); font-weight: 600; }
+header .actions { margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* adjacency ladder: the one loud element */
+.ladder { margin: 18px 0 6px; display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; }
+.step { position: relative; padding: 10px 10px 8px; background: var(--panel); border-bottom: 4px solid var(--rule);
+        font-family: "Barlow Semi Condensed", Barlow, sans-serif; font-weight: 500; font-size: 16px; color: var(--muted);
+        transition: border-color .35s ease, color .35s ease; }
+.step:first-child { border-radius: var(--radius-panel) 0 0 var(--radius-panel); }
+.step:last-child { border-radius: 0 var(--radius-panel) var(--radius-panel) 0; }
+.step.done { border-bottom-color: var(--up); color: var(--ink); }
+.step.now { border-bottom-color: var(--pending); color: var(--ink); }
+.ladder.full .step { border-bottom-color: var(--up); }
+.ladder.full .step.now { color: var(--up); font-weight: 600; }
+.ladder.down .step:first-child { border-bottom-color: var(--down); color: var(--down); }
+.nbr { color: var(--muted); font-size: 14px; display: flex; flex-wrap: wrap; gap: 4px 22px; }
+.nbr b { color: var(--ink); font-weight: 500; }
+
+/* main grid */
+.main { margin-top: 16px; display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; }
+.panel { background: var(--panel); border: 1px solid var(--rule); border-radius: var(--radius-panel); }
+.panel > .head { display: flex; align-items: baseline; gap: 12px; padding: 12px 14px 8px; }
+.panel > .head .sub { color: var(--muted); font-size: 14px; }
+.panel > .head .tools { margin-left: auto; display: flex; gap: 6px; }
+
+#graph { width: 100%; height: 520px; display: block; cursor: grab; touch-action: none; }
+#graph.dragging { cursor: grabbing; }
+.edge { stroke: var(--up); stroke-width: 2.5; pointer-events: none; }
+.edge.down { stroke: var(--down); stroke-dasharray: 5 5; stroke-width: 2; }
+.edge.dut { stroke: var(--sim); stroke-width: 4; }
+.edge.dut.down { stroke: var(--pending); stroke-dasharray: 3 6; }
+.edge-hit { stroke: transparent; stroke-width: 14; cursor: pointer; }
+.edge-hit:hover + .edge, .edge.sel { stroke-width: 5; }
+.node rect { fill: var(--panel); stroke: var(--ink); stroke-width: 1.2; }
+.node.sim rect { fill: var(--sim); stroke: var(--sim); }
+.node.sim text { fill: #fff; }
+.node.dut rect { fill: var(--fog); stroke-dasharray: 4 3; }
+.node.ext rect { stroke-width: 2.4; }
+.node text { font-size: 12px; fill: var(--ink); pointer-events: none; }
+.node { cursor: pointer; }
+.node.sel rect { stroke: var(--focus); stroke-width: 3; }
+.legend { padding: 6px 14px 12px; color: var(--muted); font-size: 13px; display: flex; gap: 18px; flex-wrap: wrap; }
+.legend i { display: inline-block; width: 22px; height: 0; vertical-align: middle; margin-right: 6px; border-top: 3px solid var(--up); }
+.legend i.d { border-top: 3px dashed var(--down); }
+.legend i.s { border-top: 4px solid var(--sim); }
+
+/* links rail */
+.rail { display: flex; flex-direction: column; min-height: 0; }
+.rail input[type=search] { margin: 0 14px 8px; padding: 6px 9px; border: 1px solid var(--rule); border-radius: var(--radius-control); background: var(--fog); }
+.links { list-style: none; margin: 0; padding: 0 0 8px; overflow: auto; max-height: 470px; }
+.links li { display: grid; grid-template-columns: 1fr auto auto; gap: 8px; align-items: center; padding: 6px 14px; border-top: 1px solid var(--rule); }
+.links li.sel { background: color-mix(in srgb, var(--focus) 10%, transparent); }
+.links .name { font-weight: 500; }
+.links .meta { display: block; color: var(--muted); font-size: 13px; }
+.switch { width: 46px; padding: 3px 0; text-align: center; font-size: 13px; font-weight: 600; }
+.switch.up { color: var(--up); border-color: var(--up); }
+.switch.down { color: #fff; background: var(--down); border-color: var(--down); }
+.flapbtn { font-size: 13px; padding: 3px 8px; }
+.detail { border-top: 1px solid var(--rule); padding: 10px 14px 14px; font-size: 14px; }
+.detail:empty { display: none; }
+.detail dl { display: grid; grid-template-columns: auto 1fr; gap: 2px 12px; margin: 6px 0 0; }
+.detail dt { color: var(--muted); }
+.detail dd { margin: 0; }
+
+/* lsdb + events */
+.lower { margin-top: 16px; display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; }
+.tabs { display: flex; gap: 4px; flex-wrap: wrap; padding: 0 14px 8px; }
+.tabs button { padding: 3px 10px; font-size: 14px; }
+.tabs button[aria-pressed=true] { background: var(--ink); color: var(--panel); border-color: var(--ink); }
+.tablewrap { max-height: 420px; overflow: auto; border-top: 1px solid var(--rule); }
+table { border-collapse: collapse; width: 100%; font-size: 14px; }
+th { position: sticky; top: 0; background: var(--panel); text-align: left; font-weight: 600; padding: 7px 10px; border-bottom: 1px solid var(--rule); }
+td { padding: 5px 10px; border-bottom: 1px solid color-mix(in srgb, var(--rule) 55%, transparent); white-space: nowrap; }
+td.num, th.num { text-align: right; }
+tbody tr { cursor: pointer; }
+tbody tr:hover { background: color-mix(in srgb, var(--focus) 7%, transparent); }
+.tag { font-size: 12px; padding: 1px 6px; border-radius: 3px; border: 1px solid var(--rule); color: var(--muted); }
+.tag.learned { border-color: var(--sim); color: var(--sim); }
+.tag.pend { border-color: var(--pending); color: var(--pending); }
+pre.lsa { margin: 0; padding: 10px 14px; border-top: 1px solid var(--rule); font: 13px/1.4 ui-monospace, "SF Mono", Menlo, Consolas, monospace; overflow: auto; max-height: 260px; }
+pre.lsa:empty { display: none; }
+.events { list-style: none; margin: 0; padding: 0; max-height: 470px; overflow: auto; font-size: 14px; border-top: 1px solid var(--rule); }
+.events li { padding: 5px 14px; border-bottom: 1px solid color-mix(in srgb, var(--rule) 55%, transparent); display: grid; grid-template-columns: 62px 1fr; gap: 8px; }
+.events time { color: var(--muted); }
+.events li.neighbor span { color: var(--sim); font-weight: 500; }
+.events li.lsdb span { color: var(--ink); }
+.toast { position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); background: var(--ink); color: var(--panel); padding: 8px 14px; border-radius: var(--radius-control); font-size: 14px; opacity: 0; transition: opacity .2s; pointer-events: none; }
+.toast.show { opacity: 1; }
+.offline { color: var(--down); font-weight: 600; }
+
+@media (max-width: 1000px) {
+  .main, .lower { grid-template-columns: minmax(0, 1fr); }
+  #graph { height: 380px; }
+  .ladder { grid-template-columns: repeat(4, 1fr); }
+  .step:first-child, .step:last-child { border-radius: 0; }
+}
+@media (max-width: 520px) {
+  .wrap { padding: 12px 16px 32px; }
+  .step { font-size: 15px; padding: 8px 6px 6px; }
+  header .actions { margin-left: 0; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>ospfv2 lab</h1>
+    <span class="who" id="who">connecting</span>
+    <div class="actions">
+      <button id="btn-aging" title="Let LSA ages grow, or freeze them at their current value">Aging</button>
+      <button id="btn-refresh" title="Give every simulated LSA a new sequence number and flood it">Refresh LSAs</button>
+      <button id="btn-flush" title="Set every simulated LSA to MaxAge so the router removes them">Flush LSAs</button>
+      <button id="btn-run">Stop neighbor</button>
+    </div>
+  </header>
+
+  <div class="ladder" id="ladder" aria-label="Adjacency state">
+    <div class="step" data-s="down">Down</div>
+    <div class="step" data-s="attempt">Attempt</div>
+    <div class="step" data-s="init">Init</div>
+    <div class="step" data-s="exstart">ExStart</div>
+    <div class="step" data-s="exchange">Exchange</div>
+    <div class="step" data-s="loading">Loading</div>
+    <div class="step" data-s="full">Full</div>
+  </div>
+  <div class="nbr" id="nbr"></div>
+
+  <div class="main">
+    <section class="panel">
+      <div class="head">
+        <h2>Topology</h2>
+        <span class="sub" id="topo-sub"></span>
+        <div class="tools"><button id="btn-fit" title="Fit the whole topology">Fit</button></div>
+      </div>
+      <svg id="graph" role="img" aria-label="Simulated topology"></svg>
+      <div class="legend"><span><i></i>link up</span><span><i class="d"></i>link down</span><span><i class="s"></i>adjacency with the router under test</span><span>Click a link to take it down or bring it up. Drag to pan, scroll to zoom.</span></div>
+    </section>
+
+    <section class="panel rail">
+      <div class="head"><h2>Links</h2><span class="sub" id="links-sub"></span></div>
+      <input type="search" id="link-filter" placeholder="Filter, e.g. r2c3" aria-label="Filter links">
+      <ul class="links" id="links"></ul>
+      <div class="detail" id="detail"></div>
+    </section>
+  </div>
+
+  <div class="lower">
+    <section class="panel">
+      <div class="head"><h2>Link state database</h2><span class="sub" id="lsdb-sub"></span>
+        <div class="tools"><a id="lsdb-txt" href="/api/lsdb.txt?format=junos" target="_blank" rel="noopener">Plain text</a></div>
+      </div>
+      <div class="tabs" id="tabs"></div>
+      <div class="tablewrap">
+        <table>
+          <thead><tr><th>Type</th><th>Link state ID</th><th>Advertising router</th><th class="num">Sequence</th><th class="num">Age</th><th class="num">Checksum</th><th class="num">Length</th><th>Origin</th></tr></thead>
+          <tbody id="lsdb"></tbody>
+        </table>
+      </div>
+      <pre class="lsa" id="lsa"></pre>
+    </section>
+
+    <section class="panel">
+      <div class="head"><h2>Events</h2></div>
+      <ul class="events" id="events"></ul>
+    </section>
+  </div>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const NS = 'http://www.w3.org/2000/svg';
+  const ORDER = ['down', 'attempt', 'init', 'exstart', 'exchange', 'loading', 'full'];
+  const LABEL = { router: 'Router', network: 'Network', summary: 'Summary', asbr_summary: 'ASBR summary', as_external: 'External', area: 'Opaque' };
+  let state = null, rows = [], tab = 'all', selLink = null, selNode = null, eventSeq = 0, lastSig = '';
+  let layout = null, view = null, online = true;
+
+  async function api(path, method = 'GET', body) {
+    const opt = { method, headers: {} };
+    if (method !== 'GET') { opt.headers['X-OSPFv2'] = '1'; opt.headers['Content-Type'] = 'application/json'; opt.body = JSON.stringify(body || {}); }
+    const r = await fetch(path, opt);
+    const ct = r.headers.get('content-type') || '';
+    const data = ct.includes('json') ? await r.json() : await r.text();
+    if (!r.ok) throw new Error(data.error || data);
+    return data;
+  }
+  function toast(msg) { const t = $('toast'); t.textContent = msg; t.classList.add('show'); clearTimeout(toast.h); toast.h = setTimeout(() => t.classList.remove('show'), 2200); }
+  function el(tag, attrs = {}, text) { const e = document.createElement(tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); if (text != null) e.textContent = text; return e; }
+  function sv(tag, attrs = {}) { const e = document.createElementNS(NS, tag); for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, v); return e; }
+
+  // ---------- header and ladder
+  function renderHeader() {
+    const n = state.neighbor;
+    $('who').innerHTML = '';
+    $('who').append('router ', el('b', {}, n.router_id), ' on ', el('b', {}, `${n.address}`), ` area ${n.area_id}, ${n.network_type === 'p2p' ? 'point-to-point' : 'broadcast'}, hello ${n.hello_interval}s`);
+    $('btn-aging').textContent = state.aging ? 'Freeze ages' : 'Start aging';
+    $('btn-run').textContent = state.running ? 'Stop neighbor' : 'Start neighbor';
+    const i = ORDER.indexOf(n.state);
+    const ladder = $('ladder');
+    ladder.classList.toggle('full', n.state === 'full');
+    ladder.classList.toggle('down', n.state === 'down');
+    ladder.querySelectorAll('.step').forEach((s, k) => {
+      s.classList.toggle('done', k < i);
+      s.classList.toggle('now', k === i);
+      s.setAttribute('aria-current', k === i ? 'step' : 'false');
+    });
+    const parts = [
+      ['Router under test', n.neighbor_router_id || 'not seen yet'],
+      ['at', n.neighbor_ip || '-'],
+      ['DR', n.designated_router],
+      ['Dead interval', `${n.dead_interval}s`],
+      ['Requests pending', n.ls_request_pending],
+      ['Not acked', state.counts.unacked]
+    ];
+    $('nbr').replaceChildren(...parts.map(([k, v]) => { const s = el('span', {}, `${k} `); s.append(el('b', {}, String(v))); return s; }));
+    if (!online) $('nbr').prepend(el('span', { class: 'offline' }, 'Lost contact with the simulator. Retrying.'));
+    const c = state.topology.counts;
+    $('topo-sub').textContent = `${c.routers} routers, ${c.links} links`;
+  }
+
+  // ---------- graph
+  function computeLayout(g) {
+    const pos = {}, GAP = 90;
+    const grid = g.nodes.filter(n => n.grid);
+    grid.forEach(n => { pos[n.id] = { x: n.grid[1] * GAP, y: n.grid[0] * GAP, fixed: true }; });
+    const adj = {};
+    g.edges.forEach(e => { (adj[e.from] ||= []).push(e.to); (adj[e.to] ||= []).push(e.from); });
+    // sim sits left of whatever it is attached to, the DUT left of the sim
+    const simNbr = (adj.sim || []).find(x => x !== 'dut' && pos[x]);
+    pos.sim = simNbr ? { x: pos[simNbr].x - GAP * 1.4, y: pos[simNbr].y, fixed: true } : { x: 0, y: 0, fixed: true };
+    pos.dut = { x: pos.sim.x - GAP * 1.6, y: pos.sim.y, fixed: true };
+    // place the rest near their placed neighbours, then relax
+    const free = g.nodes.filter(n => !pos[n.id]);
+    let k = 0;
+    free.forEach(n => {
+      const anchor = (adj[n.id] || []).map(x => pos[x]).find(Boolean) || pos.sim;
+      const a = (k++ * 2.4);
+      pos[n.id] = { x: anchor.x + Math.cos(a) * GAP * 1.3, y: anchor.y + Math.sin(a) * GAP * 1.3 };
+    });
+    for (let it = 0; it < 220; it++) {
+      for (const a of free) {
+        const p = pos[a.id]; let fx = 0, fy = 0;
+        for (const id in pos) { if (id === a.id) continue; const q = pos[id]; let dx = p.x - q.x, dy = p.y - q.y; let d2 = dx * dx + dy * dy + 1; if (d2 < GAP * GAP * 4) { fx += dx / d2 * 2200; fy += dy / d2 * 2200; } }
+        for (const b of adj[a.id] || []) { const q = pos[b]; fx += (q.x - p.x) * 0.02; fy += (q.y - p.y) * 0.02; }
+        p.x += Math.max(-12, Math.min(12, fx)); p.y += Math.max(-12, Math.min(12, fy));
+      }
+    }
+    return pos;
+  }
+
+  function fit() {
+    const xs = Object.values(layout).map(p => p.x), ys = Object.values(layout).map(p => p.y);
+    const pad = 60;
+    view = { x: Math.min(...xs) - pad, y: Math.min(...ys) - pad, w: Math.max(...xs) - Math.min(...xs) + pad * 2, h: Math.max(...ys) - Math.min(...ys) + pad * 2 };
+    applyView();
+  }
+  function applyView() { $('graph').setAttribute('viewBox', `${view.x} ${view.y} ${view.w} ${view.h}`); }
+
+  function renderGraph() {
+    const g = state.graph;
+    const sig = g.nodes.map(n => n.id).join(',') + '|' + g.edges.map(e => e.id).join(',');
+    if (sig !== lastSig) { layout = computeLayout(g); lastSig = sig; fit(); }
+    const svg = $('graph');
+    svg.replaceChildren();
+    const many = g.nodes.length > 220;
+    const ge = sv('g'), gn = sv('g');
+    for (const e of g.edges) {
+      const a = layout[e.from], b = layout[e.to]; if (!a || !b) continue;
+      const isDut = e.id === 'dut';
+      const hit = sv('line', { x1: a.x, y1: a.y, x2: b.x, y2: b.y, class: 'edge-hit' });
+      const line = sv('line', { x1: a.x, y1: a.y, x2: b.x, y2: b.y, class: `edge${isDut ? ' dut' : ''}${e.up ? '' : ' down'}${selLink === e.id ? ' sel' : ''}` });
+      const t = sv('title'); t.textContent = isDut ? `adjacency: ${e.state}` : `${e.from} to ${e.to}, metric ${e.metric}, ${e.up ? 'up' : 'down'}. Click to ${e.up ? 'take down' : 'bring up'}.`;
+      hit.append(t);
+      if (!isDut) hit.addEventListener('click', (ev) => { ev.stopPropagation(); selLink = e.id; toggle(e.id); });
+      ge.append(hit, line);
+    }
+    for (const n of g.nodes) {
+      const p = layout[n.id]; if (!p) continue;
+      const cls = ['node', n.sim ? 'sim' : '', n.dut ? 'dut' : '', (n.externals || n.summaries) ? 'ext' : '', selNode === n.id ? 'sel' : ''].join(' ');
+      const grp = sv('g', { class: cls, transform: `translate(${p.x},${p.y})`, tabindex: 0, role: 'button', 'aria-label': `router ${n.id}` });
+      const label = n.dut ? 'DUT' : n.id;
+      const w = many ? 14 : Math.max(44, label.length * 7.4 + 16), h = many ? 14 : 24;
+      grp.append(sv('rect', { x: -w / 2, y: -h / 2, width: w, height: h, rx: 4 }));
+      if (!many) { const tx = sv('text', { 'text-anchor': 'middle', y: 4 }); tx.textContent = label; grp.append(tx); }
+      const t = sv('title'); t.textContent = n.dut ? `router under test ${n.router_id || '(not seen yet)'}` : `${n.id} ${n.router_id}`; grp.append(t);
+      const pick = () => { selNode = n.id; selLink = null; renderDetail(); renderGraph(); };
+      grp.addEventListener('click', pick);
+      grp.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); pick(); } });
+      gn.append(grp);
+    }
+    svg.append(ge, gn);
+  }
+
+  // pan & zoom
+  (() => {
+    const svg = $('graph'); let drag = null;
+    svg.addEventListener('pointerdown', e => { if (e.target.closest('.node, .edge-hit')) return; drag = { x: e.clientX, y: e.clientY, v: { ...view } }; svg.classList.add('dragging'); svg.setPointerCapture(e.pointerId); });
+    svg.addEventListener('pointermove', e => { if (!drag) return; const r = svg.getBoundingClientRect(); const s = Math.max(view.w / r.width, view.h / r.height); view.x = drag.v.x - (e.clientX - drag.x) * s; view.y = drag.v.y - (e.clientY - drag.y) * s; applyView(); });
+    svg.addEventListener('pointerup', () => { drag = null; svg.classList.remove('dragging'); });
+    svg.addEventListener('wheel', e => { e.preventDefault(); const r = svg.getBoundingClientRect(); const f = e.deltaY > 0 ? 1.12 : 1 / 1.12; const mx = view.x + (e.clientX - r.left) / r.width * view.w, my = view.y + (e.clientY - r.top) / r.height * view.h; view.w *= f; view.h *= f; view.x = mx - (mx - view.x) * f; view.y = my - (my - view.y) * f; applyView(); }, { passive: false });
+    $('btn-fit').addEventListener('click', fit);
+  })();
+
+  // ---------- links rail
+  function renderLinks() {
+    const f = $('link-filter').value.trim().toLowerCase();
+    const list = state.links.filter(l => !f || l.name.toLowerCase().includes(f) || l.network.includes(f));
+    const down = state.links.filter(l => !l.up).length;
+    $('links-sub').textContent = down ? `${down} down of ${state.links.length}` : `all ${state.links.length} up`;
+    const items = list.slice(0, 400).map(l => {
+      const li = el('li', { class: selLink === l.id ? 'sel' : '' });
+      const name = el('span', {}); name.append(el('span', { class: 'name' }, `${l.from} to ${l.to}`), el('span', { class: 'meta' }, `#${l.id}, metric ${l.metric}, ${l.network}`));
+      const sw = el('button', { class: `switch ${l.up ? 'up' : 'down'}`, 'aria-pressed': String(!l.up), title: l.up ? 'Take this link down' : 'Bring this link up' }, l.up ? 'Up' : 'Down');
+      sw.addEventListener('click', () => { selLink = l.id; toggle(l.id); });
+      const fl = el('button', { class: 'flapbtn', title: 'Down and up 3 times, 5 seconds apart' }, 'Flap');
+      fl.addEventListener('click', async () => { try { await api(`/api/links/${l.id}/flap`, 'POST', { count: 3, interval: 5 }); toast(`Flapping ${l.name}`); } catch (e) { toast(e.message); } });
+      li.append(name, sw, fl);
+      return li;
+    });
+    if (list.length > 400) items.push(el('li', {}, `${list.length - 400} more. Narrow the filter.`));
+    if (!list.length) items.push(el('li', {}, state.links.length ? 'No link matches the filter.' : 'This topology has no links. Add some under links: in the topology file.'));
+    $('links').replaceChildren(...items);
+  }
+
+  function renderDetail() {
+    const d = $('detail');
+    const n = selNode && state.graph.nodes.find(x => x.id === selNode);
+    if (!n) { d.replaceChildren(); return; }
+    const dl = el('dl');
+    const add = (k, v) => { dl.append(el('dt', {}, k), el('dd', {}, String(v))); };
+    if (n.dut) { add('Router id', n.router_id || 'not seen yet'); add('Address', n.address || '-'); add('State', state.neighbor.state); }
+    else {
+      add('Router id', n.router_id);
+      if (n.grid) add('Grid position', `row ${n.grid[0]}, column ${n.grid[1]}`);
+      add('Role', [n.sim ? 'simulated router' : null, n.abr ? 'ABR' : null, n.asbr ? 'ASBR' : null].filter(Boolean).join(', ') || 'internal');
+      add('Stub networks', n.networks); add('Summaries', n.summaries); add('Externals', n.externals);
+    }
+    const h = el('h2', {}, n.dut ? 'Router under test' : n.id);
+    const items = [h, dl];
+    if (!n.dut) {
+      const b = el('button', { style: 'margin-top:8px' }, 'Show router LSA');
+      b.addEventListener('click', () => showLsa('router', n.router_id, n.router_id));
+      items.push(b);
+      $('link-filter').value = n.sim ? 'sim' : n.id; renderLinks();
+    }
+    d.replaceChildren(...items);
+  }
+
+  async function toggle(id) {
+    try { const l = await api(`/api/links/${id}/toggle`, 'POST'); toast(`${l.from} to ${l.to} is ${l.up ? 'up' : 'down'}`); await poll(true); }
+    catch (e) { toast(e.message); }
+  }
+
+  // ---------- lsdb
+  function renderTabs() {
+    const c = state.counts;
+    const types = ['all', ...Object.keys(LABEL).filter(t => c[t])];
+    $('tabs').replaceChildren(...types.map(t => {
+      const b = el('button', { 'aria-pressed': String(tab === t) }, `${t === 'all' ? 'All' : LABEL[t]} ${t === 'all' ? c.total : c[t]}`);
+      b.addEventListener('click', () => { tab = t; renderTabs(); renderRows(); });
+      return b;
+    }));
+  }
+  function renderRows() {
+    const list = rows.filter(r => tab === 'all' || r.type === tab);
+    $('lsdb-sub').textContent = `${state.counts.total} LSAs`;
+    const MAX = 600;
+    const trs = list.slice(0, MAX).map(r => {
+      const tr = el('tr', { tabindex: 0 });
+      [[LABEL[r.type] || r.type_name], [r.ls_id], [r.advertising_router], [r.seq, 'num'], [r.age, 'num'], [r.checksum, 'num'], [r.length, 'num']]
+        .forEach(([v, c]) => tr.append(el('td', c ? { class: c } : {}, String(v))));
+      const td = el('td');
+      td.append(el('span', { class: `tag ${r.originated ? '' : 'learned'}` }, r.originated ? 'simulated' : 'learned'));
+      if (!r.acked) td.append(' ', el('span', { class: 'tag pend', title: 'Sent, waiting for an acknowledgement' }, 'not acked'));
+      tr.append(td);
+      const open = () => showLsa(r.type, r.ls_id, r.advertising_router);
+      tr.addEventListener('click', open);
+      tr.addEventListener('keydown', e => { if (e.key === 'Enter') open(); });
+      return tr;
+    });
+    if (list.length > MAX) { const tr = el('tr'); tr.append(el('td', { colspan: 8 }, `${list.length - MAX} more rows. Use Plain text for the full list.`)); trs.push(tr); }
+    $('lsdb').replaceChildren(...trs);
+  }
+  async function showLsa(type, id, advr) {
+    try { $('lsa').textContent = await api(`/api/lsa?type=${encodeURIComponent(type)}&id=${encodeURIComponent(id)}&advr=${encodeURIComponent(advr)}`); $('lsa').scrollIntoView({ block: 'nearest' }); }
+    catch (e) { toast(e.message); }
+  }
+
+  // ---------- events
+  async function pollEvents() {
+    const evs = await api(`/api/events?since=${eventSeq}`);
+    if (!evs.length) return false;
+    eventSeq = evs[evs.length - 1].seq;
+    const ul = $('events');
+    for (const e of evs) {
+      const li = el('li', { class: e.kind }); li.append(el('time', {}, e.time), el('span', {}, e.text));
+      ul.prepend(li);
+    }
+    while (ul.children.length > 300) ul.lastChild.remove();
+    return true;
+  }
+
+  // ---------- loop
+  let tick = 0;
+  async function poll(force = false) {
+    try {
+      state = await api('/api/state');
+      online = true;
+      const changed = await pollEvents();
+      renderHeader(); renderGraph(); renderLinks(); renderDetail();
+      if (force || changed || tick % 3 === 0) { rows = await api('/api/lsdb'); renderTabs(); renderRows(); }
+    } catch (e) {
+      online = false;
+      if (state) renderHeader(); else $('who').textContent = 'cannot reach the simulator. Is ospfv2 still running?';
+    }
+    tick++;
+  }
+
+  $('link-filter').addEventListener('input', renderLinks);
+  $('btn-aging').addEventListener('click', async () => { await api('/api/aging', 'POST', { on: !state.aging }); poll(true); });
+  $('btn-refresh').addEventListener('click', async () => { const r = await api('/api/refresh', 'POST'); toast(`Refreshed ${r.refreshed} LSAs`); poll(true); });
+  $('btn-flush').addEventListener('click', async () => { if (!confirm('Set every simulated LSA to MaxAge? The router will drop them.')) return; await api('/api/flush', 'POST'); toast('Flushed simulated LSAs'); poll(true); });
+  $('btn-run').addEventListener('click', async () => {
+    try { await api(`/api/neighbor/${state.running ? 'stop' : 'start'}`, 'POST'); poll(true); } catch (e) { toast(e.message); }
+  });
+  $('graph').addEventListener('click', e => { if (!e.target.closest('.node')) { selNode = null; renderDetail(); renderGraph(); } });
+
+  poll(true);
+  setInterval(poll, 1000);
+})();
+</script>
+</body>
+</html>

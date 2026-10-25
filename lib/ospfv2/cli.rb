@@ -204,8 +204,17 @@ module OSPFv2
 
     def legacy(argv)
       o = OptParse.parse(argv)
+      topo = legacy_topology(o)
+      opts = { console: o.console, log: o.log_fname == $stdout ? '-' : o.log_fname, debug: o.debug, web: o.web }
+      serve(Simulator.new(topo, log: open_log(opts[:log]), debug: o.debug), opts)
+    end
+
+    public
+
+    # Topology equivalent to the original command line flags.
+    def legacy_topology(o)
       topo = Topology.new
-      topo.configure(router_id: o.router_id, interface: "#{o.ipaddr}/#{IPAddr.new(o.netmask).prefix}", area: o.area_id,
+      topo.configure(router_id: o.router_id, interface: "#{o.ipaddr}/#{IPAddr.new("0.0.0.0/#{o.netmask}").prefix}", area: o.area_id,
                      hello_interval: o.hello_int, dead_interval: o.dead_int, network_type: o.network_type == :p2p ? 'p2p' : 'broadcast')
       topo.configure(device: o.device) if o.device
       topo.configure_lsdb(link_prefix: o.base_link_addr, refresh_time: o.ls_refresh_time)
@@ -225,9 +234,9 @@ module OSPFv2
         r.asbr = o.num_ext.positive?
       end
       topo.validate!
-      opts = { console: o.console, log: o.log_fname == $stdout ? '-' : o.log_fname, debug: o.debug, web: o.web }
-      serve(Simulator.new(topo, log: open_log(opts[:log]), debug: o.debug), opts)
     end
+
+    private
 
     # ---- helpers
 

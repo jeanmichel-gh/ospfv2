@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'monitor'
+require 'time'
 require 'stringio'
 require_relative '../ospfv2'
 require_relative 'topology'

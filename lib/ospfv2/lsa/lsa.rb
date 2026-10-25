@@ -373,6 +373,12 @@ module OSPFv2
     end
     
     def encode(content='')
+      if @_header_only
+        hdr = encode_header
+        hdr[16, 2] = @_csum
+        hdr[18, 2] = @_size
+        return hdr
+      end
       lsa = []
       lsa << encode_header
       lsa << content
@@ -393,6 +399,13 @@ module OSPFv2
     def parse(s)
       validate_checksum(s)
       ls_age, options, ls_type, ls_id, advr, seqn, csum, length, lsa = s.unpack('nCCNNNnna*')
+      # A header without its body (DD, LS Ack): keep the checksum and
+      # length the originator computed, they cannot be recomputed here.
+      @_header_only = s.bytesize < length
+      if @_header_only
+        @_csum = s.byteslice(16, 2)
+        @_size = s.byteslice(18, 2)
+      end
       @ls_type = LsType.new ls_type
       @options = Options.new options
       @ls_age = LsAge.new ls_age

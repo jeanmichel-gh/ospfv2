@@ -85,11 +85,3 @@ module OSPFv2
     end
   end
 end
-
-require_relative './down_state'
-require_relative './attempt_state'
-require_relative './init_state'
-require_relative './exstart_state'
-require_relative './exchange_state'
-require_relative './loading_state'
-require_relative './full_state'
