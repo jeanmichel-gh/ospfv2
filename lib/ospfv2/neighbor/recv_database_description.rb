@@ -91,22 +91,25 @@ module OSPFv2
             end
             @dd.dd_sequence_number = rcv_dd.seqn
             send_dd @dd, true
+            unless rcv_dd.more? || @dd.more?
+              dd_rxmt_interval.cancel
+              new_state Loading.new(self), 'exchange_done'
+              new_state Full.new, 'no loading: req list is empty' if @ls_req_list.empty?
+            end
           elsif rcv_dd.seqn == @last_dd_seqn_rcv
-            # use rxmt
+            # The master retransmitted: our answer was lost, send it again.
+            send_packet @sent_dd, @neighbor_ip if @sent_dd
           else
             @state.seq_number_mismatch(self)
-          end
-
-          unless  rcv_dd.more? || @dd.more?
-            dd_rxmt_interval.cancel
-            new_state Loading.new(self), 'exchange_done'
-            new_state Full.new, 'no loading: req list is empty' if @ls_req_list.empty?
           end
 
         else
           debug "*** #{rcv_dd.router_id} is slave ***"
 
           if rcv_dd.seqn == @last_dd_seqn
+            # Read the slave's headers before deciding the exchange is
+            # over: its last DD (M bit clear) still carries LSA headers.
+            @ls_db.recv_dd(rcv_dd, @ls_req_list) if @ls_db
 
             if ! @sent_dd.more? && ! rcv_dd.more?
               dd_rxmt_interval.cancel
@@ -119,10 +122,10 @@ module OSPFv2
 
               @last_dd_seqn += 1
               if @ls_db
-                @ls_db.recv_dd(rcv_dd, @ls_req_list)
-                @dd = DatabaseDescription.new :router_id=> @router_id, :area_id=> @area_id, 
+                @dd = DatabaseDescription.new :router_id=> @router_id, :area_id=> @area_id,
                 :ls_db => @ls_db, :number_of_lsa=>60
               else
+                @dd = DatabaseDescription.new :router_id=> @router_id, :area_id=> @area_id
                 @dd.no_more
               end
               @dd.is_master
@@ -133,8 +136,8 @@ module OSPFv2
           elsif @last_dd_seqn - rcv_dd.seqn == 1
             debug "*** RXMT SHOULD FIX THIS: @last_dd_seqn=#{@last_dd_seqn}, rcv_dd.seqn=#{rcv_dd.seqn} "
           else
-            debug "*** SHOULD GO TO EXSTART: @last_dd_seqn=#{@last_dd_seqn}, rcv_dd.seqn=#{rcv_dd.seqn} "
-            new_state Full.new, "SeqNumberMismatch"
+            debug "*** SeqNumberMismatch: @last_dd_seqn=#{@last_dd_seqn}, rcv_dd.seqn=#{rcv_dd.seqn} "
+            new_state ExStart.new(self), "SeqNumberMismatch"
           end
           
         end

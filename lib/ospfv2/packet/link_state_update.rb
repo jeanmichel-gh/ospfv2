@@ -154,7 +154,7 @@ module OSPFv2
     end
 
     def ack_lsu(router_id)
-      ls_ack = LinkStateAck.new(:router_id => router_id, :area => area = @aread_id)
+      ls_ack = LinkStateAck.new(:router_id => router_id, :area_id => area_id.to_i)
       each { |lsa| ls_ack.lsa_headers << lsa  }
       ls_ack
     end

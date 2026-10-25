@@ -24,43 +24,29 @@ require_relative './neighbor_state'
 module OSPFv2
   module NeighborState
 
+    # RFC 2328 10.1 ExStart: decide master/slave and the initial DD
+    # sequence number. Entering the state resets the adjacency and sends
+    # an empty DD with I, M and MS set, retransmitted until answered.
     class ExStart < State
       def initialize(n)
         @neighbor = n
         n.instance_eval do
-          @last_dd_seqn = n.dd_sequence_number
-
-          #-- could be a State#reset method inherited ?
-          @ls_db.reset if @ls_db
-          @ls_req_list={}
-          @periodic_refresh.cancel
-          @periodic_rxmt.cancel
-          #--
-
+          @ls_db&.reset
+          @ls_req_list = {}
+          cancel_adjacency_timers
           @last_dd_seqn = dd_sequence_number
-          raise unless @last_dd_seqn>0
-
-          dd = DatabaseDescription.new :router_id=> @router_id, :area_id=> @area_id, 
-          :imms=>7, :dd_sequence_number => @last_dd_seqn
+          dd = DatabaseDescription.new router_id: @router_id, area_id: @area_id,
+                                       imms: 7, dd_sequence_number: @last_dd_seqn
           send_dd dd, true
         end
-
       end
 
       def negotiation_done
         @neighbor.instance_eval do
           dd_rxmt_interval.cancel
-          new_state Exchange.new
+          new_state Exchange.new, 'negotiation_done'
         end
       end
-
-      def adj_ok?
-        if ! ok
-          change_state(@neighbor, Two_way.new)
-        end
-
-      end
-
     end
   end
 end

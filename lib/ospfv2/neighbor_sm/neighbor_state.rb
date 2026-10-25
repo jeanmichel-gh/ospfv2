@@ -23,57 +23,65 @@
 
 module OSPFv2
   module NeighborState
-    class State
 
+    # Base class of the RFC 2328 section 10.1 neighbor states.
+    # Events a state does not handle are ignored.
+    class State
       def change_state(neighbor, *args)
         neighbor.change_state(*args)
       end
-      alias :new_state :change_state
+      alias new_state change_state
+
+      def start(neighbor); end
 
       def kill_nbr(neighbor)
-        new_state neighbor, Down.new, 'll_down or kill_nbr'
+        neighbor.cancel_adjacency_timers
+        new_state neighbor, Down.new, 'll_down or kill_nbr' unless neighbor.state == :down
       end
-      alias :ll_down :kill_nbr
-      
+      alias ll_down kill_nbr
+
+      # Dead interval expired without a hello from the neighbor.
       def inactivity_timer(neighbor)
-        
-        neighbor.instance_eval {
-          @ls_db.reset if @ls_db
-          @ls_req_list={}
-          @periodic_refresh.cancel
-          @periodic_rxmt.cancel
-        }
-        
+        neighbor.instance_eval do
+          @ls_db&.reset
+          @ls_req_list = {}
+          hello.remove_neighbor(@neighbor_router_id.to_i) if @neighbor_router_id
+          cancel_adjacency_timers
+        end
         new_state neighbor, Down.new, 'Inactivity Timer'
       end
-      
-      def recv_hello(neighbor, rcv_hello, *args)
-        neighbor.instance_eval {
+
+      def recv_hello(neighbor, rcv_hello, *)
+        neighbor.instance_eval do
           hello.add_router_id rcv_hello
           hello.designated_router_id = rcv_hello.designated_router_id.to_ip
-          inactivity_timer.start { new_state Down.new, 'Inactivity Timer' }
-        }
-      end
-
-      def adj_ok?
-      end
-      def seq_number_mismatch(neighbor)
-      end
-      def bad_ls_req(neighbor)
-      end
-      def one_way_received(neighbor)
-      end
-      def two_way_received(neighbor)
-      end
-      
-      def method_missing(method, *args, &block)
-        if method.to_s =~ /^recv_(.+)$/
-          args[0].__send__ debug,  "*** ignoring packet #{$1} : received  while in #{self} ***"
-        else
-          raise
+          inactivity_timer.start { synchronize { @state.inactivity_timer(self) } }
         end
       end
 
+      def negotiation_done; end
+      def exchange_done(neighbor); end
+      def adj_ok?(neighbor); end
+      def seq_number_mismatch(neighbor); end
+      def bad_ls_req(neighbor); end
+      def one_way_received(neighbor); end
+      def two_way_received(neighbor); end
+
+      def to_s
+        self.class.to_s.split('::').last
+      end
+
+      def method_missing(method, *args, &block)
+        if method.to_s.start_with?('recv_') && args[0].respond_to?(:debug)
+          args[0].debug "ignoring #{method.to_s.delete_prefix('recv_')} received while in #{self}"
+        else
+          super
+        end
+      end
+
+      def respond_to_missing?(method, include_private = false)
+        method.to_s.start_with?('recv_') || super
+      end
     end
   end
 end

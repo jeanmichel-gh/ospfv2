@@ -2,27 +2,12 @@
 # Copyright 2010 Jean-Michel Esnault.
 # All rights reserved.
 # See LICENSE.txt for permissions.
-#
-#
-# This file is part of OSPFv2.
-# 
-# OSPFv2 is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-# 
-# OSPFv2 is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with OSPFv2.  If not, see <http://www.gnu.org/licenses/>.
 #++
 
-
 module OSPFv2
-  
+
+  # Serializes everything that happens to a Neighbor: received packets and
+  # timer events go through one queue and one thread.
   class NeighborEventHandler
 
     def initialize(neighbor)
@@ -31,31 +16,40 @@ module OSPFv2
       start_event_loop
     end
 
+    # Observer callback for timers, and entry point for the transport.
     def update(*args)
       @evQ.enq(args)
     end
-    
+
     def start_event_loop
-      @neighbor.debug "*** Event Loop Started ***"
-      Thread.new(@evQ) do |events|
+      @thread = Thread.new do
+        Thread.current.name = 'ospfv2-events'
         loop do
-          ev_type, *ev = events.deq
-          case ev_type
-          when :ev_recv
-            bits, from, @port = ev
-            packet = OspfPacket.factory(bits[20..-1])
-            if packet
-              @neighbor.log :rcv, packet
-              @neighbor.__send__ "recv_#{packet.name}", packet, from, @port
-            else
-              STDERR.puts "Not an ospf packet: #{bits.unpack('H*')}"
-            end
-          else
-            @neighbor.log ev_type, ev.inspect
+          ev_type, *ev = @evQ.deq
+          begin
+            dispatch(ev_type, ev)
+          rescue StandardError => e
+            @neighbor.log :error, "#{e.class}: #{e.message}\n  #{e.backtrace.first(6).join("\n  ")}"
           end
         end
       end
     end
 
+    private
+
+    def dispatch(ev_type, ev)
+      case ev_type
+      when :ev_recv
+        bytes, from = ev
+        packet = OspfPacket.factory(bytes)
+        unless packet
+          @neighbor.log :drop, "not an OSPF packet from #{from}: #{bytes.unpack1('H*')[0, 64]}"
+          return
+        end
+        @neighbor.synchronize { @neighbor.receive(packet, from) }
+      else
+        @neighbor.debug "#{ev_type} #{ev.inspect}"
+      end
+    end
   end
 end
