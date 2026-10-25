@@ -1,0 +1,6 @@
+# A second ospfv2 playing the router under test: it originates nothing
+# but its own router LSA, and learns everything the simulator floods.
+simulator:
+  router_id: 2.2.2.2
+  interface: 10.99.0.20/24
+  hello_interval: 2

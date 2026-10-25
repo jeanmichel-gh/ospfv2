@@ -1,0 +1,63 @@
+# Two ways to use this file:
+#
+#   docker compose up ospfv2           your topology against a real router on the
+#                                      host network. Put it in ./lab.yml first
+#                                      (ospfv2 init > lab.yml), dashboard on :8080.
+#
+#   docker compose --profile lab up    self-contained lab: the simulator floods a
+#                                      5x5 grid to a second ospfv2 over a bridge,
+#                                      using real raw sockets. Dashboards on :8080
+#                                      (simulator) and :8081 (peer).
+#
+#   docker compose --profile frr up    the same simulator against FRRouting ospfd,
+#                                      then: docker compose exec frr vtysh -c "show ip ospf neighbor"
+
+x-ospfv2: &ospfv2
+  build: .
+  image: ospfv2:latest
+  cap_drop: [ALL]
+  cap_add: [NET_RAW]
+  restart: "no"
+
+services:
+  ospfv2:
+    <<: *ospfv2
+    network_mode: host
+    volumes:
+      - ./lab.yml:/work/lab.yml:ro
+    command: ["run", "/work/lab.yml", "--web", "0.0.0.0:8080", "--log", "-"]
+
+  sim:
+    <<: *ospfv2
+    profiles: [lab, frr]
+    networks:
+      ospflab:
+        ipv4_address: 10.99.0.10
+    ports: ["8080:8080"]
+    command: ["run", "/app/examples/lab/sim.yml", "--web", "0.0.0.0:8080", "--log", "/tmp/ospfv2.log"]
+
+  peer:
+    <<: *ospfv2
+    profiles: [lab]
+    networks:
+      ospflab:
+        ipv4_address: 10.99.0.20
+    ports: ["8081:8080"]
+    command: ["run", "/app/examples/lab/peer.yml", "--web", "0.0.0.0:8080", "--log", "/tmp/ospfv2.log"]
+
+  frr:
+    profiles: [frr]
+    image: quay.io/frrouting/frr:10.2.1
+    cap_add: [NET_ADMIN, NET_RAW, SYS_ADMIN]
+    networks:
+      ospflab:
+        ipv4_address: 10.99.0.20
+    volumes:
+      - ./examples/lab/frr/daemons:/etc/frr/daemons:ro
+      - ./examples/lab/frr/frr.conf:/etc/frr/frr.conf:ro
+
+networks:
+  ospflab:
+    ipam:
+      config:
+        - subnet: 10.99.0.0/24

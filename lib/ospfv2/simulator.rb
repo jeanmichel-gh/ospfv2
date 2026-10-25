@@ -347,6 +347,7 @@ module OSPFv2
     # a point-to-point network. Without this the DUT has no link back to
     # the simulated area and installs none of its routes.
     def update_interface_link(state)
+      before = @sim_lsa.links.map(&:encode).sort
       net = settings.prefix
       @sim_lsa.delete(:stub_network, net.to_s)
       @sim_lsa.links.delete_if { |l| [2].include?(l.router_link_type.to_i) }
@@ -360,7 +361,7 @@ module OSPFv2
       else
         @sim_lsa << interface_stub
       end
-      reoriginate(@sim_lsa, "interface link (#{state})") if state == :full || @sim_lsa.sequence_number.to_I > 0x80000001
+      reoriginate(@sim_lsa, "interface link (#{state})") if @sim_lsa.links.map(&:encode).sort != before
     end
   end
 end

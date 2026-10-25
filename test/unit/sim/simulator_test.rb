@@ -103,6 +103,17 @@ class TestSimulator < Test::Unit::TestCase
     refute sim.has_link?(2, '192.168.1.254')
   end
 
+  def test_intermediate_states_do_not_reoriginate
+    @sim.start
+    seq = rlsa('1.1.1.1').sequence_number.to_I
+    %w[Init ExStart Exchange Loading].each do |st|
+      klass = NeighborState.const_get(st)
+      state = klass.instance_method(:initialize).arity.zero? ? klass.new : klass.allocate
+      @sim.synchronize { @sim.neighbor.change_state(state, 'test') }
+    end
+    assert_equal seq, rlsa('1.1.1.1').sequence_number.to_I
+  end
+
   def test_full_on_p2p_advertises_p2p_link
     sim = Simulator.new(topo(network_type: 'p2p'), transport: CaptureTransport.new)
     sim.start

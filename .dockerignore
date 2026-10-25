@@ -1,0 +1,6 @@
+.git
+*.gem
+*.log
+tmp/
+coverage/
+Gemfile.lock
