@@ -258,42 +258,60 @@ module LSDB
       ls.instance_eval { refresh?(rt) }
     end
     
+    # Flooding procedure for a received Link State Update (RFC 2328 13).
+    #
+    # For an LSA we originate (13.4):
+    #   same instance  -> the router echoed it back: an implicit ack (13.5)
+    #   theirs newer   -> left over from before a restart: jump past it
+    #   theirs older   -> keep ours, it is still waiting for an ack
+    #   we have none   -> an LSA that claims to be ours: flush it (MaxAge)
+    # For anyone else's LSA: keep the newer copy, drop a MaxAge one.
     def recv_link_state_update(link_state_update)
       link_state_update.each do |lsa|
+        ours = @ls_db[lsa.key]
         if advertised_routers.has?(lsa.advertising_router)
-          if @ls_db.key? lsa.key
-            @ls_db[lsa.key].force_refresh(lsa.sequence_number)
-          else
-            @ls_db.store(lsa.key,lsa)
+          if ours.nil?
+            @ls_db.store(lsa.key, lsa)
             lsa.maxage
-          end
-        else
-          if lsa.maxaged?
-            @ls_db.delete lsa.key
+            lsa.retransmit
           else
-            @ls_db.store(lsa.key,lsa)
-            # TBD: remove lsa from lsr_list
+            case ours <=> lsa
+            when 0  then ls_ack(ours)
+            when -1 then ours.force_refresh(lsa.sequence_number)
+            end
           end
+        elsif lsa.maxaged?
+          @ls_db.delete(lsa.key) if ours.nil? || (ours <=> lsa) <= 0
+        elsif ours.nil? || (ours <=> lsa) < 0
+          @ls_db.store(lsa.key, lsa)
         end
-      end 
+      end
     end
     
     def has?(obj)
       lookup(obj)
     end
     
+    # Headers described by the neighbor in a Database Description (10.6).
+    # Request what we lack or hold an older copy of. For our own LSAs the
+    # neighbor's newer copy (left from before a restart) makes us jump past
+    # it, and one we no longer originate is requested so it can be flushed.
+    # (`our <=> theirs` used to be tested for truth, and -1, 0 and 1 are all
+    # true in Ruby, so every header reset our LSA.)
     def recv_dd(dd, ls_req_list)
-      raise ArgumentError, "lss nil" unless ls_req_list
-      dd.each { |dd_lsa|
+      raise ArgumentError, "ls_req_list required" unless ls_req_list
+      dd.each do |dd_lsa|
+        ours = lookup(dd_lsa)
         if advertised_routers.has?(dd_lsa.advertising_router)
-          our_lsa = lookup(dd_lsa)
-          if our_lsa and (our_lsa <=> dd_lsa)
-            our_lsa.force_refresh(dd_lsa.sequence_number)
+          if ours.nil?
+            ls_req_list.store(dd_lsa.key, 0)
+          elsif (ours <=> dd_lsa) < 0
+            ours.force_refresh(dd_lsa.sequence_number)
           end
-        else 
-          ls_req_list.store(dd_lsa.key,0)
+        elsif ours.nil? || (ours <=> dd_lsa) < 0
+          ls_req_list.store(dd_lsa.key, 0)
         end
-      }
+      end
       nil
     end
 

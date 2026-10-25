@@ -424,36 +424,19 @@ module OSPFv2
       [ls_type.to_i, ls_id.to_i, advertising_router.to_i]
     end
     
-    # -1  self older than other
-    #  0  self equivalent to other
-    # +1  self newer than other
-    # TODO: compare advr router id.
+    # Which instance of the same LSA is more recent (RFC 2328 13.1):
+    # -1 self older, 0 same instance, +1 self newer.
     def <=>(other)
-      raise RuntimeError unless self.key == other.key
-      if self.sequence_number < other.sequence_number
-        # puts "*** jme: our lsa older than other: our seq less than other seq ***"        
-        -1
-      elsif self.sequence_number > other.sequence_number
-        # puts "*** jme: our lsa newer than other: our seq greater than other seq ***"        
-        +1
-      else
-        if self.csum_to_i < other.csum_to_i
-          # puts "*** jme: our lsa older than other: our csum less than other csum ***"        
-          -1
-        elsif self.csum_to_i > other.csum_to_i
-          # puts "*** jme: our lsa newer than other: our csum greater than other csum ***"        
-          +1
-        else
-          if (self.ls_age != other.ls_age and other.ls_age >= MaxAge) or
-            ((other.ls_age - self.ls_age) > OSPFv2::MaxAgeDiff)
-            # puts "*** jme: our lsa newer than other: age diff < maxage diff: #{(other.ls_age - self.ls_age)} ***"
-            +1
-          else
-            # puts "*** jme: same lsa: age diff < maxage diff: #{(other.ls_age - self.ls_age)} ***"
-            0
-          end
-        end
-      end
+      raise ArgumentError, "different LSAs: #{key.inspect} vs #{other.key.inspect}" unless key == other.key
+      by_seq = sequence_number <=> other.sequence_number # signed: 0x80000001 is lowest
+      return by_seq unless by_seq.zero?
+      by_csum = csum_to_i <=> other.csum_to_i
+      return by_csum unless by_csum.zero?
+      mine, theirs = ls_age.to_i, other.ls_age.to_i
+      return +1 if mine >= MaxAge && theirs < MaxAge
+      return -1 if theirs >= MaxAge && mine < MaxAge
+      return 0 if (mine - theirs).abs <= OSPFv2::MaxAgeDiff
+      mine < theirs ? +1 : -1
     end
     
     def refresh(advertised_routers, refresh_time, seqn=nil)

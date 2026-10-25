@@ -96,6 +96,29 @@ class TestAdjacency < Test::Unit::TestCase
     assert dropped.keys.map(&:last).uniq.sort == [2, 4], "expected a DD and an LSU drop, got #{dropped.inspect}"
   end
 
+  # On a LAN the DR refloods every update it receives, our own LSAs
+  # included. Those echoes are acks: ages must keep growing and sequence
+  # numbers must not move.
+  def test_echoes_from_a_dr_do_not_reset_our_lsas
+    db = grid_lsdb(3, 3)
+    @a = build('0.0.0.1', '10.0.0.1', ls_db: db, log: @logs[0])
+    @b = build('0.0.0.200', '10.0.0.2', log: @logs[1])
+    def @b.recv_link_state_update(lsu, *args)
+      super
+      flood(lsu.lsas, AllSPFRouters)
+    end
+    @a.start
+    @b.start
+    wait_for { @a.full? && @b.full? }
+    LsAge.aging :on
+    sleep 3
+    seqs = db.all.map { |l| l.sequence_number.to_I }.uniq
+    assert_equal [0x80000001], seqs, 'echoes bumped sequence numbers'
+    assert db.all.all? { |l| l.ls_age.to_i >= 2 }, 'echoes reset ages'
+  ensure
+    LsAge.aging :off
+  end
+
   def test_inactivity_timer_brings_neighbor_down
     @a = build('0.0.0.1', '10.0.0.1', ls_db: grid_lsdb(2, 1), log: @logs[0])
     @b = build('0.0.0.2', '10.0.0.2', log: @logs[1])
