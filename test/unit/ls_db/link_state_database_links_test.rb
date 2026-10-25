@@ -1,9 +1,9 @@
-require 'ls_db/link_state_database_links'
+require 'ospfv2/ls_db/link_state_database_links'
 require "test/unit"
 
 # require "ls_db/link_add"
 
-class TestLsDbLinks < Test::Unit::TestCase
+class TestLsDbLinkStateDatabaseLinks < Test::Unit::TestCase
   include OSPFv2::LSDB
   def setup
     @ls_db = LinkStateDatabase.new(:area_id=> 0)

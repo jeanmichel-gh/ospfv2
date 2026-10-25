@@ -1,5 +1,5 @@
 require "test/unit"
-require "lsa/lsa_factory"
+require 'ospfv2/lsa/lsa_factory'
 
 class TestLsaLsa < Test::Unit::TestCase
   def test_asbr_summary
@@ -100,8 +100,8 @@ class TestLsaLsa < Test::Unit::TestCase
   #  			 4b94 50c0 4b94 50c0 4b94 50c0 4b94 50c0
   #  			 4b94 50c0 4b94 50c0 4b94 50c0 0009 0004
   #  			 0000 0000
-  require 'packet/ospf_packet'
-  require 'lsa/tlv/tlv_factory'
+  require 'ospfv2/packet/ospf_packet'
+  require 'ospfv2/lsa/tlv/tlv_factory'
   
   def test_traffic_engineering_link_tlv_2
     s = "

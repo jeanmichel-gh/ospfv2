@@ -1,7 +1,7 @@
 require "test/unit"
 
-require "lsa/tlv/link"
-require 'lsa/tlv/tlv_factory'
+require 'ospfv2/lsa/tlv/link'
+require 'ospfv2/lsa/tlv/tlv_factory'
 
 class TestLsaTlvLink < Test::Unit::TestCase
   include OSPFv2

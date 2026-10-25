@@ -1,6 +1,6 @@
 
 require "test/unit"
-require 'ie/id.rb'
+require 'ospfv2/ie/id'
 
 class TestIeId < Test::Unit::TestCase
   include OSPFv2

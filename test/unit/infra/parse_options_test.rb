@@ -1,7 +1,7 @@
 
 require "test/unit"
 
-require "infra/parse_options"
+require 'ospfv2/infra/parse_options'
 
 class TestOptParse < Test::Unit::TestCase
 

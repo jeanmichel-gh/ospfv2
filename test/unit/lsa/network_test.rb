@@ -1,6 +1,6 @@
 require "test/unit"
 
-require "lsa/network"
+require 'ospfv2/lsa/network'
 
 class TestLasNetwork < Test::Unit::TestCase
   include OSPFv2

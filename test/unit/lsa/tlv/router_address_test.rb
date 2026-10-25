@@ -1,6 +1,6 @@
 require "test/unit"
 
-require "lsa/tlv/router_address"
+require 'ospfv2/lsa/tlv/router_address'
 
 class TestLsaTlvRouterAddress < Test::Unit::TestCase
   include OSPFv2

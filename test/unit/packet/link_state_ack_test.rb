@@ -1,10 +1,10 @@
 require "test/unit"
-require 'lsa/router'
-require 'lsa/summary'
-require 'lsa/network'
+require 'ospfv2/lsa/router'
+require 'ospfv2/lsa/summary'
+require 'ospfv2/lsa/network'
 
-require "packet/link_state_ack"
-require 'packet/link_state_update'
+require 'ospfv2/packet/link_state_ack'
+require 'ospfv2/packet/link_state_update'
 
 
 class TestPacketLinkStateAck < Test::Unit::TestCase

@@ -1,6 +1,6 @@
 
 require "test/unit"
-require 'ie/ls_type'
+require 'ospfv2/ie/ls_type'
 
 
 class TestIeLsType < Test::Unit::TestCase

@@ -1,5 +1,5 @@
 require "test/unit"
-require "ie/tos_metric"
+require 'ospfv2/ie/tos_metric'
 
 class TestIeTosMetric < Test::Unit::TestCase
   include OSPFv2

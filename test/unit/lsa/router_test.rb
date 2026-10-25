@@ -1,7 +1,7 @@
 require "test/unit"
 
-require "lsa/router"
-require "lsa/lsa_factory"
+require 'ospfv2/lsa/router'
+require 'ospfv2/lsa/lsa_factory'
 
 class TestLsaRouter < Test::Unit::TestCase
   include OSPFv2

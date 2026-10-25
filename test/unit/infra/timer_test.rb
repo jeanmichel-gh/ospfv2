@@ -1,8 +1,9 @@
 require "test/unit"
 
-require "infra/timer"
+require 'ospfv2/infra/timer'
 
 class TestInfraTimer < Test::Unit::TestCase
+  include OSPFv2
 
   Timer1 = Class.new(Timer)
   Timer2 = Class.new(Timer)
@@ -55,6 +56,7 @@ class TestInfraTimer < Test::Unit::TestCase
 end
 
 class TestPeriodicTimer < Test::Unit::TestCase
+  include OSPFv2
 
   PeriodicTimer1 = Class.new(PeriodicTimer)
 

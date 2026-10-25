@@ -3,7 +3,7 @@
 require "test/unit"
 
 # require "lsa/external"
-require_relative "../../../lib/lsa/external"
+require 'ospfv2/lsa/external'
 
 class TestLsaExternal < Test::Unit::TestCase
   include OSPFv2

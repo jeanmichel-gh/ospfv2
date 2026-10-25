@@ -1,6 +1,6 @@
 require "test/unit"
-require "ls_db/link_state_database"
-require 'packet/ospf_packet'
+require 'ospfv2/ls_db/link_state_database'
+require 'ospfv2/packet/ospf_packet'
 
 class TestLsDbLinkStateDatabase < Test::Unit::TestCase
   include OSPFv2

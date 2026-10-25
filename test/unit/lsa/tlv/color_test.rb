@@ -24,7 +24,7 @@
 
 require "test/unit"
 
-require "lsa/tlv/color"
+require 'ospfv2/lsa/tlv/color'
 
 class TestLsaTlvColor < Test::Unit::TestCase
   include OSPFv2

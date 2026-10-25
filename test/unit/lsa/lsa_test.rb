@@ -1,6 +1,6 @@
 require "test/unit"
 
-require_relative "../../../lib/lsa/lsa"
+require 'ospfv2/lsa/lsa'
 # require_relative "lsa/lsa"
 
 class TestPacketLsa < Test::Unit::TestCase

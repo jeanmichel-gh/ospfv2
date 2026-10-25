@@ -1,6 +1,6 @@
 
 require "test/unit"
-require 'ie/packet_type'
+require 'ospfv2/ie/packet_type'
 
 
 class TestPacketType < Test::Unit::TestCase

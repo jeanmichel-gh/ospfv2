@@ -1,6 +1,6 @@
 require "test/unit"
 
-require "lsa/tlv/traffic_engineering_metric"
+require 'ospfv2/lsa/tlv/traffic_engineering_metric'
 
 class TestLsaTlvTrafficEngineeringMetric < Test::Unit::TestCase
   include OSPFv2

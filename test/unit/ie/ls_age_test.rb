@@ -1,6 +1,6 @@
 require "test/unit"
 
-require "ie/ls_age"
+require 'ospfv2/ie/ls_age'
 
 class TestIeLsAge < Test::Unit::TestCase
   include OSPFv2

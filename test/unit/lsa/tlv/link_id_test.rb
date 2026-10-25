@@ -1,6 +1,6 @@
 require "test/unit"
 
-require "lsa/tlv/link_id"
+require 'ospfv2/lsa/tlv/link_id'
 
 class TestLsaTlvLinkId < Test::Unit::TestCase
   include OSPFv2

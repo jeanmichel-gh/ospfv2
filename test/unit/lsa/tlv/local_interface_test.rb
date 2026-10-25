@@ -1,6 +1,6 @@
 require "test/unit"
 
-require "lsa/tlv/local_interface"
+require 'ospfv2/lsa/tlv/local_interface'
 
 class TestTlvLsaLocalInterface < Test::Unit::TestCase
   include OSPFv2

@@ -1,7 +1,7 @@
 require "test/unit"
-require 'lsa/router'
+require 'ospfv2/lsa/router'
 
-require "neighbor/neighbor"
+require 'ospfv2/neighbor/neighbor'
 
 class TestNeighborNeighbor < Test::Unit::TestCase
   include OSPFv2

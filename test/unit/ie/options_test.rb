@@ -5,7 +5,7 @@
 
 require 'test/unit'
 require 'pp'
-require 'ie/options'
+require 'ospfv2/ie/options'
 
 class TestOptions < Test::Unit::TestCase # :nodoc:
   include OSPFv2

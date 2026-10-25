@@ -1,6 +1,6 @@
 require "test/unit"
 
-require "lsa/tlv/remote_interface"
+require 'ospfv2/lsa/tlv/remote_interface'
 
 class TestLsaTlvRemoteInterface < Test::Unit::TestCase
   include OSPFv2
