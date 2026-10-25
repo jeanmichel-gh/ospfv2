@@ -33,9 +33,14 @@ class TestCommon < Test::Unit::TestCase
     assert_equal '10.0.0.12/30', OSPFv2::IP.nth_network(IPAddr.new('10.0.0.0/30'), 3)
     assert_equal '10.0.0.1/30', OSPFv2::IP.host(IPAddr.new('10.0.0.0/30'), 1)
     assert_equal '10.0.0.2/30', OSPFv2::IP.host(IPAddr.new('10.0.0.0/30'), 2)
-    # IPAddr itself is no longer patched
+    # IPAddr itself is no longer patched. Ruby 4.0's ipaddr has its own
+    # IPAddr#+, so check where methods come from rather than whether they exist.
     refute IPAddr.method_defined?(:mlen)
-    refute IPAddr.method_defined?(:+)
+    ours = File.expand_path('../../../lib', __dir__)
+    patched = %i[+ ^ netmask mlen to_s_net].select do |m|
+      IPAddr.method_defined?(m) && IPAddr.instance_method(m).source_location&.first.to_s.start_with?(ours)
+    end
+    assert_equal [], patched
     
     assert_equal '10.0.0.0', IPAddr.new('10.0.0.1/24').to_s
     assert_equal '10.0.0.0/24', OSPFv2::IP.to_s_net(IPAddr.new('10.0.0.1/24'))
