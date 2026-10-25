@@ -35,12 +35,33 @@ module OSPFv2
       end
     end
 
+    # RFC 2328 8.2 sanity checks on raw OSPF bytes. Returns nil when the
+    # packet is acceptable, else the reason to drop it. The checksum is
+    # only defined for null and simple password authentication.
+    def self.invalid?(bytes)
+      return 'shorter than an OSPF header' if bytes.bytesize < 24
+      version, _type, len = bytes.unpack('CCn')
+      return "version #{version}" unless version == 2
+      return "length field #{len} > #{bytes.bytesize} bytes received" if len > bytes.bytesize || len < 24
+      au_type = bytes.byteslice(14, 2).unpack1('n')
+      return nil if au_type == 2 # cryptographic: no checksum
+      data = bytes.byteslice(0, 16) + bytes.byteslice(24, len - 24)
+      data += "\0" if data.bytesize.odd?
+      sum = data.unpack('n*').sum
+      sum = (sum & 0xffff) + (sum >> 16) while sum > 0xffff
+      sum == 0xffff ? nil : 'bad checksum'
+    end
+
     private
 
     def dispatch(ev_type, ev)
       case ev_type
       when :ev_recv
         bytes, from = ev
+        unless (why = self.class.invalid?(bytes)).nil?
+          @neighbor.log :drop, "packet from #{from}: #{why}"
+          return
+        end
         packet = OspfPacket.factory(bytes)
         unless packet
           @neighbor.log :drop, "not an OSPF packet from #{from}: #{bytes.unpack1('H*')[0, 64]}"

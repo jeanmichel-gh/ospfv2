@@ -1,3 +1,15 @@
+=== 0.1.0 2026-10-24
+
+* Runs on Ruby 3.1+ (Fixnum, missing opaque.rb, IE method_missing, sprintf ages)
+* Gem layout under lib/ospfv2, no runtime dependency outside the standard library
+* Topology files (YAML or Ruby DSL), Simulator, CLI subcommands, console, web dashboard
+* Docker image and compose labs
+* Protocol fixes: area id, hello/dead interval and netmask on the wire, interface
+  link to the DUT, DD exchange paging and retransmission, SeqNumberMismatch,
+  Fletcher checksum over 4 KB, packet checksum on receive, flooding address
+* 243 tests, including two simulators reaching Full over an in-memory segment
+  See REVIEW.md
+
 === 0.0.3
 
 * Opaque LSA

@@ -111,6 +111,32 @@ class TestNeighborNeighbor < Test::Unit::TestCase
     n&.stop
   end
 
+  def test_packet_sanity_checks
+    good = Hello.new(router_id: 2, netmask: '255.255.255.0').encode
+    assert_nil NeighborEventHandler.invalid?(good)
+    assert_nil NeighborEventHandler.invalid?(good + "\xff\xff\x00\x0c".b), 'trailing LLS data is fine'
+    bad = good.dup
+    bad.setbyte(30, bad.getbyte(30) ^ 0x10)
+    assert_equal 'bad checksum', NeighborEventHandler.invalid?(bad)
+    assert_match(/version/, NeighborEventHandler.invalid?("\x03".b + good[1..]))
+    assert_match(/length/, NeighborEventHandler.invalid?(good[0, 30]))
+  end
+
+  def test_corrupt_hello_is_dropped
+    t = CaptureTransport.new
+    log = StringIO.new
+    n = Neighbor.new(transport: t, log: log, src_addr: '10.0.0.1/24')
+    n.start
+    bytes = Hello.new(router_id: 2, netmask: '255.255.255.0').encode
+    bytes.setbyte(30, bytes.getbyte(30) ^ 0x10)
+    t.instance_variable_get(:@on_packet).call(bytes, '10.0.0.2')
+    sleep 0.2
+    assert_equal :attempt, n.state
+    assert_match(/bad checksum/, log.string)
+  ensure
+    n&.stop
+  end
+
   def test_hello_moves_to_init_then_exstart
     t = CaptureTransport.new
     n = new_neighbor(transport: t, router_id: 1, src_addr: '10.0.0.1/24')
