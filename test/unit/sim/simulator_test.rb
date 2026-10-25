@@ -145,6 +145,44 @@ class TestSimulator < Test::Unit::TestCase
     assert @sim.ls_db.all_proxied.all?(&:maxaged?)
   end
 
+  def test_aging_switch_reaches_lsas
+    @sim.aging = true
+    sleep 1.1
+    assert @sim.lsdb_rows.all? { |r| r[:age] >= 1 }, 'ages grow while aging is on'
+    @sim.aging = false
+    frozen = @sim.lsdb_rows.map { |r| r[:age] }
+    sleep 1.1
+    assert_equal frozen, @sim.lsdb_rows.map { |r| r[:age] }, 'ages hold while frozen'
+  ensure
+    @sim.aging = false
+  end
+
+  def test_flush_then_refresh_restores_from_topology
+    @sim.link_down('r1c1--r1c2')
+    seq_before = rlsa('0.1.0.1').sequence_number.to_I
+    n = @sim.ls_db.size
+    @sim.flush_all
+    assert @sim.flushed?
+    @sim.ls_db.all.dup.each { |l| @sim.ls_db.ls_ack(l) } # the router acks, we delete
+    assert_equal 0, @sim.ls_db.size
+    @sim.refresh_all
+    refute @sim.flushed?
+    assert_equal n, @sim.ls_db.size
+    assert_operator rlsa('0.1.0.1').sequence_number.to_I, :>, seq_before, 'newer than the flushed copy'
+    refute @sim.link('r1c1--r1c2').up?, 'link state survives the restore'
+    refute rlsa('0.1.0.1').has_link?(1, '0.1.0.2')
+    assert rlsa('0.1.0.1').has_link?(1, '0.2.0.1')
+    assert @sim.ls_db.all_not_acked.size == n, 'restored LSAs wait for an ack'
+  end
+
+  def test_start_after_flush_restores
+    @sim.flush_all
+    @sim.ls_db.all.dup.each { |l| @sim.ls_db.ls_ack(l) }
+    @sim.start
+    assert_operator @sim.ls_db.size, :>, 0
+    assert_same @sim.ls_db, @sim.neighbor.ls_db
+  end
+
   def test_flap
     sim = @sim
     states = []

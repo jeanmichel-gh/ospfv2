@@ -24,51 +24,83 @@ require_relative  '../infra/ospf_constants'
 
 module OSPFv2
 class LsAge
-  
-  class << self
-    attr_accessor :_aging
-    def aging?
-      _aging
-    end
-    def aging(arg=nil)
-      if arg
-        case arg
-        when :on  ; self._aging = true
-        when :off ; self._aging = false
+
+  # One aging clock shared by every LSA, whatever LsAge subclass it uses.
+  # It only advances while aging is on, so freezing holds every age where
+  # it is and resuming continues from there.
+  module Clock
+    @lock = Mutex.new
+    @accumulated = 0.0
+    @since = nil
+
+    class << self
+      def now
+        @lock.synchronize { @accumulated + (@since ? monotonic - @since : 0) }
+      end
+
+      def running?
+        @lock.synchronize { !@since.nil? }
+      end
+
+      def start
+        @lock.synchronize { @since ||= monotonic }
+      end
+
+      def stop
+        @lock.synchronize do
+          @accumulated += monotonic - @since if @since
+          @since = nil
         end
-      else
-        self._aging = ! _aging
+      end
+
+      private
+
+      def monotonic
+        Process.clock_gettime(Process::CLOCK_MONOTONIC)
       end
     end
   end
-  
-  include Comparable
-  
-  def initialize(age=0)
-    @age=age
-    raise ArgumentError, "Invalid Argument #{age}" unless age.is_a?(Integer)
-  end
-  
-  def to_i
-    if aging?
-      @time ||= Time.now
-      (Time.new - @time + @age).to_int
-    else
-      @age
+
+  class << self
+    def aging?
+      Clock.running?
+    end
+
+    # :on, :off, or no argument to toggle.
+    def aging(arg=nil)
+      on = arg.nil? ? !aging? : arg == :on || arg == true
+      on ? Clock.start : Clock.stop
+      aging?
     end
   end
-  
+
+  include Comparable
+
+  def initialize(age=0)
+    raise ArgumentError, "Invalid Argument #{age}" unless age.is_a?(Integer)
+    @age=age
+    @start = Clock.now
+  end
+
+  # Current age. Aging stops at MaxAge. An age already at or above MaxAge,
+  # such as a DoNotAge value (RFC 1793, high bit set), is left as is.
+  def to_i
+    return @age if @age >= OSPFv2::MaxAge
+    [(@age + Clock.now - @start).to_i, OSPFv2::MaxAge].min
+  end
+
   def reset(age=nil)
     @age = age if age
-    @time=nil
+    @start = Clock.now
   end
-  
+
   def aging?
     self.class.aging?
   end
-  
+
   def maxage
-    @age = OSPFv2::MaxAge
+    reset(OSPFv2::MaxAge)
+    to_i
   end
   
   def maxaged?
@@ -91,8 +123,9 @@ class LsAge
     "LS age: #{to_i}"
   end
   
+  # The age on the wire is the current age (it was always the initial one).
   def encode
-    [@age].pack('n')
+    [to_i].pack('n')
   end
   alias :enc  :encode
   

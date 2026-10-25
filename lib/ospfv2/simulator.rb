@@ -52,6 +52,7 @@ module OSPFv2
       @events = []
       @event_seq = 0
       @flaps = {}
+      @flushed_seq = {}
       @log = log || StringIO.new
       build_lsdb
       build_neighbor(transport, debug)
@@ -62,6 +63,7 @@ module OSPFv2
 
     def start
       synchronize do
+        restore if flushed?
         @neighbor.start
         @started_at = Time.now
         event :info, "neighbor started on #{settings.interface} (router id #{rid_s(settings.router_id)}, area #{rid_s(settings.area)})"
@@ -137,17 +139,57 @@ module OSPFv2
     end
 
     # Re-originates every LSA the simulator owns (new sequence numbers).
+    # Re-originates every LSA the simulator owns (new sequence numbers).
+    # After a flush, rebuilds them from the topology first.
     def refresh_all
-      synchronize { reoriginate(@ls_db.all_proxied, 'refresh of all originated LSAs') }
+      synchronize do
+        next restore if flushed?
+        reoriginate(@ls_db.all_proxied, 'refresh of all originated LSAs')
+      end
     end
 
-    # Flushes every LSA the simulator owns (MaxAge), e.g. before leaving.
+    # Flushes every LSA the simulator owns (MaxAge). The router acks and
+    # deletes them, and so do we. Refresh, or a neighbor restart, brings
+    # them back from the topology.
     def flush_all
       synchronize do
         lsas = @ls_db.all_proxied
+        lsas.each { |l| @flushed_seq[l.key] = l.sequence_number.to_I }
         lsas.each(&:maxage)
         @neighbor.flood(lsas) if @neighbor.full?
-        event :lsdb, "flushed #{lsas.size} LSAs"
+        event :lsdb, "flushed #{lsas.size} LSAs. Refresh LSAs or restart the neighbor to originate them again"
+        lsas
+      end
+    end
+
+    def flushed?
+      !@flushed_seq.empty?
+    end
+
+    # Rebuilds the database from the topology after a flush. Link states
+    # set since the start carry over, and every LSA gets a sequence number
+    # above the flushed copy so the router takes it as newer.
+    def restore
+      synchronize do
+        down = @links.reject(&:up?).map(&:id)
+        build_lsdb
+        @neighbor.ls_db = @ls_db
+        @links.each do |l|
+          if down.include?(l.id)
+            l.down! if l.up?
+            @ls_db.link_down(l.lsdb_link)
+          elsif !l.up?
+            l.up!
+            @ls_db.link_up(l.lsdb_link)
+          end
+        end
+        lsas = @ls_db.all_proxied
+        lsas.each { |l| l.force_refresh(@flushed_seq.fetch(l.key, nil)) }
+        @flushed_seq.clear
+        update_interface_link(@neighbor.state, flood: false)
+        @neighbor.flood(lsas) if @neighbor.full?
+        event :lsdb, "restored #{lsas.size} LSAs from the topology"
+        lsas
       end
     end
 
@@ -188,6 +230,7 @@ module OSPFv2
           running: running?,
           started_at: @started_at&.iso8601,
           aging: aging?,
+          flushed: flushed?,
           neighbor: @neighbor.to_hash,
           counts: lsdb_counts,
           topology: { counts: @topology.counts, link_prefix: @topology.lsdb[:link_prefix] },
@@ -346,7 +389,7 @@ module OSPFv2
     # broadcast network, or a point-to-point link plus the subnet stub on
     # a point-to-point network. Without this the DUT has no link back to
     # the simulated area and installs none of its routes.
-    def update_interface_link(state)
+    def update_interface_link(state, flood: true)
       before = @sim_lsa.links.map(&:encode).sort
       net = settings.prefix
       @sim_lsa.delete(:stub_network, net.to_s)
@@ -361,6 +404,7 @@ module OSPFv2
       else
         @sim_lsa << interface_stub
       end
+      return unless flood
       reoriginate(@sim_lsa, "interface link (#{state})") if @sim_lsa.links.map(&:encode).sort != before
     end
   end

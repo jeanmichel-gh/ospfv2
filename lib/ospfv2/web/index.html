@@ -435,6 +435,13 @@ pre.lsa:empty { display: none; }
       return tr;
     });
     if (list.length > MAX) { const tr = el('tr'); tr.append(el('td', { colspan: 8 }, `${list.length - MAX} more rows. Use Plain text for the full list.`)); trs.push(tr); }
+    if (!rows.length) {
+      const tr = el('tr');
+      tr.append(el('td', { colspan: 8 }, state.flushed
+        ? 'The simulated LSAs were flushed. Refresh LSAs or restart the neighbor to originate them again.'
+        : 'The database is empty.'));
+      trs.push(tr);
+    }
     $('lsdb').replaceChildren(...trs);
   }
   async function showLsa(type, id, advr) {
