@@ -71,6 +71,17 @@
 * Interop: on the FRR topology our routes reach the kernel, carry pings
   across it, survive a crash and restart, and leave on a clean stop.
   Netlink tests in a network namespace (run as root)
+* Area border router: B bit, type 3 summaries for other areas' routes and
+  type 4 summaries for AS boundary routers (RFC 2328 12.4.3), Appendix E
+  link state ids, withdrawn when no longer wanted
+* AS boundary router: AS-external-LSAs (12.4.4) and the E bit, from a
+  Junos-style export policy (policy-options policy-statement with
+  protocol direct|static, route-filter exact|orlonger|longer|upto, then
+  metric, external type, tag, accept, reject; protocols ospf export)
+* Fix: a router in two areas tracked its own LSAs by LSA key alone, so
+  its router-LSA in the second area could stay stale
+* Interop: our router as ABR and ASBR between two FRR routers; FRR's
+  tables match our SPF from their seats and traffic crosses our router
 * Interop test: on a four-router FRR topology (ECMP, an ABR, type 1 and
   type 2 externals), SPF over our database gives FRR's own table
   exactly, before and after a metric change and a withdrawn external

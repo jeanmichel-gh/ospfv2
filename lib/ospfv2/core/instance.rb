@@ -39,7 +39,7 @@ module OSPFv2
       AREA_SCOPE = [1, 2, 3, 4].freeze
 
       attr_reader :router_id, :loop, :areas, :interfaces, :as_lsdb, :random, :events, :stats,
-                  :route_table, :spf, :spf_log
+                  :route_table, :spf, :spf_log, :externals
 
       # router_id: dotted quad or Integer
       # loop:      the EventLoop that owns this router
@@ -60,6 +60,7 @@ module OSPFv2
         @max_paths = max_paths
         @route_table = Spf::Table.empty
         @spf_log = []
+        @externals = {} # key => spec, the AS-external-LSAs we originate
         @spf_skipped = []
         @route_listeners = []
         @spf = SpfScheduler.new(loop, **spf) { |reasons| compute_routes(reasons) }
@@ -124,6 +125,7 @@ module OSPFv2
         @running = true
         log(:info, nil, "router #{router_id_s} starting")
         @interfaces.each_value(&:up)
+        originate_externals
         @sweep = @loop.every(1, :maxage_sweep) { sweep }
         self
       end
@@ -134,7 +136,10 @@ module OSPFv2
       def stop(flush: false)
         return self unless @running
         if flush
-          @own.to_a.each { |_, o| flush_own(o[:area], o[:key]) if @areas[o[:area].id].equal?(o[:area]) }
+          @own.to_a.each do |sk, o|
+            # AS-wide LSAs flood the same from any area.
+            flush_own(o[:area], o[:key]) if sk[0].nil? || @areas[o[:area].id].equal?(o[:area])
+          end
         end
         @running = false
         @interfaces.each_value(&:down)
@@ -205,11 +210,42 @@ module OSPFv2
         # Up or down can make us an area border router or stop it: every
         # router-LSA carries the B bit.
         @areas.each_value(&:schedule_origination)
+        originate_externals if new != :down
         @spf.trigger(:interface, iface.name)
       end
 
       # Attached to more than one area (RFC 2328 3.3): an area border router.
       def abr? = @areas.values.count(&:active?) > 1
+
+      # Advertising external routes: an AS boundary router.
+      def asbr? = !@externals.empty?
+
+      # ---- AS-external-LSAs (RFC 2328 12.4.4) ----
+
+      # Sets the external routes we advertise:
+      #   [{ prefix:, prefix_len:, metric:, type: 1|2, tag: }]
+      # New and changed ones are originated, the rest flushed. The E bit
+      # goes on or off in every router-LSA as the list fills or empties.
+      def externals=(routes)
+        specs = {}
+        ids = {}
+        routes.sort_by { |r| [r[:prefix_len], r[:prefix]] }.each do |r|
+          len = r[:prefix_len]
+          prefix = r[:prefix] & Addr.mask(len)
+          ls_id = summary_ls_id(Spf::Route.new(prefix: prefix, prefix_len: len), ids) or next
+          e = r[:type] == 1 ? 0 : 0x8000_0000
+          metric = [r[:metric].to_i, Spf::LS_INFINITY - 1].min
+          specs[[5, ls_id, @router_id]] = { type: 5, ls_id: ls_id,
+                                            body: [Addr.mask(len), e | metric, 0, r[:tag].to_i].pack('NNNN') }
+        end
+        was = asbr?
+        old = @externals
+        @externals = specs
+        originate_externals
+        area = @areas.values.find(&:active?) || @areas.values.first
+        (old.keys - specs.keys).each { |key| flush_own(area, key) } if area
+        @areas.each_value(&:schedule_origination) if asbr? != was
+      end
 
       def dr_changed(iface)
         iface.area.schedule_origination
@@ -477,6 +513,14 @@ module OSPFv2
         nil
       end
 
+      # Floods our externals: they are AS-wide, so any area of ours carries
+      # them. With no area up yet, they go out when one comes up.
+      def originate_externals
+        return unless @running
+        area = @areas.values.find(&:active?) or return
+        @externals.each_value { |spec| originate(area, spec) }
+      end
+
       def lsdb_changed(lsa, _old)
         return unless @running
         @spf.trigger(lsa.type_name, lsa.type == 1 ? Addr.to_s(lsa.advr) : "#{Addr.to_s(lsa.ls_id)} from #{Addr.to_s(lsa.advr)}")
@@ -506,7 +550,8 @@ module OSPFv2
       # An area with no interfaces left: stop refreshing our LSAs in it and
       # forget it.
       def drop_area(area)
-        @own.select { |_, o| o[:area].equal?(area) }.each_key do |key|
+        # AS-wide LSAs are not the area's: they keep refreshing.
+        @own.select { |sk, o| !sk[0].nil? && o[:area].equal?(area) }.each_key do |key|
           @own.delete(key)[:refresh]&.cancel
           @deferred.delete(key)&.cancel
         end

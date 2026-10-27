@@ -70,6 +70,7 @@ module OSPFv2
         when 1 then ls_id == @instance.router_id
         when 2 then @interfaces.any? { |i| i.address == ls_id && network_lsa_spec(i) }
         when 3, 4 then @summaries.key?(key)
+        when 5 then @instance.externals.key?(key)
         else false
         end
       end
@@ -79,6 +80,7 @@ module OSPFv2
         when 1 then key[1] == @instance.router_id ? router_lsa_spec : nil
         when 2 then network_lsa_spec(@interfaces.find { |i| i.address == key[1] })
         when 3, 4 then @summaries[key]
+        when 5 then @instance.externals[key]
         end
       end
 
@@ -105,7 +107,7 @@ module OSPFv2
             links << stub
           end
         end
-        flags = @instance.abr? ? 1 : 0 # B bit (A.4.2)
+        flags = (@instance.abr? ? 1 : 0) | (@instance.asbr? ? 2 : 0) # B and E bits (A.4.2)
         { type: 1, ls_id: @instance.router_id, body: router_body(links, flags) }
       end
 

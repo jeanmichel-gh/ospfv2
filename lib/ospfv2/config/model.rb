@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'tree'
+require_relative 'policy'
 
 module OSPFv2
   module Config
@@ -34,7 +35,7 @@ module OSPFv2
         197 => 'openfabric (FRR)', 198 => 'srte (FRR)'
       }.freeze
 
-      attr_reader :router_id, :interfaces, :warnings, :kernel
+      attr_reader :router_id, :interfaces, :warnings, :kernel, :export
 
       def initialize(tree)
         @errors = []
@@ -48,6 +49,7 @@ module OSPFv2
           (a['interface'] || {}).each { |name, i| interface(area, name, i) }
         end
         @kernel = kernel_options(data.dig('routing-options', 'kernel') || {})
+        @export = export_policy(data)
         @warnings << 'no OSPF interfaces configured' if @interfaces.empty? && @errors.empty?
         raise Error, @errors.join("\n") unless @errors.empty?
         freeze
@@ -76,6 +78,18 @@ module OSPFv2
         auth = authentication(name, i['authentication'])
         opts[:auth] = auth if auth
         @interfaces[name] = opts.freeze
+      end
+
+      def export_policy(data)
+        name = data.dig('protocols', 'ospf', 'export') or return nil
+        policy = data.dig('policy-options', 'policy-statement', name)
+        unless policy
+          @errors << "protocols ospf export: policy-statement #{name} is not defined under policy-options"
+          return nil
+        end
+        p = Policy.from_config(name, policy)
+        @warnings << "policy-statement #{name} accepts nothing" if p.terms.none? { |t| t.action == :accept }
+        p
       end
 
       def kernel_options(k)

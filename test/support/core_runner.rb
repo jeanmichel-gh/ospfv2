@@ -12,6 +12,9 @@
 #                          "auth": {"type": "md5", "keys": {"1": "secret"}}},
 #                         {"name": "lo", "address": "1.1.1.1/32", "passive": true}]}
 #
+# "externals": [{"prefix": "203.0.113.0/24", "metric": 7, "type": 1, "tag": 9}]
+# are advertised as AS-external-LSAs.
+#
 # With "fib": true the routes go into the namespace's kernel table over
 # netlink (protocol 89, main table), and SIGTERM withdraws them.
 #
@@ -57,6 +60,14 @@ config.fetch(:interfaces).each do |i|
   end
 end
 loop_.call { router.start }
+if config[:externals]
+  ext = config[:externals].map do |e|
+    ip, len = e.fetch(:prefix).split('/')
+    { prefix: OSPFv2::Core::Addr.to_i(ip), prefix_len: len.to_i, metric: e[:metric] || 20, type: e[:type] || 2,
+      tag: e[:tag] || 0 }
+  end
+  loop_.call { router.externals = ext }
+end
 fib = nil
 if config[:fib]
   log = ->(level, msg) { warn "#{level} #{msg}" unless level == :debug }

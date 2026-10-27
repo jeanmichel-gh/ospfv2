@@ -24,7 +24,7 @@ class FrrTopology
   ROOT = FrrLab::ROOT
 
   Router = Struct.new(:name, :kind, :router_id, :loopback_area, :extra, :frr_extra, :dummies, :links, :fib,
-                      keyword_init: true)
+                      :externals, keyword_init: true)
   Link = Struct.new(:ifname, :peer, :address, :prefix_len, :p2p, :area, :cost, keyword_init: true)
 
   attr_reader :routers, :dir
@@ -44,9 +44,10 @@ class FrrTopology
   end
 
   # fib: install routes in the namespace's kernel table
-  def core(name, router_id, loopback_area: 0, fib: false)
+  # externals: [{ prefix:, metric:, type:, tag: }] to advertise
+  def core(name, router_id, loopback_area: 0, fib: false, externals: nil, dummies: {})
     @routers[name] = Router.new(name: name, kind: :core, router_id: router_id, loopback_area: loopback_area,
-                                extra: [], frr_extra: [], dummies: {}, links: [], fib: fib)
+                                extra: [], frr_extra: [], dummies: dummies, links: [], fib: fib, externals: externals)
   end
 
   # Joins a and b on +subnet+; a gets the first host address, b the second.
@@ -201,7 +202,7 @@ class FrrTopology
     end
     ifaces << { name: 'lo', address: "#{r.router_id}/32", passive: true, area: OSPFv2::Core::Addr.to_s(r.loopback_area) }
     cfg = File.join(@dir, "#{r.name}.json")
-    File.write(cfg, JSON.generate(router_id: r.router_id, interfaces: ifaces, fib: r.fib))
+    File.write(cfg, JSON.generate(router_id: r.router_id, interfaces: ifaces, fib: r.fib, externals: r.externals))
     @pids[r.name] = Process.spawn('ip', 'netns', 'exec', ns(r.name), RbConfig.ruby, "-I#{ROOT}/lib",
                                   "#{ROOT}/test/support/core_runner.rb", cfg, state_file(r.name),
                                   %i[out err] => [File.join(@dir, "#{r.name}.log"), 'a'])

@@ -200,6 +200,33 @@ That is how keys roll over without dropping adjacencies.
 Commit writes the file given with `-f` (mode 0600, as `set` lines) and keeps the
 previous versions next to it as `ospfd.conf.rollback.N`. `kill -HUP` reloads the file.
 
+### Areas and external routes
+
+An interface in a second area makes ospfd an area border router: it sets the B bit and
+tells each area about the others with summary-LSAs (and about AS boundary routers
+with type 4 summaries), as RFC 2328 12.4.3 says.
+
+External routes are advertised through an export policy, as on Junos. The host's own
+networks (`direct`) and static routes in the kernel (`static`) are the sources.
+
+```
+set policy-options policy-statement EXPORT term lan from protocol direct
+set policy-options policy-statement EXPORT term lan from route-filter 192.0.2.0/24 exact
+set policy-options policy-statement EXPORT term lan then external type 1
+set policy-options policy-statement EXPORT term lan then accept
+set policy-options policy-statement EXPORT term statics from protocol static
+set policy-options policy-statement EXPORT term statics then metric 50
+set policy-options policy-statement EXPORT term statics then tag 100
+set policy-options policy-statement EXPORT term statics then accept
+set protocols ospf export EXPORT
+```
+
+Terms are tried in order. `route-filter` takes `exact` (the default), `orlonger`,
+`longer` or `upto /N`. `then` sets `metric` (default 20), `external type 1|2`
+(default 2) and `tag`, and `accept` or `reject` ends the policy. A route no term
+accepts is not exported. New addresses and static routes are picked up within 5
+seconds.
+
 ### Routes in the kernel
 
 ospfd installs every OSPF route that goes through a gateway. Networks the host sits
