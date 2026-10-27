@@ -64,8 +64,10 @@ module OSPFv2
       # is the type 2 metric. +advr+ is the router that advertised it.
       # External routes also carry the LSA they come from: +lsa_type+ (5,
       # or 7 with +area+ the NSSA), +lsa_metric+ and the type 7 +p_bit+.
+      # Router entries also carry +address+: the router's own address on
+      # the link toward us in the tree, where a virtual link sends to it.
       Route = Struct.new(:prefix, :prefix_len, :path_type, :cost, :type2_cost, :area, :next_hops,
-                         :advr, :tag, :forwarding, :lsa_type, :lsa_metric, :p_bit, keyword_init: true) do
+                         :advr, :tag, :forwarding, :lsa_type, :lsa_metric, :p_bit, :address, keyword_init: true) do
         def dest_s = "#{Addr.to_s(prefix)}/#{prefix_len}"
         def area_s = area && Addr.to_s(area)
 
@@ -169,6 +171,7 @@ module OSPFv2
           @attached = @areas.select { |a| a.interfaces.any? && a.lsas.any? { |l| l.key == [1, @root, @root] } }
           @abr = @attached.size > 1 && @attached.any? { |a| a.id.zero? }
           @backbone_routers = 0
+          @transit_capable = {}
           # Transit areas before the backbone: a virtual link's next hops
           # come from the transit area's tree (16.1.1).
           @areas.sort_by { |a| a.id.zero? ? 1 : 0 }.each { |a| intra_area(a) }
@@ -227,6 +230,10 @@ module OSPFv2
           end
           @stats[:vertices] += tree.size
           @backbone_routers = tree.count { |id, _| id[0] == :router } - 1 if area.id.zero?
+          # TransitCapability: a router in the tree sets the V bit (16.1).
+          @transit_capable[area.id] = tree.each_value.any? do |x|
+            x.id[0] == :router && (router_body(x.lsa)&.first.to_i & 4) == 4
+          end
           stub_routes(area, tree)
         end
 
@@ -383,7 +390,22 @@ module OSPFv2
           @routers[[v.id[1], area.id]] = Route.new(prefix: v.id[1], prefix_len: 32, path_type: :intra, cost: v.dist,
                                                     area: area.id, next_hops: v.next_hops.dup, advr: v.id[1],
                                                     tag: { abr: (flags & 1) == 1, asbr: (flags & 2) == 2,
-                                                           nt: (flags & 0x10) == 0x10 })
+                                                           nt: (flags & 0x10) == 0x10 },
+                                                    address: parent_address(v))
+        end
+
+        # The router's address on its link to its parent in the tree (16.1
+        # step 4: a virtual link's far end address). Of several parents,
+        # the one our first next hop goes through.
+        def parent_address(v)
+          links = router_links(v.lsa) or return nil
+          gw = v.next_hops.first&.gateway
+          v.parents.each do |kind, id|
+            cands = links.select { |l| l.type == (kind == :network ? 2 : 1) && l.id == id }
+            l = cands.find { |x| x.data == gw } || cands.first
+            return l.data if l
+          end
+          nil
         end
 
         # ---- 16.2: inter-area routes ----
@@ -445,13 +467,7 @@ module OSPFv2
           end
         end
 
-        def transit_capable?(area)
-          area.lsas.any? do |l|
-            next false unless l.type == 1 && !l.max_age?
-            parts = router_body(l)
-            parts && (parts[0] & 4) == 4
-          end
-        end
+        def transit_capable?(area) = @transit_capable[area.id]
 
         def add_inter(table, key, len, area, cost, br, asbr: false)
           cur = table[key]

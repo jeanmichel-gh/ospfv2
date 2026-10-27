@@ -58,6 +58,9 @@ class TestDaemonVirtualLink < Test::Unit::TestCase
     assert_equal :inter, @peer.routes[[A['1.1.1.1'], 32]].path_type, 'area 2 summarized over the virtual link'
     assert vl.full_neighbors.any?
     assert(@d.views.interfaces.any? { |i| i[:name] == 'vl-2.2.2.2' && i[:type] == :virtual })
+    commit!('set protocols ospf area 0 virtual-link neighbor-id 2.2.2.2 authentication md5 1 key secret')
+    assert_same vl, @d.instance.virtual_links[A['2.2.2.2']], 'a key applies in place, no restart'
+    assert_match(/md5/i, vl.auth.to_s)
     commit!('delete protocols ospf area 0 virtual-link')
     assert_empty @d.instance.virtual_links
   end

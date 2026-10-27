@@ -19,7 +19,8 @@ module FrrTables
     nets = {}
     routers = {}
     topology.frr_json(name, 'show ip ospf route').each do |dest, r|
-      hops = r['nexthops'].map { |h| h['directlyAttachedTo'] ? [h['directlyAttachedTo'], nil] : [h['via'], h['ip']] }.sort
+      # uniq: FRR lists one next hop twice when two equal paths share it.
+      hops = r['nexthops'].map { |h| h['directlyAttachedTo'] ? [h['directlyAttachedTo'], nil] : [h['via'], h['ip']] }.uniq.sort
       if dest.include?('/')
         nets[dest] = [FRR_TYPES.fetch(r['routeType']), r['cost'], r['type2cost'], hops]
       else

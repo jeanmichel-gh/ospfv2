@@ -244,7 +244,9 @@ set protocols ospf area 0 virtual-link neighbor-id 2.2.2.2 transit-area 1
 
 It comes up when area 1 reaches 2.2.2.2, costs what that path costs, and takes the
 interface timers and authentication statements. `show ospf interface` lists it as
-`vl-2.2.2.2`.
+`vl-2.2.2.2`. Its packets follow the kernel routing table, so with `routing-options
+kernel no-install` only a far end one hop away can be reached. One virtual link per
+far end router.
 
 External routes are advertised through an export policy, as on Junos. The host's own
 networks (`direct`) and static routes in the kernel (`static`) are the sources.

@@ -152,7 +152,8 @@ module OSPFv2
         return self if @running
         @running = true
         log(:info, nil, "router #{router_id_s} starting")
-        @interfaces.each_value(&:up)
+        # Virtual links come up when SPF reaches their other end.
+        @interfaces.each_value { |i| i.up unless i.virtual? }
         refresh_externals
         @sweep = @loop.every(1, :maxage_sweep) { sweep }
         self
@@ -506,7 +507,7 @@ module OSPFv2
           area = @areas[vl.transit_area_id]
           hop = entry&.next_hops&.first
           iface = hop && @interfaces[hop.interface]
-          remote = entry && area && virtual_remote(area, vl.neighbor_id, hop)
+          remote = entry && area && (entry.address || virtual_remote(area, vl.neighbor_id, hop))
           if entry && entry.path_type == :intra && iface && remote && area.active? && !area.stub? && !area.nssa?
             vl.reach(cost: entry.cost, local: iface.address, remote: remote, via: iface.name)
           else
@@ -613,14 +614,12 @@ module OSPFv2
       # not summarized, and nothing unreachable is.
       def summarize?(r, area)
         return false if r.area.nil? || r.area == area.id || r.cost >= Spf::LS_INFINITY
-        case r.path_type
-        when :intra then true
-        when :inter
-          return false if area.id.zero?
-          names = area.interfaces.map(&:name)
-          r.next_hops.none? { |h| names.include?(h.interface) }
-        else false
-        end
+        return false unless %i[intra inter].include?(r.path_type)
+        return false if r.path_type == :inter && area.id.zero?
+        # Never back into the area its traffic goes through (12.4.3): an
+        # inter-area route, or a backbone route over a virtual link.
+        names = area.interfaces.map(&:name)
+        r.next_hops.none? { |h| names.include?(h.interface) }
       end
 
       # The cheapest entry per ASBR, whatever area it is in. An NSSA's ASBRs

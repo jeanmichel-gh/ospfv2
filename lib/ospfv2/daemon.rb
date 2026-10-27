@@ -296,6 +296,14 @@ module OSPFv2
       @applied_vls ||= {}
       (have.keys.map { |id| Core::Addr.to_s(id) } | want.keys).each do |rid|
         next if want[rid] && want[rid] == @applied_vls[rid] && have.key?(Core::Addr.to_i(rid))
+        # A new key or password applies in place, as on interfaces.
+        if want[rid] && @applied_vls[rid] && have.key?(Core::Addr.to_i(rid)) &&
+           want[rid].except(:auth) == @applied_vls[rid].except(:auth)
+          have[Core::Addr.to_i(rid)].auth = want[rid][:auth]
+          @applied_vls[rid] = want[rid]
+          log(:info, "virtual link to #{rid}: authentication changed")
+          next
+        end
         if have.key?(Core::Addr.to_i(rid))
           @instance.remove_virtual_link(rid)
           @applied_vls.delete(rid)

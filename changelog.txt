@@ -96,7 +96,9 @@
   AS-external LSAs over it, type 4 links in the backbone router-LSA, the
   V bit in the transit area, next hops from the transit area, and transit
   area summaries checked for shorter paths. Interop with FRR across two
-  hops of a transit area
+  hops of a transit area. The far end's address is the one on the path
+  toward us; backbone routes over a virtual link are not summarized back
+  into the transit area; a new key applies without restarting the link
 * Area border routers per RFC 3509: attached to the backbone and another
   area; without a backbone neighbor, every area's summaries count
 * NSSA review fixes: border routers ignore each other's type 7 default,

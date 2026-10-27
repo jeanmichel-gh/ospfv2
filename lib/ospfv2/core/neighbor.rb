@@ -83,7 +83,7 @@ module OSPFv2
       # network every packet goes to AllSPFRouters (RFC 2328 8.1), which
       # also works for /31 and unnumbered peers.
       def unicast_destination
-        return @address if @iface.virtual? # unicast across the transit area
+        return @iface.remote if @iface.virtual? # unicast across the transit area
         @iface.p2p? ? AllSPFRouters : @address
       end
 
@@ -172,7 +172,8 @@ module OSPFv2
         return unless at_least?(:exchange)
         lsas = []
         lsr.requests.each do |type, id, advr|
-          lsa = instance.lsdb_for(type, @iface.area)&.[]([type, id, advr])
+          # No AS-external LSAs over a virtual link (RFC 2328 10.3).
+          lsa = instance.lsdb_for(type, @iface.area)&.[]([type, id, advr]) unless type == 5 && @iface.virtual?
           unless lsa
             bad_ls_req("no #{LsaFields::TYPES.fetch(type, type)} #{Addr.to_s(id)} #{Addr.to_s(advr)}")
             return

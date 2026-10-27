@@ -53,6 +53,10 @@ module OSPFv2
         end
         areas.each { |area, a| virtual_link_options(area, a.dig('virtual-link', 'neighbor-id') || {}) }
         @kernel = kernel_options(data.dig('routing-options', 'kernel') || {})
+        unless @kernel[:install] || @virtual_links.empty?
+          @warnings << 'virtual links send through the kernel routing table; with kernel no-install, ' \
+                       'one whose other end is more than a hop away cannot come up'
+        end
         @export = export_policy(data)
         @warnings << 'no OSPF interfaces configured' if @interfaces.empty? && @errors.empty?
         raise Error, @errors.join("\n") unless @errors.empty?

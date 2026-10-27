@@ -77,4 +77,51 @@ class TestCoreVirtualLink < Test::Unit::TestCase
   def test_a_virtual_link_cannot_cross_the_backbone
     assert_raise(ArgumentError) { @r1.add_virtual_link(neighbor: '2.2.2.2', transit_area: 0) }
   end
+
+  # ---- review fixes ----
+
+  def test_backbone_routes_over_the_link_are_not_summarized_back_into_the_transit_area
+    assert @lab.run_until(180) { converged? }
+    into1 = @r3.areas[1].lsdb.select { |l| l.type == 3 && l.advr == @r3.router_id && !l.max_age? }.map { |l| Addr.to_s(l.ls_id) }
+    assert_include into1, '4.4.4.4', 'area 2 goes into area 1'
+    %w[1.1.1.1 2.2.2.2 10.0.12.0].each { |p| assert_not_include into1, p, 'reached through area 1: split horizon' }
+  end
+
+  def test_packets_for_the_neighbor_go_to_the_far_end_and_no_externals_on_request
+    assert @lab.run_until(180) { converged? }
+    n = @vl3.full_neighbors.first
+    assert_equal @vl3.remote, n.unicast_destination
+    @r1.externals = [{ prefix: A['192.0.2.0'], prefix_len: 24, metric: 20, type: 2, tag: 0 }]
+    assert @lab.run_until(30) { @r2.as_lsdb[[5, A['192.0.2.0'], A['1.1.1.1']]] }
+    n2 = @vl2.full_neighbors.first
+    n2.receive_ls_request(Wire::LinkStateRequest.new(requests: [[5, A['192.0.2.0'], A['1.1.1.1']]]))
+    assert_equal :exstart, n2.state, 'BadLSReq: no AS-external LSAs over a virtual link'
+  end
+
+  def test_a_virtual_link_waits_for_spf_to_come_up
+    lab = CoreLab.new
+    r = lab.router('9.9.9.9', [lab.segment, '10.9.0.1/30', P2P.merge(area: 1)])
+    vl = r.add_virtual_link(neighbor: '2.2.2.2', transit_area: 1)
+    r.start
+    refute vl.up?, 'nothing reaches 2.2.2.2 yet'
+    refute r.abr?
+  end
+
+  # The far end has another interface in the transit area, listed first
+  # in its router-LSA: the address used is the one on the path to us.
+  def test_the_far_end_address_is_on_the_path_toward_us
+    lab = CoreLab.new
+    s26, s25, s53 = Array.new(3) { lab.segment }
+    a1 = P2P.merge(area: 1)
+    lab.router('6.6.6.6', [s26, '10.0.26.2/30', a1])
+    r2 = lab.router('2.2.2.2', [s26, '10.0.26.1/30', a1], [s25, '10.0.25.1/30', a1], [:passive, '2.2.2.2/32'])
+    lab.router('5.5.5.5', [s25, '10.0.25.2/30', a1], [s53, '10.0.35.1/30', a1])
+    r3 = lab.router('3.3.3.3', [s53, '10.0.35.2/30', a1], [:passive, '3.3.3.3/32', { area: 2 }])
+    vl = r3.add_virtual_link(neighbor: '2.2.2.2', transit_area: 1)
+    r2.add_virtual_link(neighbor: '3.3.3.3', transit_area: 1)
+    lab.start
+    assert lab.run_until(120) { vl.up? }
+    assert_equal A['10.0.25.1'], vl.remote, 'not 10.0.26.1, which r3 cannot reach on its own link'
+    assert_equal 'eth0', vl.via
+  end
 end
