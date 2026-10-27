@@ -47,7 +47,9 @@ module FrrTables
     area = area.first
     links = r.links.map { |l| Spf::Link.new(name: l.ifname, address: l.address, prefix_len: l.prefix_len) }
     links << Spf::Link.new(name: 'lo', address: r.router_id, prefix_len: 32) if r.loopback_area == area
-    db = Spf::Area.new(id: area, lsas: lsas[state.dig('lsas', Addr.to_s(area)) || []], interfaces: links)
+    opts = (topology.routers.fetch(core).areas || {})[Addr.to_s(area)] || {}
+    db = Spf::Area.new(id: area, lsas: lsas[state.dig('lsas', Addr.to_s(area)) || []], interfaces: links,
+                       nssa: !(opts[:nssa] || opts['nssa']).nil?)
     Spf.run(router_id: r.router_id, areas: [db], externals: lsas[state['externals'] || []])
   end
 

@@ -81,6 +81,15 @@
 * Stub and totally stubby areas (area N stub [default-metric M]
   [no-summaries]): no E bit, no AS-external LSAs or type 4 summaries,
   a default summary from the ABR; neighbors that disagree are refused
+* NSSA (RFC 3101; area N nssa [default-lsa default-metric M metric-type
+  1|2] [no-summaries]): N bit in hellos, type 7 LSAs with the P bit and a
+  forwarding address from an NSSA ASBR (P clear from an NSSA ABR, which
+  originates the type 5 itself), type 7 routes in SPF with the 2.5
+  preference rules, translation into type 5 by the NSSA ABR with the
+  highest router id, the optional type 7 default and the no-summaries
+  type 3 default
+* Interop: stub, totally stubby and NSSA areas behind our ABR, with FRR
+  inside; equal-cost failover in the kernel within the dead interval
 * Configuration: a leaf or flag may be followed by its siblings on one
   line, as on Junos (set ... stub default-metric 10 no-summaries)
 * Fix: a router in two areas tracked its own LSAs by LSA key alone, so

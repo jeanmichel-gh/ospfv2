@@ -12,7 +12,8 @@
 #                          "auth": {"type": "md5", "keys": {"1": "secret"}}},
 #                         {"name": "lo", "address": "1.1.1.1/32", "passive": true}]}
 #
-# "areas": {"0.0.0.1": {"stub": {"no_summaries": true}}} sets area options.
+# "areas": {"0.0.0.1": {"stub": {"no_summaries": true}}} sets area options;
+# {"nssa": {"default_lsa": {"metric": 5, "type": 2}, "no_summaries": false}}.
 #
 # "externals": [{"prefix": "203.0.113.0/24", "metric": 7, "type": 1, "tag": 9}]
 # are advertised as AS-external-LSAs.
@@ -48,8 +49,14 @@ router = OSPFv2::Core::Instance.new(
   logger: ->(level, msg) { warn "#{level} #{msg}" unless level == :debug }
 )
 router.area_options = (config[:areas] || {}).to_h do |id, o|
-  [OSPFv2::Core::Addr.to_i(id.to_s), { stub: o[:stub] && { default_metric: o[:stub][:default_metric],
-                                                           no_summaries: o[:stub][:no_summaries] == true } }.compact]
+  opts = {}
+  opts[:stub] = { default_metric: o[:stub][:default_metric], no_summaries: o[:stub][:no_summaries] == true } if o[:stub]
+  if o[:nssa]
+    dl = o[:nssa][:default_lsa]
+    opts[:nssa] = { default_lsa: dl && { metric: dl[:metric] || 1, type: dl[:type] || 2 },
+                    no_summaries: o[:nssa][:no_summaries] == true }
+  end
+  [OSPFv2::Core::Addr.to_i(id.to_s), opts]
 end
 config.fetch(:interfaces).each do |i|
   ip = i.fetch(:address).split('/').first

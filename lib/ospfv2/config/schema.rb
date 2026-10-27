@@ -197,6 +197,13 @@ module OSPFv2
                        help: 'Cost of the default route the ABR sends (default 1)'
                   flag 'no-summaries', help: 'Totally stubby: only the default route, no summaries'
                 end
+                container 'nssa', help: 'Not-so-stubby area (RFC 3101): no AS externals, but routers here may bring routes in' do
+                  container 'default-lsa', help: 'The ABR sends a type 7 default route into the area' do
+                    leaf 'default-metric', Schema.hint(T.range(1, 16_777_214), '<1..16777214>'), help: 'Its metric (default 1)'
+                    leaf 'metric-type', Schema.hint(T.range(1, 2), '<1|2>'), help: 'Its external type (default 2)'
+                  end
+                  flag 'no-summaries', help: 'Only a default route from the ABR, no summaries'
+                end
                 list 'interface', key: IFNAME, help: 'Interface in this area' do
                   leaf 'interface-type', Schema.hint(T.one_of('broadcast', 'p2p'), '<broadcast|p2p>'), help: 'Network type'
                   leaf 'metric', Schema.hint(T.range(1, 65_535), '<1..65535>'), help: 'Interface cost'

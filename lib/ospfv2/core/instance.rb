@@ -36,7 +36,7 @@ module OSPFv2
       # One SPF run, for show ospf log and show ip ospf statistics.
       SpfRun = Struct.new(:time, :reasons, :duration, :routes, :diff, keyword_init: true)
       AS_SCOPE = [5].freeze
-      AREA_SCOPE = [1, 2, 3, 4].freeze
+      AREA_SCOPE = [1, 2, 3, 4, 7].freeze
 
       attr_reader :router_id, :loop, :areas, :interfaces, :as_lsdb, :random, :events, :stats,
                   :route_table, :spf, :spf_log, :externals
@@ -63,6 +63,7 @@ module OSPFv2
         @route_table = Spf::Table.empty
         @spf_log = []
         @externals = {} # key => spec, the AS-external-LSAs we originate
+        @exported = []  # the external routes we were given to advertise
         @area_options = {}
         @spf_skipped = []
         @route_listeners = []
@@ -128,7 +129,7 @@ module OSPFv2
         @running = true
         log(:info, nil, "router #{router_id_s} starting")
         @interfaces.each_value(&:up)
-        originate_externals
+        refresh_externals
         @sweep = @loop.every(1, :maxage_sweep) { sweep }
         self
       end
@@ -185,17 +186,18 @@ module OSPFv2
       # The database for LSA +type+ in +area+; nil if none (externals in a
       # stub area, RFC 2328 3.6).
       def lsdb_for(type, area)
-        return (area&.stub? ? nil : @as_lsdb) if AS_SCOPE.include?(type)
+        return (area&.external_capable? == false ? nil : @as_lsdb) if AS_SCOPE.include?(type)
+        return (area.nssa? ? area.lsdb : nil) if type == 7
         return area.lsdb if AREA_SCOPE.include?(type)
         nil
       end
 
       def lsdbs_for(area)
-        area.stub? ? [area.lsdb] : [area.lsdb, @as_lsdb]
+        area.external_capable? ? [area.lsdb, @as_lsdb] : [area.lsdb]
       end
 
       def scope_interfaces(type, area)
-        AS_SCOPE.include?(type) ? @interfaces.values.reject { |i| i.area.stub? } : area.interfaces
+        AS_SCOPE.include?(type) ? @interfaces.values.select { |i| i.area.external_capable? } : area.interfaces
       end
 
       # ---- hooks from interfaces and neighbors ----
@@ -215,15 +217,18 @@ module OSPFv2
         # Up or down can make us an area border router or stop it: every
         # router-LSA carries the B bit.
         @areas.each_value(&:schedule_origination)
-        originate_externals if new != :down
+        refresh_externals if new != :down
         @spf.trigger(:interface, iface.name)
       end
 
       # Attached to more than one area (RFC 2328 3.3): an area border router.
       def abr? = @areas.values.count(&:active?) > 1
 
-      # Advertising external routes: an AS boundary router.
+      # Advertising external routes (ours or translated): an AS boundary router.
       def asbr? = !@externals.empty?
+
+      # Bringing routes of our own into OSPF.
+      def exporting? = !@exported.empty?
 
       # ---- AS-external-LSAs (RFC 2328 12.4.4) ----
 
@@ -232,24 +237,26 @@ module OSPFv2
       # New and changed ones are originated, the rest flushed. The E bit
       # goes on or off in every router-LSA as the list fills or empties.
       def externals=(routes)
-        specs = {}
-        ids = {}
-        routes.sort_by { |r| [r[:prefix_len], r[:prefix]] }.each do |r|
-          len = r[:prefix_len]
-          prefix = r[:prefix] & Addr.mask(len)
-          ls_id = summary_ls_id(Spf::Route.new(prefix: prefix, prefix_len: len), ids) or next
-          e = r[:type] == 1 ? 0 : 0x8000_0000
-          metric = [r[:metric].to_i, Spf::LS_INFINITY - 1].min
-          specs[[5, ls_id, @router_id]] = { type: 5, ls_id: ls_id,
-                                            body: [Addr.mask(len), e | metric, 0, r[:tag].to_i].pack('NNNN') }
-        end
-        was = asbr?
+        @exported = routes.map(&:dup)
+        refresh_externals
+      end
+
+      # Works out every external LSA we should have: type 5 for our routes
+      # and for type 7 routes we translate, type 7 into each NSSA (RFC 3101)
+      # for our routes and the NSSA default. Originates what changed,
+      # flushes what went.
+      def refresh_externals(table = @route_table)
+        was = [asbr?, exporting?]
+        specs = external_specs(5, @exported + translations(table), nil)
         old = @externals
         @externals = specs
         originate_externals
-        area = @areas.values.find { |a| !a.stub? }
+        area = @areas.values.find(&:external_capable?)
         (old.keys - specs.keys).each { |key| flush_own(area, key) } if area
-        @areas.each_value(&:schedule_origination) if asbr? != was
+        @areas.each_value do |a|
+          a.nssa_lsas = a.nssa? && a.active? ? nssa_specs(a) : {}
+        end
+        @areas.each_value(&:schedule_origination) if [asbr?, exporting?] != was
       end
 
       def dr_changed(iface)
@@ -269,7 +276,11 @@ module OSPFv2
           end
           db = lsdb_for(lsa.type, area)
           unless db
-            why = AS_SCOPE.include?(lsa.type) ? 'AS-external LSA in a stub area' : "unsupported type #{lsa.type}"
+            why = case lsa.type
+                  when *AS_SCOPE then 'AS-external LSA in a stub area or NSSA'
+                  when 7 then 'type 7 LSA outside an NSSA'
+                  else "unsupported type #{lsa.type}"
+                  end
             iface.drop(:lsa, "#{why} from #{nbr}")
             next
           end
@@ -359,7 +370,7 @@ module OSPFv2
         sk = scope_key(area, key)
         db = lsdb_for(spec[:type], area)
         cur = db[key]
-        options = AS_SCOPE.include?(spec[:type]) ? 0x02 : area.options
+        options = spec[:options] || (AS_SCOPE.include?(spec[:type]) ? 0x02 : area.lsa_options)
         unchanged = @own[sk] && cur && !cur.max_age? && cur.body == spec[:body] && cur.options == options
         return if unchanged && !force
 
@@ -429,6 +440,7 @@ module OSPFv2
         @stats[:spf_runs] += 1
         replace_routes(table, reasons, Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0)
         originate_summaries(table)
+        refresh_externals(table)
         # Warn once per bad LSA, not on every run.
         (table.stats[:skipped] - @spf_skipped).each { |why| log(:warn, nil, "SPF skipped #{why}") }
         @spf_skipped = table.stats[:skipped]
@@ -479,6 +491,10 @@ module OSPFv2
           ids[0] = [0, 0]
           specs[[3, 0, @router_id]] = { type: 3, ls_id: 0, body: [0, stub[:default_metric] || 1].pack('NN') }
           return specs if stub[:no_summaries]
+        elsif (n = area.nssa) && n[:no_summaries]
+          # A totally stubby NSSA: a type 3 default, nothing else (RFC 3101 2.7).
+          metric = n.dig(:default_lsa, :metric) || 1
+          return { [3, 0, @router_id] => { type: 3, ls_id: 0, body: [0, metric].pack('NN') } }
         end
         table.routes.values.sort_by { |r| [r.prefix_len, r.prefix] }.each do |r|
           next unless summarize?(r, area)
@@ -487,7 +503,7 @@ module OSPFv2
           specs[[3, ls_id, @router_id]] = { type: 3, ls_id: ls_id, body: [Addr.mask(r.prefix_len), r.cost].pack('NN') }
         end
         best_asbrs(table).each_value do |r|
-          next if area.stub? # no externals there, so no ASBRs to reach
+          next unless area.external_capable? # no type 5 there, so no ASBRs to reach
           next unless summarize?(r, area) && r.prefix != @router_id
           specs[[4, r.prefix, @router_id]] = { type: 4, ls_id: r.prefix, body: [0, r.cost].pack('NN') }
         end
@@ -529,12 +545,74 @@ module OSPFv2
         nil
       end
 
-      # Floods our externals: they are AS-wide, so any area of ours carries
-      # them. With no area up yet, they go out when one comes up.
+      # Floods our externals: they are AS-wide, so any area of ours that
+      # carries externals will do. With none up yet, they go out when one is.
       def originate_externals
         return unless @running
-        area = @areas.values.find { |a| a.active? && !a.stub? } or return
+        area = @areas.values.find { |a| a.active? && a.external_capable? } or return
         @externals.each_value { |spec| originate(area, spec) }
+      end
+
+      # [{ prefix:, prefix_len:, metric:, type:, tag:, forwarding: }] as
+      # LSA specs of +type+ (5 or 7). +options+ for type 7 carries the P bit.
+      def external_specs(type, routes, options)
+        specs = {}
+        ids = {}
+        routes.sort_by { |r| [r[:prefix_len], r[:prefix]] }.each do |r|
+          len = r[:prefix_len]
+          prefix = r[:prefix] & Addr.mask(len)
+          ls_id = summary_ls_id(Spf::Route.new(prefix: prefix, prefix_len: len), ids) or next
+          e = r[:type] == 1 ? 0 : 0x8000_0000
+          metric = [r[:metric].to_i, Spf::LS_INFINITY - 1].min
+          body = [Addr.mask(len), e | metric, r[:forwarding].to_i, r[:tag].to_i].pack('NNNN')
+          spec = { type: type, ls_id: ls_id, body: body }
+          spec[:options] = r.fetch(:options, options) if type == 7
+          specs[[type, ls_id, @router_id]] = spec
+        end
+        specs
+      end
+
+      # Type 7 LSAs for NSSA +area+. Our own routes go in with the P bit set
+      # and one of our addresses in the area as forwarding address, so an
+      # NSSA border router can translate them; an NSSA border router itself
+      # originates the type 5 and sets no P bit (RFC 3101 2.3, 2.4). The
+      # border router also sends the default, if configured (2.7).
+      def nssa_specs(area)
+        abr = abr?
+        fwd = abr ? 0 : nssa_forwarding(area)
+        p = !abr && !fwd.nil?
+        routes = @exported.map { |r| r.merge(forwarding: p ? fwd : 0, options: p ? 0x08 : 0x00) }
+        n = area.nssa
+        if abr && (d = n[:default_lsa]) && !n[:no_summaries]
+          routes << { prefix: 0, prefix_len: 0, metric: d[:metric], type: d[:type], tag: 0, forwarding: 0, options: 0x00 }
+        end
+        external_specs(7, routes, 0x00)
+      end
+
+      # An address of ours in the area, a passive (loopback) one first.
+      def nssa_forwarding(area)
+        up = area.interfaces.select(&:up?)
+        (up.find(&:passive?) || up.first)&.address
+      end
+
+      # As the elected translator of an NSSA, the type 7 routes from it that
+      # won in our table, P bit set and a forwarding address, go out again
+      # as type 5 (RFC 3101 3.2). The translator is the NSSA border router
+      # with the highest router id (3.1).
+      def translations(table)
+        return [] unless abr?
+        @areas.values.select { |a| a.nssa? && a.active? && translator?(a, table) }.flat_map do |a|
+          table.routes.values.filter_map do |r|
+            next unless r.lsa_type == 7 && r.area == a.id && r.p_bit && r.forwarding
+            { prefix: r.prefix, prefix_len: r.prefix_len, metric: r.lsa_metric, type: r.path_type == :ext1 ? 1 : 2,
+              tag: r.tag.to_i, forwarding: r.forwarding }
+          end
+        end
+      end
+
+      def translator?(area, table)
+        others = table.routers.values.select { |r| r.area == area.id && r.path_type == :intra && r.tag && r.tag[:abr] }
+        others.none? { |r| r.prefix > @router_id }
       end
 
       def lsdb_changed(lsa, _old)
@@ -548,7 +626,7 @@ module OSPFv2
             Spf::Link.new(name: i.name, address: i.address, prefix_len: i.prefix_len,
                           neighbors: i.full_neighbors.to_h { |n| [n.router_id, n.address] })
           end
-          Spf::Area.new(id: a.id, lsas: a.lsdb.live, interfaces: links)
+          Spf::Area.new(id: a.id, lsas: a.lsdb.live, interfaces: links, nssa: a.nssa?)
         end
       end
 

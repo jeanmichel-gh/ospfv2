@@ -43,9 +43,10 @@ module OSPFv2
         def on?(ip) = (ip & mask) == network
       end
 
-      Area = Struct.new(:id, :lsas, :interfaces, keyword_init: true) do
-        def initialize(id:, lsas:, interfaces: [])
-          super(id: Addr.to_i(id), lsas: lsas, interfaces: interfaces)
+      # +nssa+: the area is not-so-stubby (RFC 3101); its type 7 LSAs count.
+      Area = Struct.new(:id, :lsas, :interfaces, :nssa, keyword_init: true) do
+        def initialize(id:, lsas:, interfaces: [], nssa: false)
+          super(id: Addr.to_i(id), lsas: lsas, interfaces: interfaces, nssa: nssa)
         end
       end
 
@@ -59,8 +60,10 @@ module OSPFv2
       # One destination. +cost+ is the internal cost (for type 2 external
       # routes, the cost to the ASBR or forwarding address); +type2_cost+
       # is the type 2 metric. +advr+ is the router that advertised it.
+      # External routes also carry the LSA they come from: +lsa_type+ (5,
+      # or 7 with +area+ the NSSA), +lsa_metric+ and the type 7 +p_bit+.
       Route = Struct.new(:prefix, :prefix_len, :path_type, :cost, :type2_cost, :area, :next_hops,
-                         :advr, :tag, :forwarding, keyword_init: true) do
+                         :advr, :tag, :forwarding, :lsa_type, :lsa_metric, :p_bit, keyword_init: true) do
         def dest_s = "#{Addr.to_s(prefix)}/#{prefix_len}"
         def area_s = area && Addr.to_s(area)
 
@@ -426,7 +429,37 @@ module OSPFv2
             route = Route.new(prefix: l.ls_id & mask, prefix_len: len, path_type: e_bit ? :ext2 : :ext1,
                               cost: e_bit ? base.cost : base.cost + metric, type2_cost: e_bit ? metric : nil,
                               area: nil, next_hops: hops.dup, advr: l.advr, tag: tag,
-                              forwarding: fwd.zero? ? nil : fwd)
+                              forwarding: fwd.zero? ? nil : fwd, lsa_type: 5, lsa_metric: metric)
+            add_external([route.prefix, len], route)
+          end
+          @areas.select(&:nssa).each { |a| nssa_externals(a, own) }
+        end
+
+        # RFC 3101 2.5: type 7 LSAs, like type 5 but inside their NSSA: the
+        # ASBR and any forwarding address must be reached within it.
+        def nssa_externals(area, own)
+          area.lsas.each do |l|
+            next unless l.type == 7 && !l.max_age? && l.advr != @root
+            body = external_body(l) or next
+            mask, e_bit, metric, fwd, tag = body
+            next if metric == LS_INFINITY || own[fwd]
+            # The originator: an ASBR, or the NSSA border router for its
+            # default (2.5 step 3).
+            asbr = @routers[[l.advr, area.id]]
+            next unless asbr && asbr.path_type == :intra && asbr.tag && (asbr.tag[:asbr] || asbr.tag[:abr])
+            if fwd.zero?
+              base = asbr
+              hops = asbr.next_hops
+            else
+              base = lookup(fwd, area: area.id) or next
+              hops = base.next_hops.map { |h| h.gateway ? h : NextHop.new(h.interface, fwd) }
+            end
+            len = prefix_len(mask, l) or next
+            route = Route.new(prefix: l.ls_id & mask, prefix_len: len, path_type: e_bit ? :ext2 : :ext1,
+                              cost: e_bit ? base.cost : base.cost + metric, type2_cost: e_bit ? metric : nil,
+                              area: area.id, next_hops: hops.dup, advr: l.advr, tag: tag,
+                              forwarding: fwd.zero? ? nil : fwd, lsa_type: 7, lsa_metric: metric,
+                              p_bit: (l.options & 0x08) != 0)
             add_external([route.prefix, len], route)
           end
         end
@@ -452,8 +485,12 @@ module OSPFv2
           return 1 if %i[intra inter].include?(b.path_type)
           rank = { ext1: 0, ext2: 1 }
           return rank[a.path_type] <=> rank[b.path_type] unless a.path_type == b.path_type
-          return a.cost <=> b.cost if a.path_type == :ext1
-          [a.type2_cost, a.cost] <=> [b.type2_cost, b.cost]
+          c = a.path_type == :ext1 ? a.cost <=> b.cost : [a.type2_cost, a.cost] <=> [b.type2_cost, b.cost]
+          return c unless c.zero? && a.forwarding && b.forwarding
+          # RFC 3101 2.5 (6e): equal, both with a forwarding address: a type 7
+          # with the P bit, then a type 5, then the higher router id.
+          rank = ->(r) { r.lsa_type == 7 && r.p_bit ? 0 : (r.lsa_type == 5 ? 1 : 2) }
+          [rank[a], -a.advr] <=> [rank[b], -b.advr]
         end
 
         # Intra and inter-area routes by prefix length, for forwarding
@@ -465,10 +502,11 @@ module OSPFv2
         end
 
         # Longest-prefix match among the internal routes.
-        def lookup(ip)
+        # With +area+, an intra-area route in that area only.
+        def lookup(ip, area: nil)
           @internal_lens.each do |len|
-            r = @internal[len][ip & Addr.mask(len)]
-            return r if r
+            r = @internal[len][ip & Addr.mask(len)] or next
+            return r if area.nil? || (r.path_type == :intra && r.area == area)
           end
           nil
         end

@@ -214,8 +214,21 @@ set protocols ospf area 1 stub
 set protocols ospf area 2 stub default-metric 10 no-summaries
 ```
 
-Every router in the area must agree, or they will not become neighbors. Changing it
-restarts the area's interfaces.
+An NSSA (RFC 3101) keeps AS externals out too, but routers inside may bring their own
+routes in as type 7 LSAs. The area border router with the highest router id
+translates them into AS externals for the rest of the network.
+
+```
+set protocols ospf area 3 nssa
+set protocols ospf area 4 nssa default-lsa default-metric 10 metric-type 1
+set protocols ospf area 5 nssa no-summaries
+```
+
+`default-lsa` makes the border router send a type 7 default into the area;
+`no-summaries` sends a plain default route and nothing else.
+
+Every router in the area must agree on stub or NSSA, or they will not become
+neighbors. Changing it restarts the area's interfaces.
 
 External routes are advertised through an export policy, as on Junos. The host's own
 networks (`direct`) and static routes in the kernel (`static`) are the sources.

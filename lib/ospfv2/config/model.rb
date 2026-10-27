@@ -85,12 +85,20 @@ module OSPFv2
       # area => { stub: { default_metric:, no_summaries: } }, areas with
       # options only.
       def area_options(area, a)
-        return unless (stub = a['stub'])
+        stub = a['stub']
+        nssa = a['nssa']
+        return unless stub || nssa
         if area == '0.0.0.0'
-          @errors << 'area 0.0.0.0 is the backbone and cannot be a stub area'
-          return
+          @errors << "area 0.0.0.0 is the backbone and cannot be #{stub ? 'a stub area' : 'an NSSA'}"
+        elsif stub && nssa
+          @errors << "area #{area} cannot be both stub and nssa"
+        elsif stub
+          @areas[area] = { stub: { default_metric: stub['default-metric'], no_summaries: stub['no-summaries'] == true } }
+        else
+          dl = nssa['default-lsa']
+          @areas[area] = { nssa: { default_lsa: dl && { metric: dl['default-metric'] || 1, type: dl['metric-type'] || 2 },
+                                   no_summaries: nssa['no-summaries'] == true } }
         end
-        @areas[area] = { stub: { default_metric: stub['default-metric'], no_summaries: stub['no-summaries'] == true } }
       end
 
       def export_policy(data)

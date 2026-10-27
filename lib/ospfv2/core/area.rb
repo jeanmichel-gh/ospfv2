@@ -18,9 +18,18 @@ module OSPFv2
         @interfaces = []
         @pending = false
         @summaries = {} # key => spec, the summary-LSAs we want here
+        @nssa_lsas = {} # key => spec, the type 7 LSAs we want here (NSSA)
       end
 
-      attr_reader :summaries
+      attr_reader :summaries, :nssa_lsas
+
+      # Sets the type 7 LSAs this router wants in the area (RFC 3101).
+      def nssa_lsas=(specs)
+        old = @nssa_lsas
+        @nssa_lsas = specs
+        specs.each_value { |spec| @instance.originate(self, spec) }
+        (old.keys - specs.keys).each { |key| @instance.flush_own(self, key) }
+      end
 
       # Sets the summary-LSAs this router wants in the area: new and
       # changed ones are originated, the rest flushed.
@@ -39,8 +48,18 @@ module OSPFv2
       def stub = @instance.area_options.dig(@id, :stub)
       def stub? = !stub.nil?
 
-      # Options in our hellos, DDs and LSAs here: E unless a stub.
-      def options = stub? ? 0x00 : 0x02
+      # NSSA settings (RFC 3101), { default_lsa: { metric:, type: }, no_summaries: }, or nil.
+      def nssa = @instance.area_options.dig(@id, :nssa)
+      def nssa? = !nssa.nil?
+
+      # AS-external LSAs flood here: neither a stub nor an NSSA.
+      def external_capable? = !stub? && !nssa?
+
+      # Options in our hellos and DDs: E in a normal area, N in an NSSA.
+      def options = nssa? ? 0x08 : (external_capable? ? 0x02 : 0x00)
+
+      # Options in our LSAs here (in an LSA, 0x08 is the type 7 P bit).
+      def lsa_options = external_capable? ? 0x02 : 0x00
 
       def id_s = Addr.to_s(@id)
 
@@ -79,6 +98,7 @@ module OSPFv2
         when 2 then @interfaces.any? { |i| i.address == ls_id && network_lsa_spec(i) }
         when 3, 4 then @summaries.key?(key)
         when 5 then @instance.externals.key?(key)
+        when 7 then @nssa_lsas.key?(key)
         else false
         end
       end
@@ -89,6 +109,7 @@ module OSPFv2
         when 2 then network_lsa_spec(@interfaces.find { |i| i.address == key[1] })
         when 3, 4 then @summaries[key]
         when 5 then @instance.externals[key]
+        when 7 then @nssa_lsas[key]
         end
       end
 
@@ -115,8 +136,10 @@ module OSPFv2
             links << stub
           end
         end
-        # B and E bits (A.4.2). No E bit in a stub area: no externals there.
-        flags = (@instance.abr? ? 1 : 0) | (@instance.asbr? && !stub? ? 2 : 0)
+        # B and E bits (A.4.2). No E bit in a stub area: no externals
+        # there. In an NSSA, E when we bring routes in as type 7 (RFC 3101).
+        asbr = nssa? ? @instance.exporting? : (@instance.asbr? && external_capable?)
+        flags = (@instance.abr? ? 1 : 0) | (asbr ? 2 : 0)
         { type: 1, ls_id: @instance.router_id, body: router_body(links, flags) }
       end
 

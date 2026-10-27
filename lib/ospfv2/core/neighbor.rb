@@ -15,7 +15,7 @@ module OSPFv2
       # LSA types this router understands. Anything else in a DD is a
       # SeqNumberMismatch (RFC 2328 10.6). We do not set the O bit, so
       # compliant neighbors do not offer opaque LSAs.
-      SUPPORTED_TYPES = [1, 2, 3, 4, 5].freeze
+      SUPPORTED_TYPES = [1, 2, 3, 4, 5, 7].freeze
 
       attr_reader :iface, :router_id, :address, :state, :priority, :dr, :bdr, :options,
                   :ls_request, :retransmit, :dd_seq, :last_change, :state_changes
@@ -310,8 +310,12 @@ module OSPFv2
             seq_number_mismatch("unsupported LSA type #{h.type}")
             return
           end
-          if h.type == 5 && @iface.area.stub?
-            seq_number_mismatch('AS-external LSA offered in a stub area') # RFC 2328 10.6
+          if h.type == 5 && !@iface.area.external_capable?
+            seq_number_mismatch('AS-external LSA offered in a stub area or NSSA') # RFC 2328 10.6
+            return
+          end
+          if h.type == 7 && !@iface.area.nssa?
+            seq_number_mismatch('type 7 LSA offered outside an NSSA')
             return
           end
           ours = instance.lsdb_for(h.type, @iface.area)&.[](h.key)

@@ -91,4 +91,17 @@ class TestConfigModel < Test::Unit::TestCase
     assert_match(/backbone and cannot be a stub/, errors('set routing-options router-id 1.1.1.1',
                                                          'set protocols ospf area 0 stub').join)
   end
+
+  def test_nssa_areas
+    m = model('set protocols ospf area 1 interface eth1', 'set protocols ospf area 1 nssa',
+              'set protocols ospf area 2 interface eth2',
+              'set protocols ospf area 2 nssa default-lsa default-metric 5 metric-type 1',
+              'set protocols ospf area 2 nssa no-summaries')
+    assert_equal({ '0.0.0.1' => { nssa: { default_lsa: nil, no_summaries: false } },
+                   '0.0.0.2' => { nssa: { default_lsa: { metric: 5, type: 1 }, no_summaries: true } } }, m.areas)
+    assert_match(/cannot be an NSSA/, errors('set routing-options router-id 1.1.1.1',
+                                                                              'set protocols ospf area 0 nssa').join)
+    assert_match(/both stub and nssa/, errors('set routing-options router-id 1.1.1.1', 'set protocols ospf area 1 stub',
+                                              'set protocols ospf area 1 nssa').join)
+  end
 end
