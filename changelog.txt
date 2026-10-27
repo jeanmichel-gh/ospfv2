@@ -7,6 +7,16 @@
 * Real and fake clocks. With Clock::Fake, tests run hours of protocol
   time in milliseconds and repeat exactly (OSPFv2::Clock)
 * The simulator still uses the thread-per-timer OSPFv2::Timer for now
+* Router core (OSPFv2::Core): areas, broadcast and point-to-point
+  interfaces, interface state machine and DR/BDR election, neighbor state
+  machine with 2-Way and a master/slave DD exchange, per-area and AS-wide
+  LSDBs, RFC 2328 section 13 flooding with per-neighbor retransmission
+  lists and delayed acks, router-LSA and network-LSA origination with
+  MinLSInterval, LSRefreshTime refresh and MaxAge flushing
+* Core packet codec keeps received LSAs byte for byte, so they are
+  flooded unchanged; cross-checked against the existing packet classes
+* Simulator fix: an ack only counts for the instance it names
+  (RFC 2328 13.7)
 
 === 0.1.0 2026-10-24
 
