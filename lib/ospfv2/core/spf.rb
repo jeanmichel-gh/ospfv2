@@ -186,6 +186,9 @@ module OSPFv2
               c = cand[w_id]
               next if c && d > c.dist
               hops = next_hops(area, v, w_id, w_lsa, link)
+              # Our LSA can still list a link whose interface just went
+              # down. No way out: not a path (other ways may still be).
+              next if hops.empty?
               if c && d == c.dist
                 c.next_hops |= hops
                 c.parents << v.id
@@ -312,7 +315,8 @@ module OSPFv2
         def transit_route(area, v)
           parts = network_body(v.lsa) or return
           mask, = parts
-          len = prefix_len(mask) or return
+          return skip(v.lsa, 'network-LSA with mask 0.0.0.0') if mask.zero?
+          len = prefix_len(mask, v.lsa) or return
           add_intra(area, v.id[1] & mask, len, v.dist, v.next_hops, v.lsa.advr)
         end
 
@@ -323,7 +327,7 @@ module OSPFv2
             links = router_links(v.lsa) or next
             links.each do |l|
               next unless l.type == 3
-              len = prefix_len(l.data) or next
+              len = prefix_len(l.data, v.lsa) or next
               hops = if v.id[1] == @root
                        iface = area.interfaces.find { |i| i.on?(l.id) }
                        iface ? [NextHop.new(iface.name, nil)] : []
@@ -359,13 +363,15 @@ module OSPFv2
         # ---- 16.2: inter-area routes ----
 
         def inter_area
-          attached = @areas.select { |a| a.lsas.any? { |l| l.key == [1, @root, @root] } }
+          # Active attachments (16.2): an interface up in the area.
+          attached = @areas.select { |a| a.interfaces.any? && a.lsas.any? { |l| l.key == [1, @root, @root] } }
           backbone = attached.find { |a| a.id.zero? }
           # An ABR looks at backbone summaries only.
           examined = attached.size > 1 ? [backbone].compact : attached
           examined.each do |area|
             area.lsas.each do |l|
               next unless [3, 4].include?(l.type) && !l.max_age? && l.advr != @root
+              next if l.type == 4 && l.ls_id == @root
               parts = summary_body(l) or next
               mask, metric = parts
               next if metric == LS_INFINITY
@@ -373,7 +379,7 @@ module OSPFv2
               next unless br && br.tag[:abr]
               cost = br.cost + metric
               if l.type == 3
-                len = prefix_len(mask) or next
+                len = prefix_len(mask, l) or next
                 add_inter(@routes, [l.ls_id & mask, len], len, area, cost, br)
               else
                 add_inter(@routers, [l.ls_id, area.id], 32, area, cost, br, asbr: true)
@@ -397,12 +403,16 @@ module OSPFv2
         # ---- 16.4: AS external routes ----
 
         def external
+          index_internal
+          own = @areas.flat_map { |a| a.interfaces.map(&:address) }.to_h { |x| [x, true] }
+          @asbrs = Hash.new { |h, rid| h[rid] = find_asbr(rid) }
           @externals.each do |l|
             next unless l.type == 5 && !l.max_age? && l.advr != @root
             body = external_body(l) or next
             mask, e_bit, metric, fwd, tag = body
             next if metric == LS_INFINITY
-            asbr = best_asbr(l.advr) or next
+            next if own[fwd] # the ASBR points back at us
+            asbr = @asbrs[l.advr] or next
             if fwd.zero?
               base = asbr
               hops = asbr.next_hops
@@ -412,7 +422,7 @@ module OSPFv2
               # A forwarding address on a network we sit on is the next hop.
               hops = base.next_hops.map { |h| h.gateway ? h : NextHop.new(h.interface, fwd) }
             end
-            len = prefix_len(mask) or next
+            len = prefix_len(mask, l) or next
             route = Route.new(prefix: l.ls_id & mask, prefix_len: len, path_type: e_bit ? :ext2 : :ext1,
                               cost: e_bit ? base.cost : base.cost + metric, type2_cost: e_bit ? metric : nil,
                               area: nil, next_hops: hops.dup, advr: l.advr, tag: tag,
@@ -421,7 +431,7 @@ module OSPFv2
           end
         end
 
-        def best_asbr(rid)
+        def find_asbr(rid)
           @routers.select { |(id, _), r| id == rid && r.tag && r.tag[:asbr] }.values.min_by { |r| [r.cost, -r.area.to_i] }
         end
 
@@ -446,15 +456,21 @@ module OSPFv2
           [a.type2_cost, a.cost] <=> [b.type2_cost, b.cost]
         end
 
-        # Longest-prefix match among the internal routes computed so far.
+        # Intra and inter-area routes by prefix length, for forwarding
+        # addresses: externals go in after, so the index stays valid.
+        def index_internal
+          @internal = Hash.new { |h, k| h[k] = {} }
+          @routes.each_value { |r| @internal[r.prefix_len][r.prefix] = r if %i[intra inter].include?(r.path_type) }
+          @internal_lens = @internal.keys.sort.reverse
+        end
+
+        # Longest-prefix match among the internal routes.
         def lookup(ip)
-          best = nil
-          @routes.each_value do |r|
-            next unless %i[intra inter].include?(r.path_type)
-            next unless (ip & Addr.mask(r.prefix_len)) == r.prefix
-            best = r if best.nil? || r.prefix_len > best.prefix_len
+          @internal_lens.each do |len|
+            r = @internal[len][ip & Addr.mask(len)]
+            return r if r
           end
-          best
+          nil
         end
 
         # ---- helpers ----
@@ -463,10 +479,10 @@ module OSPFv2
           r.next_hops = r.next_hops.uniq.sort_by(&:sort_key).first(@max_paths)
         end
 
-        def prefix_len(mask)
+        def prefix_len(mask, lsa)
           Addr.prefix_len(mask)
         rescue ArgumentError
-          nil
+          skip(lsa, "mask #{Addr.to_s(mask)} is not contiguous")
         end
 
         # Bodies are parsed once per run: Dijkstra looks at each LSA from

@@ -14,9 +14,10 @@ module OSPFv2
     #   s.trigger(:router, '2.2.2.2')
     #
     # Every router in an area using the same values converges together,
-    # which is the point of the RFC. The defaults are its suggested values.
+    # which is the point of the RFC. The defaults are its suggested values
+    # (section 6): 50 ms, 200 ms, 5 s, 500 ms to learn, 10 s of holddown.
     class SpfScheduler
-      DEFAULTS = { initial: 0.05, short: 0.2, long: 2.0, learn: 1.0, holddown: 10.0 }.freeze
+      DEFAULTS = { initial: 0.05, short: 0.2, long: 5.0, learn: 0.5, holddown: 10.0 }.freeze
       MAX_REASONS = 32
 
       # What set off a run: LSA types, or a local change.
@@ -49,7 +50,7 @@ module OSPFv2
         note(kind, detail)
         case @state
         when :quiet
-          @spf.restart(@settings[:initial])
+          @spf.restart(@settings[:initial]) unless @spf.active?
           @learn.restart
           @holddown.restart
           @state = :short_wait
@@ -108,6 +109,7 @@ module OSPFv2
         raise ArgumentError, "unknown SPF setting #{unknown.first}" unless unknown.empty?
         s.each { |k, v| raise ArgumentError, "SPF #{k} must be a positive number" unless v.is_a?(Numeric) && v.positive? }
         raise ArgumentError, 'SPF delays must be initial <= short <= long' unless s[:initial] <= s[:short] && s[:short] <= s[:long]
+        raise ArgumentError, 'SPF holddown must be longer than time to learn' unless s[:holddown] > s[:learn]
       end
     end
   end

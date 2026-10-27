@@ -45,7 +45,8 @@
   AS external routes type 1 and 2 with forwarding addresses and ASBRs
   found through type 4 summaries. A 1,024-router grid takes about 40 ms
 * SPF back-off per RFC 8405 (OSPFv2::Core::SpfScheduler): initial 50 ms,
-  short 200 ms, long 2 s, time to learn 1 s, holddown 10 s. Runs when an
+  short 200 ms, long 5 s, time to learn 500 ms, holddown 10 s (the
+  RFC's suggested values). Runs when an
   LSA's contents change, an LSA reaches MaxAge, or an interface or
   adjacency comes or goes
 * The router keeps its routing table and tells listeners what changed

@@ -60,6 +60,7 @@ module OSPFv2
         @max_paths = max_paths
         @route_table = Spf::Table.empty
         @spf_log = []
+        @spf_skipped = []
         @route_listeners = []
         @spf = SpfScheduler.new(loop, **spf) { |reasons| compute_routes(reasons) }
         @own = {}              # key => { area:, refresh:, wrap: } for LSAs we originate
@@ -365,8 +366,11 @@ module OSPFv2
         return unless @running
         t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         table = Spf.run(router_id: @router_id, areas: spf_areas, externals: @as_lsdb.live, max_paths: @max_paths)
+        @stats[:spf_runs] += 1
         replace_routes(table, reasons, Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0)
-        table.stats[:skipped].each { |why| log(:warn, nil, "SPF skipped #{why}") }
+        # Warn once per bad LSA, not on every run.
+        (table.stats[:skipped] - @spf_skipped).each { |why| log(:warn, nil, "SPF skipped #{why}") }
+        @spf_skipped = table.stats[:skipped]
         table
       end
 
@@ -412,7 +416,6 @@ module OSPFv2
         @spf_log << SpfRun.new(time: @loop.clock.wall, reasons: reasons, duration: duration,
                                routes: table.routes.size, diff: diff)
         @spf_log.shift(@spf_log.size - MAX_SPF_LOG) if @spf_log.size > MAX_SPF_LOG
-        @stats[:spf_runs] += 1
         return if diff.empty?
         log(:info, nil, "routes #{diff} after SPF (#{reasons.first(3).join(', ')}#{reasons.size > 3 ? ', ...' : ''})")
         @route_listeners.each { |l| l.call(diff) }

@@ -341,6 +341,63 @@ class TestCoreSpf < Test::Unit::TestCase
     assert_match(/7\.7\.7\.7/, t.stats[:skipped].join)
   end
 
+  # ---- review fixes ----
+
+  def test_a_root_link_whose_interface_is_gone_is_not_a_path
+    t = spf(square, [iface('eth2', 1, 3)]) # eth1 is down, our LSA still lists it
+    r = route(t, '4.4.4.4/32')
+    assert_equal ['via 10.1.3.2 eth2'], hops(r)
+    assert_equal 20, r.cost
+    assert_equal ['via 10.1.3.2 eth2'], hops(route(t, '2.2.2.2/32')), 'R2 the long way round'
+    assert t.routes.values.reject { |x| x.advr == A['1.1.1.1'] }.all? { |x| x.next_hops.any? }, 'no route without a way out'
+  end
+
+  def test_a_forwarding_address_of_our_own_is_ignored
+    lsas = lan
+    lsas[1] = rtr('2.2.2.2', [[:transit, '10.0.0.2', '10.0.0.2', 10]], flags: 2)
+    t = spf(lsas, lan_ifaces, externals: [external('9.0.0.0', 8, '2.2.2.2', 5, fwd: '10.0.0.1')])
+    assert_nil route(t, '9.0.0.0/8')
+  end
+
+  def test_an_inactive_backbone_does_not_make_us_an_abr
+    a0 = Spf::Area.new(id: 0, lsas: [rtr('1.1.1.1', [])], interfaces: [])
+    a1 = Spf::Area.new(id: 1, lsas: inter, interfaces: [iface('eth1', 1, 2)])
+    t = Spf.run(router_id: '1.1.1.1', areas: [a0, a1])
+    assert_equal :inter, route(t, '172.16.0.0/16').path_type
+  end
+
+  def test_bad_masks_are_skipped_and_said
+    lsas = lan
+    lsas[3] = net('10.0.0.2', '2.2.2.2', 0, %w[2.2.2.2 1.1.1.1 3.3.3.3])
+    t = spf(lsas, lan_ifaces)
+    assert_nil route(t, '0.0.0.0/0')
+    assert_match(/mask 0\.0\.0\.0/, t.stats[:skipped].join)
+    lsas = square
+    lsas[3] = rtr('4.4.4.4', p2p(4, 2) + p2p(4, 3) + [[:stub, '44.0.0.0', '255.0.255.0', 1]])
+    t = spf(lsas, square_ifaces)
+    assert_match(/255\.0\.255\.0 is not contiguous/, t.stats[:skipped].join)
+  end
+
+  def test_a_type_4_summary_about_us_is_ignored
+    t = spf(inter([summary('1.1.1.1', 32, '2.2.2.2', 7, type: 4)]), [iface('eth1', 1, 2)], area: 1)
+    assert_nil t.routers.keys.find { |rid, _| rid == A['1.1.1.1'] }
+  end
+
+  # 5,000 externals with a forwarding address on a 1,024-router grid: the
+  # forwarding address lookup must not scan the table per LSA.
+  def test_many_externals_with_forwarding_addresses_are_fast
+    lsas, ifaces, id = grid(32)
+    asbr = Addr.to_s(id[31, 31])
+    lsas[-1] = rtr(asbr, lsas[-1].router_links.map { |x| [%i[_ p2p transit stub][x.type], x.id, x.data, x.metric] }, flags: 2)
+    fwd = Addr.to_s(id[31, 31] | (1 << 16))
+    ext = (0...5000).map { |i| external(Addr.to_s((20 << 24) | (i << 8)), 24, asbr, 10, fwd: fwd) }
+    t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    t = Spf.run(router_id: Addr.to_s(id[0, 0]), areas: [Spf::Area.new(id: 0, lsas: lsas, interfaces: ifaces)], externals: ext)
+    ms = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000
+    assert_equal 1024 + 5000, t.routes.size
+    assert_operator ms, :<, ENV['CI'] ? 3000 : 600, format('took %.1f ms', ms)
+  end
+
   def test_routes_compare_by_value
     a = route(spf(square, square_ifaces), '4.4.4.4/32')
     b = route(spf(square.reverse, square_ifaces.reverse), '4.4.4.4/32')
@@ -350,9 +407,7 @@ class TestCoreSpf < Test::Unit::TestCase
     refute a.same_as?(route(spf(lsas, square_ifaces), '4.4.4.4/32'))
   end
 
-  # 32 x 32 grid, 1,024 routers, about 4,000 links: well under 200 ms.
-  def test_a_thousand_router_grid_is_fast
-    n = 32
+  def grid(n)
     id = ->(x, y) { (10 << 24) | (x << 8) | y }
     lsas = []
     (0...n).each do |x|
@@ -367,6 +422,13 @@ class TestCoreSpf < Test::Unit::TestCase
     end
     ifaces = [Spf::Link.new(name: 'e', address: Addr.to_s(id[0, 0]), prefix_len: 32,
                             neighbors: { Addr.to_s(id[1, 0]) => '192.0.2.1', Addr.to_s(id[0, 1]) => '192.0.2.2' })]
+    [lsas, ifaces, id]
+  end
+
+  # 32 x 32 grid, 1,024 routers, about 4,000 links: well under 200 ms.
+  def test_a_thousand_router_grid_is_fast
+    n = 32
+    lsas, ifaces, id = grid(n)
     t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
     t = Spf.run(router_id: Addr.to_s(id[0, 0]), areas: [Spf::Area.new(id: 0, lsas: lsas, interfaces: ifaces)])
     ms = (Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0) * 1000
@@ -375,7 +437,7 @@ class TestCoreSpf < Test::Unit::TestCase
     assert_equal 2 * (n - 1) * 10, far.cost
     assert_equal 2, far.next_hops.size
     limit = ENV['CI'] ? 1000 : 200 # shared CI runners are slow and noisy
-    warn format("grid SPF %.1f ms", ms) if ENV["SPF_BENCH"]
+    warn format('grid SPF %.1f ms', ms) if ENV['SPF_BENCH']
     assert_operator ms, :<, limit, format('SPF took %.1f ms', ms)
   end
 end

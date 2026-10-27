@@ -37,24 +37,42 @@ class TestCoreSpfScheduler < Test::Unit::TestCase
     assert_equal [[0.05, ['router a', 'network b']]], @runs
   end
 
+  # RFC 8405 section 6 defaults: 50 ms, 200 ms, 5 s, learn 500 ms, holddown 10 s.
   def test_short_then_long_then_quiet
     @s.trigger(:x)          # quiet -> short wait, run at 0.05
-    at(0.5)
-    @s.trigger(:x)          # short wait: run at 0.7
-    at(0.7)
-    assert_equal [0.05, 0.7], @runs.map(&:first)
-    at(1.0)                 # time to learn is up
+    at(0.2)
+    @s.trigger(:x)          # short wait: run at 0.4
+    at(0.4)
+    assert_equal [0.05, 0.4], @runs.map(&:first)
+    at(0.5)                 # time to learn is up
     assert_equal :long_wait, @s.state
-    @s.trigger(:x)          # long wait: run at 3.0
-    at(2.999)
+    at(1.0)
+    @s.trigger(:x)          # long wait: run at 6.0
+    at(5.999)
     assert_equal 2, @runs.size
-    at(3.0)
-    assert_equal 3.0, @runs.last.first
+    at(6.0)
+    assert_equal 6.0, @runs.last.first
     at(11.0)                # 10 s of holddown since the last change
     assert_equal :quiet, @s.state
     @s.trigger(:x)
     at(11.05)
     assert_equal 11.05, @runs.last.first
+  end
+
+  # Transition 1 starts the SPF timer only if it is not running: a long
+  # wait run still due when holddown ends is not pulled forward.
+  def test_quiet_keeps_a_run_already_due
+    s = SpfScheduler.new(@loop, learn: 0.5, holddown: 1.0) { @runs << @loop.now.round(3) }
+    s.trigger(:x)
+    at(0.6)
+    s.trigger(:x)           # long wait: run at 5.6
+    at(1.7)
+    assert_equal :quiet, s.state
+    s.trigger(:x)
+    at(5.599)
+    assert_equal [0.05], @runs
+    at(5.6)
+    assert_equal [0.05, 5.6], @runs
   end
 
   def test_holddown_restarts_with_every_change
@@ -73,6 +91,7 @@ class TestCoreSpfScheduler < Test::Unit::TestCase
     assert_raise(ArgumentError) { SpfScheduler.new(@loop, initial: 1, short: 0.5) {} }
     assert_raise(ArgumentError) { SpfScheduler.new(@loop, holddown: 0) {} }
     assert_raise(ArgumentError) { SpfScheduler.new(@loop, bogus: 1) {} }
+    assert_raise(ArgumentError) { SpfScheduler.new(@loop, learn: 2, holddown: 2) {} }
     s = SpfScheduler.new(@loop, initial: 0.1, short: 0.1, long: 0.1) { @runs << :custom }
     s.trigger(:x)
     at(0.1)
@@ -147,6 +166,16 @@ class TestCoreSpfScheduler < Test::Unit::TestCase
     assert_empty r1.routes
     assert_equal :stop, r1.spf_log.last.reasons.first.kind
     r3.stop
+  end
+
+  def test_a_bad_lsa_is_warned_about_once
+    lab, r1, = chain
+    assert lab.run_until(120) { route(r1, '3.3.3.3/32') }
+    r1.as_lsdb.install(Lsa.build(type: 5, ls_id: '9.0.0.0', advr: '2.2.2.2', seq: 1, body: "\0" * 4))
+    r1.compute_routes
+    r1.compute_routes
+    assert_equal 1, lab.log.count { |l| l.start_with?('1.1.1.1') && l.include?('SPF skipped external 9.0.0.0 2.2.2.2: external body too short') }
+    assert_equal r1.spf.runs + 2, r1.stats[:spf_runs], 'two runs by hand, the rest by the scheduler'
   end
 
   def test_a_metric_change_reroutes_without_bouncing_anything

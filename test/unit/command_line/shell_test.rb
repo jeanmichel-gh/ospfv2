@@ -156,7 +156,7 @@ class TestCommandLineShell < Test::Unit::TestCase
     assert_equal rib, @sh.execute('sh ip ro os')
     log = @sh.execute('show ospf log')
     assert_match(/^SPF runs: [1-9]\d*, state: (short|long) wait/, log)
-    assert_match(/initial 50 ms, short 200 ms, long 2000 ms, learn 1000 ms, holddown 10000 ms/, log)
+    assert_match(/initial 50 ms, short 200 ms, long 5000 ms, learn 500 ms, holddown 10000 ms/, log)
     assert_match(/\+\d+ ~\d+ -\d+\s+.*router 2\.2\.2\.2/, log)
     stats = @sh.execute('show ip ospf statistics')
     assert_match(/SPF algorithm executed [1-9]\d* times/, stats)

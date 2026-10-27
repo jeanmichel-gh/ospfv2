@@ -255,7 +255,7 @@ module OSPFv2
             out << row(cells + [h['interface'], h['gateway']], widths)
           end
           next unless detail
-          d = ["area #{r['area'] || '0.0.0.0'}", "origin #{r['advr']}"]
+          d = [r['area'] && "area #{r['area']}", "origin #{r['advr']}"].compact
           d << "type 2 metric #{r['type2_cost']}, internal #{r['cost']}" if r['path_type'] == 'ext2'
           d << "fwd addr #{r['forwarding']}" if r['forwarding']
           d << "tag #{r['tag']}" if r['tag'].to_i.positive?
@@ -265,7 +265,7 @@ module OSPFv2
       end
 
       def router_kind(r)
-        [r['abr'] && 'Area', r['asbr'] && 'AS'].compact.join('/').then { |k| "#{k} BR" }
+        "#{[('Area' if r['abr']), ('AS' if r['asbr'])].compact.join('/')} BR"
       end
 
       # "show ip ospf route", as FRR prints it.
@@ -278,7 +278,7 @@ module OSPFv2
         end
         out << '' << '============ OSPF router routing table ============='
         data['routers'].each do |r|
-          kinds = [r['abr'] && 'ABR', r['asbr'] && 'ASBR'].compact.join(', ')
+          kinds = [('ABR' if r['abr']), ('ASBR' if r['asbr'])].compact.join(', ')
           out << format('%-4s %-18s    [%d] area: %s, %s', r['path_type'] == 'inter' ? 'R IA' : 'R', r['router_id'],
                         r['cost'], r['area'], kinds)
           out.concat(ios_hops(r))
