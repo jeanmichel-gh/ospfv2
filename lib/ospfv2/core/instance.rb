@@ -73,6 +73,20 @@ module OSPFv2
         iface
       end
 
+      # Takes interface +name+ down and forgets it. Our network-LSA for it,
+      # if we were DR, is flushed, and the router-LSA no longer lists it.
+      def remove_interface(name)
+        iface = @interfaces.delete(name) or return nil
+        was_dr = iface.dr?
+        iface.down
+        area = iface.area
+        area.interfaces.delete(iface)
+        flush_own(area, [2, iface.address, @router_id]) if was_dr
+        area.schedule_origination if @running
+        log(:info, iface, "interface #{name} removed")
+        iface
+      end
+
       def start
         return self if @running
         @running = true
@@ -294,10 +308,16 @@ module OSPFv2
       # ---- log ----
 
       def log(level, iface, message)
+        record(level, message, iface)
+        @logger&.call(level, iface ? "#{iface.name} #{message}" : message)
+      end
+
+      # Adds an event to the list without passing it to the logger.
+      def record(level, message, iface = nil)
         ev = Event.new(@loop.clock.wall, level, iface&.name, message)
         @events << ev
         @events.shift(@events.size - MAX_EVENTS) if @events.size > MAX_EVENTS
-        @logger&.call(level, ev.to_s)
+        ev
       end
 
       def trace(dir, iface, pkt, peer)

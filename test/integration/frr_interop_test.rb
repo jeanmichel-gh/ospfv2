@@ -77,6 +77,26 @@ class TestFrrInterop < Test::Unit::TestCase
     assert_synced(true)
   end
 
+  def test_ospfd_and_ospf_cli
+    @lab.start(frr_interface: MD5, ospfd: [
+                 'set routing-options router-id 1.1.1.1',
+                 'set protocols ospf area 0 interface veth0 hello-interval 1',
+                 'set protocols ospf area 0 interface veth0 dead-interval 4',
+                 'set protocols ospf area 0 interface veth0 authentication md5 1 key secret',
+                 'set protocols ospf area 0 interface lo passive'
+               ])
+    ok = @lab.wait_for(30) { @lab.frr_neighbor_state == 'Full' && @lab.cli('show ospf neighbor').include?('Full') }
+    assert ok, "frr #{@lab.frr_neighbor_state.inspect}\n#{@lab.cli('show ospf neighbor')}\n#{@lab.core_log.lines.last(20).join}"
+    assert_match(/2\.2\.2\.2\s+1\s+FULL\/DR/, @lab.cli('show ip ospf neighbor'))
+
+    out = @lab.cli('configure', 'set protocols ospf area 0 interface veth0 metric 33', 'commit')
+    assert_match(/commit complete/, out)
+    seen = @lab.wait_for(15) { @lab.vtysh('show ip ospf database router 1.1.1.1').include?('TOS 0 Metric: 33') }
+    assert seen, 'FRR sees the new cost'
+    assert_equal 'Full', @lab.frr_neighbor_state, 'a cost change keeps the adjacency'
+    assert_match(/1\.1\.1\.1\s+1\.1\.1\.1/, @lab.vtysh('show ip ospf database'))
+  end
+
   def test_simple_password
     @lab.start(frr_interface: ['ip ospf authentication', 'ip ospf authentication-key pw'],
                core_interface: { auth: { type: 'simple', password: 'pw' } })

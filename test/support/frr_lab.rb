@@ -41,7 +41,8 @@ class FrrLab
   # frr_interface: extra lines under "interface veth0" in FRR
   # core_interface: extra keys for the core interface (auth:, type:, ...)
   # p2p: point-to-point on both sides
-  def start(frr_interface: [], core_interface: {}, p2p: false)
+  # ospfd: run bin/ospfd with these set lines instead of the bare core
+  def start(frr_interface: [], core_interface: {}, p2p: false, ospfd: nil)
     cleanup
     sh "ip netns add #{@frr_ns}"
     sh "ip netns add #{@core_ns}"
@@ -53,8 +54,13 @@ class FrrLab
       sh "ip -n #{ns} link set lo up"
       sh "ip -n #{ns} link set veth0 up"
     end
+    sh "ip -n #{@core_ns} addr add 1.1.1.1/32 dev lo"
     start_frr(frr_interface + (p2p ? ['ip ospf network point-to-point'] : []))
-    start_core(core_interface.merge(p2p ? { type: 'p2p' } : {}))
+    if ospfd
+      start_ospfd(ospfd)
+    else
+      start_core(core_interface.merge(p2p ? { type: 'p2p' } : {}))
+    end
     self
   end
 
@@ -119,6 +125,15 @@ class FrrLab
     rows.sort
   end
 
+  # Runs ospf-cli commands against the ospfd started by start(ospfd:).
+  def cli(*commands)
+    args = commands.flat_map { |c| ['-c', c] }
+    out, = Open3.capture2e(RbConfig.ruby, "#{ROOT}/bin/ospf-cli", '-s', socket_path, *args)
+    out
+  end
+
+  def socket_path = File.join(@dir, 'ospfd.sock')
+
   def core_log
     File.read(File.join(@dir, 'core.log'))
   rescue Errno::ENOENT
@@ -165,6 +180,14 @@ class FrrLab
     @core_pid = Process.spawn('ip', 'netns', 'exec', @core_ns, RbConfig.ruby, "-I#{ROOT}/lib",
                               "#{ROOT}/test/support/core_runner.rb", File.join(@dir, 'core.json'), state_file,
                               %i[out err] => File.join(@dir, 'core.log'))
+  end
+
+  def start_ospfd(lines)
+    conf = File.join(@dir, 'ospfd.conf')
+    File.write(conf, lines.join("\n"))
+    @core_pid = Process.spawn('ip', 'netns', 'exec', @core_ns, RbConfig.ruby, "#{ROOT}/bin/ospfd",
+                              '-f', conf, '-s', socket_path, '-l', File.join(@dir, 'core.log'),
+                              %i[out err] => File.join(@dir, 'ospfd.out'))
   end
 
   def cleanup
