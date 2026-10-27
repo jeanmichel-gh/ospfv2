@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'wire'
+require_relative 'auth'
 require_relative 'neighbor'
 
 module OSPFv2
@@ -15,12 +16,12 @@ module OSPFv2
 
       DEFAULTS = {
         type: :broadcast, cost: 10, priority: 1, hello_interval: 10, dead_interval: nil,
-        rxmt_interval: 5, transmit_delay: 1, mtu: 1500, mtu_ignore: false, passive: false
+        rxmt_interval: 5, transmit_delay: 1, mtu: 1500, mtu_ignore: false, passive: false, auth: nil
       }.freeze
 
       attr_reader :instance, :name, :area, :address, :prefix_len, :type, :cost, :priority,
                   :hello_interval, :dead_interval, :rxmt_interval, :transmit_delay, :mtu,
-                  :state, :dr, :bdr, :neighbors, :stats, :transport
+                  :state, :dr, :bdr, :neighbors, :stats, :transport, :auth
       attr_accessor :mtu_ignore
 
       # instance:  the Core::Instance
@@ -28,6 +29,7 @@ module OSPFv2
       # address:   "10.0.0.1/24"
       # area:      the Core::Area
       # transport: a Transport (RawSocket, Loopback); nil for passive
+      # auth:      authentication spec for Auth.build (null by default)
       def initialize(instance, name:, address:, area:, transport: nil, **opts)
         unknown = opts.keys - DEFAULTS.keys
         raise ArgumentError, "unknown interface option(s): #{unknown.join(', ')}" unless unknown.empty?
@@ -51,6 +53,7 @@ module OSPFv2
         @mtu = o[:mtu]
         @mtu_ignore = o[:mtu_ignore]
         @passive = o[:passive]
+        self.auth = o[:auth]
         @transport = transport
         raise ArgumentError, "interface #{name} needs a transport unless passive" if @transport.nil? && !@passive
 
@@ -63,6 +66,15 @@ module OSPFv2
       end
 
       def loop = @instance.loop
+
+      # Replaces the authentication (Auth.build spec or object). Takes
+      # effect on the next packet sent or received.
+      def auth=(spec)
+        @auth = Auth.build(spec, clock: -> { @instance.loop.clock.wall.to_i })
+      end
+
+      # Largest packet body that fits the MTU with our authentication.
+      def max_body = Wire.max_body(@mtu, @auth.trailer_size)
       def broadcast? = @type == :broadcast
       def p2p? = @type == :p2p
       def passive? = @passive
@@ -140,26 +152,31 @@ module OSPFv2
       def receive(bytes, from)
         return unless up?
         from_i = Addr.to_i(from)
-        pkt = Wire.decode(bytes)
+        pkt = Wire.decode(bytes, auth: @auth)
         @stats[:"rx_#{pkt.name}"] += 1
         return drop(pkt.name, "area #{Addr.to_s(pkt.area_id)} from #{from}, ours is #{Addr.to_s(@area.id)}") unless pkt.area_id == @area.id
         return drop(pkt.name, "router id #{Addr.to_s(pkt.router_id)} from #{from} is ours") if pkt.router_id == @instance.router_id
         return drop(pkt.name, "source #{from} not on #{Addr.to_s(network)}/#{@prefix_len}") if broadcast? && (from_i & mask) != network
 
+        key = neighbor_key(pkt.router_id, from_i)
+        return if pkt.crypto_seq && replayed?(pkt, @neighbors[key], from)
+
         if pkt.type == Wire::HELLO
           receive_hello(pkt, from_i)
-          return
+        else
+          nbr = @neighbors[key]
+          return drop(pkt.name, "from unknown neighbor #{Addr.to_s(pkt.router_id)}@#{from}") unless nbr
+          trace(:rx, pkt, from)
+          case pkt.type
+          when Wire::DD  then nbr.receive_dd(pkt.body)
+          when Wire::LSR then nbr.receive_ls_request(pkt.body)
+          when Wire::LSU then @instance.receive_update(nbr, pkt.body)
+          when Wire::ACK then nbr.receive_ack(pkt.body)
+          end
         end
-
-        nbr = @neighbors[neighbor_key(pkt.router_id, from_i)]
-        return drop(pkt.name, "from unknown neighbor #{Addr.to_s(pkt.router_id)}@#{from}") unless nbr
-        trace(:rx, pkt, from)
-        case pkt.type
-        when Wire::DD  then nbr.receive_dd(pkt.body)
-        when Wire::LSR then nbr.receive_ls_request(pkt.body)
-        when Wire::LSU then @instance.receive_update(nbr, pkt.body)
-        when Wire::ACK then nbr.receive_ack(pkt.body)
-        end
+        @neighbors[key]&.crypto_seq = pkt.crypto_seq if pkt.crypto_seq
+      rescue Wire::AuthError => e
+        drop(:auth, "from #{from}: #{e.message}")
       rescue Wire::Error => e
         drop(:packet, "from #{from}: #{e.message}")
       end
@@ -174,7 +191,7 @@ module OSPFv2
 
       def send_packet(body, dest)
         return unless @transport && up? && !@going_down
-        bytes = Wire.encode(body, router_id: @instance.router_id, area_id: @area.id)
+        bytes = Wire.encode(body, router_id: @instance.router_id, area_id: @area.id, auth: @auth)
         @stats[:"tx_#{Wire::NAMES[body.class.type]}"] += 1
         trace(:tx, body, Addr.to_s(dest.is_a?(Integer) ? dest : Addr.to_i(dest)))
         @transport.send_packet(bytes, dest.is_a?(Integer) ? Addr.to_s(dest) : dest)
@@ -184,7 +201,7 @@ module OSPFv2
       # InfTransDelay on the way out (RFC 2328 13.3).
       def send_update(lsas, dest)
         aged = lsas.map { |l| l.with_age(l.age + @transmit_delay) }
-        room = Wire.max_body(@mtu)
+        room = max_body
         Wire.batches(aged, room, fixed: 4, &:length).each do |batch|
           send_packet(Wire::LinkStateUpdate.new(lsas: batch), dest)
         end
@@ -211,7 +228,7 @@ module OSPFv2
           name: @name, address: "#{Addr.to_s(@address)}/#{@prefix_len}", area: Addr.to_s(@area.id),
           type: @type, state: @state, cost: @cost, priority: @priority, passive: @passive,
           dr: Addr.to_s(@dr), bdr: Addr.to_s(@bdr), hello_interval: @hello_interval,
-          dead_interval: @dead_interval, rxmt_interval: @rxmt_interval, mtu: @mtu,
+          dead_interval: @dead_interval, rxmt_interval: @rxmt_interval, mtu: @mtu, auth: @auth.to_s,
           neighbors: @neighbors.size, adjacent: full_neighbors.size,
           hello_due: @hello_timer&.remaining&.round(1)
         }
@@ -221,6 +238,15 @@ module OSPFv2
 
       def neighbor_key(router_id, address)
         p2p? ? router_id : address
+      end
+
+      # RFC 2328 D.5.2: the cryptographic sequence number from a neighbor
+      # never goes down. A lower one is a replay.
+      def replayed?(pkt, nbr, from)
+        last = nbr&.crypto_seq
+        return false unless last && pkt.crypto_seq < last
+        drop(:auth, "from #{from}: sequence #{pkt.crypto_seq} below #{last} from #{nbr}, replayed?")
+        true
       end
 
       def change(new_state, event)
@@ -346,7 +372,7 @@ module OSPFv2
       end
 
       def send_acks(headers, dest)
-        room = Wire.max_body(@mtu)
+        room = max_body
         Wire.batches(headers, room) { LsaHeader::SIZE }.each do |batch|
           send_packet(Wire::LinkStateAck.new(headers: batch.map(&:header)), dest)
         end

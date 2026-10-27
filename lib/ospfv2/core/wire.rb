@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'lsa'
+require_relative 'auth'
 
 module OSPFv2
   module Core
@@ -13,8 +14,14 @@ module OSPFv2
     #   bytes = Wire.encode(Wire::Hello.new(...), router_id: rid, area_id: 0)
     #   pkt   = Wire.decode(bytes)          # => Wire::Packet
     #   pkt.body                            # => Wire::Hello
+    #
+    # Both take an optional auth: (a Core::Auth object, null by default).
     module Wire
       class Error < StandardError; end
+
+      # The packet failed authentication: wrong type, key, password,
+      # digest or checksum.
+      class AuthError < Error; end
 
       VERSION = 2
       HEADER_SIZE = 24
@@ -28,7 +35,9 @@ module OSPFv2
 
       NAMES = { HELLO => :hello, DD => :dd, LSR => :ls_request, LSU => :ls_update, ACK => :ls_ack }.freeze
 
-      Packet = Struct.new(:type, :router_id, :area_id, :autype, :auth, :body, keyword_init: true) do
+      # key_id and crypto_seq are set with cryptographic authentication.
+      Packet = Struct.new(:type, :router_id, :area_id, :autype, :auth, :key_id, :crypto_seq, :body,
+                          keyword_init: true) do
         def name = NAMES[type]
       end
 
@@ -133,50 +142,54 @@ module OSPFv2
 
       module_function
 
-      # Builds a packet with null authentication (AuType 0).
-      def encode(body, router_id:, area_id:)
+      NULL_AUTH = Auth::Null.new
+
+      # Builds a packet and authenticates it with +auth+.
+      def encode(body, router_id:, area_id:, auth: NULL_AUTH)
         payload = body.encode
         hdr = [VERSION, body.class.type, HEADER_SIZE + payload.bytesize, router_id, area_id, 0, 0, 0, 0]
               .pack('CCnNNnnNN')
-        raw = (hdr + payload).b
-        raw[12, 2] = [inet_checksum(raw)].pack('n')
-        raw
+        auth.seal((hdr + payload).b)
       end
 
-      # Parses and checks one packet (RFC 2328 8.2, minus the interface
-      # checks the caller does). Trailing bytes after the OSPF length, such
-      # as a Cisco LLS block, are ignored.
-      def decode(bytes)
+      # Parses and checks one packet (RFC 2328 8.2 and D.5, minus the
+      # interface checks the caller does). The AuType must match +auth+.
+      # Trailing bytes after the OSPF length and any authentication data,
+      # such as a Cisco LLS block, are ignored.
+      def decode(bytes, auth: NULL_AUTH)
         raise Error, "packet too short (#{bytes.bytesize})" if bytes.bytesize < HEADER_SIZE
-        ver, type, len, rid, aid, csum, autype, auth = bytes.unpack('CCnNNnna8')
+        ver, type, len, rid, aid, _csum, autype, authf = bytes.unpack('CCnNNnna8')
         raise Error, "version #{ver}, expected 2" unless ver == VERSION
         raise Error, "length #{len} out of range (#{bytes.bytesize} received)" if len < HEADER_SIZE || len > bytes.bytesize
         body_class = BODIES[type] or raise Error, "unknown packet type #{type}"
-        raw = bytes.byteslice(0, len)
-        case autype
-        when 0
-          raise Error, format('bad checksum 0x%04x', csum) unless inet_checksum(raw).zero?
-        else
-          raise Error, "authentication type #{autype} not supported"
+        unless autype == auth.autype
+          raise AuthError, "authentication type #{autype} (#{AUTYPE_NAMES.fetch(autype, 'unknown')}), " \
+                           "expected #{auth.autype} (#{AUTYPE_NAMES[auth.autype]})"
         end
-        Packet.new(type: type, router_id: rid, area_id: aid, autype: autype, auth: auth,
-                   body: body_class.decode(raw.byteslice(HEADER_SIZE..)))
+        begin
+          result = auth.open(bytes, len)
+        rescue Auth::ChecksumError => e
+          raise Error, e.message
+        rescue Auth::Error => e
+          raise AuthError, e.message
+        end
+        Packet.new(type: type, router_id: rid, area_id: aid, autype: autype, auth: authf,
+                   key_id: result.key_id, crypto_seq: result.seq,
+                   body: body_class.decode(bytes.byteslice(HEADER_SIZE, len - HEADER_SIZE)))
       end
+
+      AUTYPE_NAMES = { Auth::NULL => 'null', Auth::SIMPLE => 'simple', Auth::CRYPTO => 'cryptographic' }.freeze
 
       # RFC 1071 one's complement sum. The 8 authentication bytes are not
-      # covered (RFC 2328 D.4.1); with AuType 0 they are zero anyway.
+      # covered (RFC 2328 D.4.1).
       def inet_checksum(raw)
-        data = raw.dup
-        data[16, 8] = "\0" * 8
-        data << "\0" if data.bytesize.odd?
-        sum = data.unpack('n*').sum
-        sum = (sum & 0xffff) + (sum >> 16) while sum > 0xffff
-        ~sum & 0xffff
+        Auth.inet_checksum(raw)
       end
 
-      # Largest OSPF body that fits an interface MTU.
-      def max_body(mtu)
-        mtu - IP_HEADER_SIZE - HEADER_SIZE
+      # Largest OSPF body that fits an interface MTU, leaving room for
+      # +trailer+ bytes of authentication data.
+      def max_body(mtu, trailer = 0)
+        mtu - IP_HEADER_SIZE - HEADER_SIZE - trailer
       end
 
       # Splits +items+ into groups whose encoded size fits +room+ bytes.

@@ -17,6 +17,15 @@
   flooded unchanged; cross-checked against the existing packet classes
 * Simulator fix: an ack only counts for the instance it names
   (RFC 2328 13.7)
+* Packet authentication for the core (OSPFv2::Core::Auth): null, simple
+  password, keyed MD5 (RFC 2328 D) and HMAC-SHA-1/256/384/512
+  (RFC 5709). Several keys per interface for rollover, one send key,
+  mixed algorithms allowed. Per-neighbor replay check on the
+  cryptographic sequence number, which starts from the wall clock so it
+  keeps growing across restarts. Bigger digests shrink the room for
+  LSAs so packets still fit the MTU
+* Interop tests against FRRouting ospfd in network namespaces, with and
+  without authentication (OSPFV2_FRR=1, run as root; a CI job runs them)
 
 === 0.1.0 2026-10-24
 

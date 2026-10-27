@@ -19,6 +19,19 @@ jobs:
           bundler-cache: true
       - run: bundle exec rake test
 
+  # The core against FRRouting ospfd over veth links in network
+  # namespaces: adjacency, database sync and authentication.
+  interop-frr:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+          bundler-cache: true
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq frr iproute2
+      - run: sudo -E env "PATH=$PATH" OSPFV2_FRR=1 bundle exec ruby -Ilib -Itest test/integration/frr_interop_test.rb
+
   docker:
     runs-on: ubuntu-latest
     steps:
