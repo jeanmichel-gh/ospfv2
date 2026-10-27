@@ -32,10 +32,11 @@ module OSPFv2
       # and optionally its neighbors' addresses by router id, used for a
       # point-to-point next hop when the neighbor's router-LSA does not
       # say its address on our subnet (an unnumbered link, say).
-      Link = Struct.new(:name, :address, :prefix_len, :neighbors, keyword_init: true) do
-        def initialize(name:, address:, prefix_len:, neighbors: {})
+      # +virtual+: [neighbor router id, transit area id] for a virtual link.
+      Link = Struct.new(:name, :address, :prefix_len, :neighbors, :virtual, keyword_init: true) do
+        def initialize(name:, address:, prefix_len:, neighbors: {}, virtual: nil)
           super(name: name, address: Addr.to_i(address), prefix_len: prefix_len,
-                neighbors: neighbors.to_h { |rid, ip| [Addr.to_i(rid), Addr.to_i(ip)] })
+                neighbors: neighbors.to_h { |rid, ip| [Addr.to_i(rid), Addr.to_i(ip)] }, virtual: virtual)
         end
 
         def mask = Addr.mask(prefix_len)
@@ -44,9 +45,10 @@ module OSPFv2
       end
 
       # +nssa+: the area is not-so-stubby (RFC 3101); its type 7 LSAs count.
-      Area = Struct.new(:id, :lsas, :interfaces, :nssa, keyword_init: true) do
-        def initialize(id:, lsas:, interfaces: [], nssa: false)
-          super(id: Addr.to_i(id), lsas: lsas, interfaces: interfaces, nssa: nssa)
+      # +no_summaries+: its border routers send it only a default.
+      Area = Struct.new(:id, :lsas, :interfaces, :nssa, :no_summaries, keyword_init: true) do
+        def initialize(id:, lsas:, interfaces: [], nssa: false, no_summaries: false)
+          super(id: Addr.to_i(id), lsas: lsas, interfaces: interfaces, nssa: nssa, no_summaries: no_summaries)
         end
       end
 
@@ -62,15 +64,20 @@ module OSPFv2
       # is the type 2 metric. +advr+ is the router that advertised it.
       # External routes also carry the LSA they come from: +lsa_type+ (5,
       # or 7 with +area+ the NSSA), +lsa_metric+ and the type 7 +p_bit+.
+      # Router entries also carry +address+: the router's own address on
+      # the link toward us in the tree, where a virtual link sends to it.
       Route = Struct.new(:prefix, :prefix_len, :path_type, :cost, :type2_cost, :area, :next_hops,
-                         :advr, :tag, :forwarding, :lsa_type, :lsa_metric, :p_bit, keyword_init: true) do
+                         :advr, :tag, :forwarding, :lsa_type, :lsa_metric, :p_bit, :address, keyword_init: true) do
         def dest_s = "#{Addr.to_s(prefix)}/#{prefix_len}"
         def area_s = area && Addr.to_s(area)
 
-        # Same destination, same way to get there.
+        # Same destination, same way to get there, same LSA behind it (what
+        # a translation or a summary copies).
         def same_as?(o)
           o && path_type == o.path_type && cost == o.cost && type2_cost == o.type2_cost &&
-            area == o.area && next_hops.sort_by(&:sort_key) == o.next_hops.sort_by(&:sort_key)
+            area == o.area && next_hops.sort_by(&:sort_key) == o.next_hops.sort_by(&:sort_key) &&
+            tag == o.tag && forwarding == o.forwarding && lsa_type == o.lsa_type && p_bit == o.p_bit &&
+            lsa_metric == o.lsa_metric
         end
 
         def to_s
@@ -158,8 +165,18 @@ module OSPFv2
         end
 
         def run
-          @areas.each { |a| intra_area(a) }
+          # Active attachments (16.2): an interface up in the area. An area
+          # border router is attached to the backbone and another area
+          # (RFC 3509).
+          @attached = @areas.select { |a| a.interfaces.any? && a.lsas.any? { |l| l.key == [1, @root, @root] } }
+          @abr = @attached.size > 1 && @attached.any? { |a| a.id.zero? }
+          @backbone_routers = 0
+          @transit_capable = {}
+          # Transit areas before the backbone: a virtual link's next hops
+          # come from the transit area's tree (16.1.1).
+          @areas.sort_by { |a| a.id.zero? ? 1 : 0 }.each { |a| intra_area(a) }
           inter_area
+          transit_areas
           external
           @routes.each_value { |r| finish(r) }
           @routers.each_value { |r| finish(r) }
@@ -212,6 +229,11 @@ module OSPFv2
             break unless v
           end
           @stats[:vertices] += tree.size
+          @backbone_routers = tree.count { |id, _| id[0] == :router } - 1 if area.id.zero?
+          # TransitCapability: a router in the tree sets the V bit (16.1).
+          @transit_capable[area.id] = tree.each_value.any? do |x|
+            x.id[0] == :router && (router_body(x.lsa)&.first.to_i & 4) == 4
+          end
           stub_routes(area, tree)
         end
 
@@ -252,9 +274,9 @@ module OSPFv2
             links = router_links(v.lsa) or return
             links.each do |link|
               case link.type
-              when 1 # point-to-point
+              when 1, 4 # point-to-point, virtual link
                 w = db.router(link.id)
-                next unless w && links_back?(w, v.id)
+                next unless w && links_back?(w, v.id, link.type)
                 yield [:router, link.id], w, link.metric, link
               when 2 # transit network; link id is the DR's address
                 w = db.network(link.id)
@@ -273,7 +295,7 @@ module OSPFv2
           end
         end
 
-        def links_back?(w_lsa, v_id)
+        def links_back?(w_lsa, v_id, type = 1)
           kind, id = v_id
           if w_lsa.type == 2
             return false unless kind == :router
@@ -283,7 +305,7 @@ module OSPFv2
           else
             links = router_links(w_lsa) or return false
             if kind == :router
-              links.any? { |l| l.type == 1 && l.id == id }
+              links.any? { |l| l.type == type && l.id == id }
             else
               links.any? { |l| l.type == 2 && l.id == id }
             end
@@ -293,9 +315,14 @@ module OSPFv2
         # ---- 16.1.1: next hops ----
 
         def next_hops(area, parent, w_id, w_lsa, link)
-          if parent.id == [:router, @root]
-            iface = area.interfaces.find { |i| i.address == link.data } ||
-                    area.interfaces.find { |i| i.on?(link.data) }
+          if parent.id == [:router, @root] && link.type == 4
+            # Over a virtual link: the transit area's path to its other end.
+            vl = area.interfaces.find { |i| i.virtual && i.virtual[0] == w_id[1] } or return []
+            entry = @routers[[w_id[1], vl.virtual[1]]]
+            entry && entry.path_type == :intra ? entry.next_hops.dup : []
+          elsif parent.id == [:router, @root]
+            iface = area.interfaces.reject(&:virtual).find { |i| i.address == link.data } ||
+                    area.interfaces.reject(&:virtual).find { |i| i.on?(link.data) }
             return [] unless iface
             return [NextHop.new(iface.name, nil)] if w_id[0] == :network
             # The neighbor's address: its link back to us on this subnet.
@@ -332,7 +359,7 @@ module OSPFv2
               next unless l.type == 3
               len = prefix_len(l.data, v.lsa) or next
               hops = if v.id[1] == @root
-                       iface = area.interfaces.find { |i| i.on?(l.id) }
+                       iface = area.interfaces.reject(&:virtual).find { |i| i.on?(l.id) }
                        iface ? [NextHop.new(iface.name, nil)] : []
                      else
                        v.next_hops
@@ -345,10 +372,12 @@ module OSPFv2
         def add_intra(area, prefix, len, cost, hops, advr)
           key = [prefix, len]
           cur = @routes[key]
-          if cur.nil? || cur.path_type != :intra || cost < cur.cost
+          # One area per entry (RFC 2328 11): of equal paths in two areas,
+          # the lower area id's is kept, whatever order areas are computed.
+          if cur.nil? || cur.path_type != :intra || cost < cur.cost || (cost == cur.cost && area.id < cur.area)
             @routes[key] = Route.new(prefix: prefix, prefix_len: len, path_type: :intra, cost: cost,
                                      area: area.id, next_hops: hops.dup, advr: advr)
-          elsif cost == cur.cost
+          elsif cost == cur.cost && cur.area == area.id
             cur.next_hops |= hops
           end
         end
@@ -360,17 +389,32 @@ module OSPFv2
           return if (flags & 0x3).zero? # neither B nor E
           @routers[[v.id[1], area.id]] = Route.new(prefix: v.id[1], prefix_len: 32, path_type: :intra, cost: v.dist,
                                                     area: area.id, next_hops: v.next_hops.dup, advr: v.id[1],
-                                                    tag: { abr: (flags & 1) == 1, asbr: (flags & 2) == 2 })
+                                                    tag: { abr: (flags & 1) == 1, asbr: (flags & 2) == 2,
+                                                           nt: (flags & 0x10) == 0x10 },
+                                                    address: parent_address(v))
+        end
+
+        # The router's address on its link to its parent in the tree (16.1
+        # step 4: a virtual link's far end address). Of several parents,
+        # the one our first next hop goes through.
+        def parent_address(v)
+          links = router_links(v.lsa) or return nil
+          gw = v.next_hops.first&.gateway
+          v.parents.each do |kind, id|
+            cands = links.select { |l| l.type == (kind == :network ? 2 : 1) && l.id == id }
+            l = cands.find { |x| x.data == gw } || cands.first
+            return l.data if l
+          end
+          nil
         end
 
         # ---- 16.2: inter-area routes ----
 
         def inter_area
-          # Active attachments (16.2): an interface up in the area.
-          attached = @areas.select { |a| a.interfaces.any? && a.lsas.any? { |l| l.key == [1, @root, @root] } }
-          backbone = attached.find { |a| a.id.zero? }
-          # An ABR looks at backbone summaries only.
-          examined = attached.size > 1 ? [backbone].compact : attached
+          backbone = @attached.find { |a| a.id.zero? }
+          # An ABR with a live backbone (a neighbor there) looks at backbone
+          # summaries only; otherwise, every attached area's (RFC 3509).
+          examined = @abr && @backbone_routers.positive? ? [backbone] : @attached
           examined.each do |area|
             area.lsas.each do |l|
               next unless [3, 4].include?(l.type) && !l.max_age? && l.advr != @root
@@ -390,6 +434,40 @@ module OSPFv2
             end
           end
         end
+
+        # 16.3: an area border router attached to a transit area (one a
+        # virtual link crosses, V bit set) checks that area's summaries for
+        # shorter paths to backbone and inter-area destinations.
+        def transit_areas
+          return unless @abr
+          @attached.each do |area|
+            next if area.id.zero? || !transit_capable?(area)
+            area.lsas.each do |l|
+              next unless [3, 4].include?(l.type) && !l.max_age? && l.advr != @root
+              parts = summary_body(l) or next
+              mask, metric = parts
+              next if metric == LS_INFINITY
+              br = @routers[[l.advr, area.id]]
+              next unless br && br.path_type == :intra && br.tag && br.tag[:abr]
+              cur = if l.type == 3
+                      len = prefix_len(mask, l) or next
+                      @routes[[l.ls_id & mask, len]]
+                    else
+                      @routers[[l.ls_id, 0]]
+                    end
+              next unless cur && %i[intra inter].include?(cur.path_type) && cur.area.to_i.zero?
+              cost = br.cost + metric
+              if cost < cur.cost
+                cur.cost = cost
+                cur.next_hops = br.next_hops.dup
+              elsif cost == cur.cost
+                cur.next_hops |= br.next_hops
+              end
+            end
+          end
+        end
+
+        def transit_capable?(area) = @transit_capable[area.id]
 
         def add_inter(table, key, len, area, cost, br, asbr: false)
           cur = table[key]
@@ -443,6 +521,10 @@ module OSPFv2
             body = external_body(l) or next
             mask, e_bit, metric, fwd, tag = body
             next if metric == LS_INFINITY || own[fwd]
+            # A border router ignores another border router's default (P bit
+            # clear), and every default in an NSSA it sends only a default
+            # to; otherwise two of them route to each other (2.5 step 3).
+            next if mask.zero? && @abr && (!(l.options & 0x08).positive? || area.no_summaries)
             # The originator: an ASBR, or the NSSA border router for its
             # default (2.5 step 3).
             asbr = @routers[[l.advr, area.id]]
@@ -486,9 +568,11 @@ module OSPFv2
           rank = { ext1: 0, ext2: 1 }
           return rank[a.path_type] <=> rank[b.path_type] unless a.path_type == b.path_type
           c = a.path_type == :ext1 ? a.cost <=> b.cost : [a.type2_cost, a.cost] <=> [b.type2_cost, b.cost]
-          return c unless c.zero? && a.forwarding && b.forwarding
-          # RFC 3101 2.5 (6e): equal, both with a forwarding address: a type 7
-          # with the P bit, then a type 5, then the higher router id.
+          # Different forwarding addresses, or none: equal-cost paths, kept.
+          return c unless c.zero? && a.forwarding && a.forwarding == b.forwarding
+          # RFC 3101 2.5 (6e): the same route through the same forwarding
+          # address: a type 7 with the P bit, then a type 5, then the
+          # higher router id.
           rank = ->(r) { r.lsa_type == 7 && r.p_bit ? 0 : (r.lsa_type == 5 ? 1 : 2) }
           [rank[a], -a.advr] <=> [rank[b], -b.advr]
         end
@@ -502,11 +586,13 @@ module OSPFv2
         end
 
         # Longest-prefix match among the internal routes.
-        # With +area+, an intra-area route in that area only.
+        # With +area+, the longest match must be an intra-area route in
+        # that area, or there is none (RFC 3101 2.5 step 3).
         def lookup(ip, area: nil)
           @internal_lens.each do |len|
             r = @internal[len][ip & Addr.mask(len)] or next
             return r if area.nil? || (r.path_type == :intra && r.area == area)
+            return nil
           end
           nil
         end

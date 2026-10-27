@@ -120,6 +120,13 @@ module OSPFv2
         links = []
         @interfaces.each do |iface|
           next unless iface.up?
+          if iface.virtual?
+            # A virtual link, once its adjacency is full (12.4.1.3).
+            iface.full_neighbors.each do |n|
+              links << { type: 4, id: n.router_id, data: iface.address, metric: iface.cost }
+            end
+            next
+          end
           stub = { type: 3, id: iface.network, data: iface.mask, metric: iface.cost }
           if iface.passive?
             links << stub
@@ -140,7 +147,13 @@ module OSPFv2
         # there. In an NSSA, E when we bring routes in as type 7 (RFC 3101).
         asbr = nssa? ? @instance.exporting? : (@instance.asbr? && external_capable?)
         flags = (@instance.abr? ? 1 : 0) | (asbr ? 2 : 0)
+        flags |= 4 if transit_for_virtual_link? # V bit
         { type: 1, ls_id: @instance.router_id, body: router_body(links, flags) }
+      end
+
+      # A full virtual link crosses this area: the V bit in our router-LSA.
+      def transit_for_virtual_link?
+        @instance.virtual_links.each_value.any? { |v| v.transit_area_id == @id && v.full_neighbors.any? }
       end
 
       # A broadcast segment is transit when we are fully adjacent with the

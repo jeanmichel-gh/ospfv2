@@ -225,11 +225,16 @@ module OSPFv2
       module_function
 
       # [[label, help]] for the word after +words+ (the statement so far).
-      def options(words, partial = '')
+      # +siblings+: after a leaf or flag, offer the leaves and flags beside
+      # it, as set allows ("stub default-metric 10 no-summaries"); delete
+      # takes one statement.
+      def options(words, partial = '', siblings: true)
         node = Config::Schema::ROOT
         i = 0
+        after_leaf = false
         while i < words.size
           child = find(node, words[i]) or return []
+          return [] if after_leaf && !%i[leaf flag].include?(child.kind)
           case child.kind
           when :container
             node = child
@@ -241,9 +246,13 @@ module OSPFv2
             i += 2
           when :leaf
             return [[hint(child.type), child.help]] if i + 1 == words.size
+            return [['<cr>', '']] unless siblings
             i += 2 # its siblings may follow on the same line
+            after_leaf = true
           when :flag
+            return [['<cr>', '']] unless siblings
             i += 1
+            after_leaf = true
           when :keyed_leaf
             rest = words.size - i - 1
             return [[hint(child.type), 'Key id']] if rest.zero?
@@ -251,13 +260,16 @@ module OSPFv2
             return rest == 2 ? [[hint(child.sub[1]), 'Secret']] : [['<cr>', '']]
           end
         end
-        opts = node.children.values.select { |c| c.name.start_with?(partial) }.map { |c| [c.name, c.help.to_s] }
+        kids = node.children.values
+        kids = kids.select { |c| %i[leaf flag].include?(c.kind) } if after_leaf
+        opts = kids.select { |c| c.name.start_with?(partial) }.map { |c| [c.name, c.help.to_s] }
         opts << ['<cr>', ''] if !words.empty? && partial.empty? && node.inner?
         opts
       end
 
-      def completions(words, partial)
-        options(words, partial).map(&:first).reject { |w| w.start_with?('<') }.select { |w| w.start_with?(partial) }
+      def completions(words, partial, siblings: true)
+        options(words, partial, siblings: siblings).map(&:first).reject { |w| w.start_with?('<') }
+                                                    .select { |w| w.start_with?(partial) }
       end
 
       def find(node, word)

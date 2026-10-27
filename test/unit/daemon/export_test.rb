@@ -88,7 +88,18 @@ class TestDaemonExport < Test::Unit::TestCase
     assert_equal 2, @d.instance.interfaces['eth1'].options
     first = @d.instance.interfaces['eth2']
     commit!('set protocols ospf area 0.0.0.1 stub no-summaries')
-    refute_same first, @d.instance.interfaces['eth2'], 'restarted'
+    assert_same first, @d.instance.interfaces['eth2'], 'still a stub: no restart'
+    commit!('delete protocols ospf area 0.0.0.1 stub', 'set protocols ospf area 0.0.0.1 nssa')
+    refute_same first, @d.instance.interfaces['eth2'], 'stub to NSSA: restarted'
+    assert_equal 0x08, @d.instance.interfaces['eth2'].options
     assert @peer.neighbors.first.full?, 'other areas untouched'
+  end
+
+  def test_a_kernel_read_error_keeps_the_static_routes
+    commit!(*BASE, *POLICY)
+    assert @loop.run_until(120) { route('198.18.0.0/15') }
+    @system.statics = nil # the netlink read failed
+    @loop.advance(12)
+    assert route('198.18.0.0/15'), 'still advertised'
   end
 end

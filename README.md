@@ -202,9 +202,12 @@ previous versions next to it as `ospfd.conf.rollback.N`. `kill -HUP` reloads the
 
 ### Areas and external routes
 
-An interface in a second area makes ospfd an area border router: it sets the B bit and
-tells each area about the others with summary-LSAs (and about AS boundary routers
-with type 4 summaries), as RFC 2328 12.4.3 says.
+Interfaces in the backbone and another area make ospfd an area border router: it sets
+the B bit and tells each area about the others with summary-LSAs (and about AS
+boundary routers with type 4 summaries), as RFC 2328 12.4.3 says. As on most
+implementations (RFC 3509), a router in two areas without the backbone is not an
+area border router, and one whose backbone has no neighbor uses every area's
+summaries.
 
 A stub area takes no external routes; its area border routers send a default route
 instead, and with `no-summaries` nothing else (totally stubby):
@@ -215,8 +218,10 @@ set protocols ospf area 2 stub default-metric 10 no-summaries
 ```
 
 An NSSA (RFC 3101) keeps AS externals out too, but routers inside may bring their own
-routes in as type 7 LSAs. The area border router with the highest router id
-translates them into AS externals for the rest of the network.
+routes in as type 7 LSAs. The area border router with the highest router id, among
+those also on the backbone, translates them into AS externals for the rest of the
+network; one that loses the role keeps translating for 40 seconds, so routes do not
+flap.
 
 ```
 set protocols ospf area 3 nssa
@@ -229,6 +234,19 @@ set protocols ospf area 5 nssa no-summaries
 
 Every router in the area must agree on stub or NSSA, or they will not become
 neighbors. Changing it restarts the area's interfaces.
+
+An area with no backbone interface can reach the backbone through a virtual link
+across another area, to an area border router of that area:
+
+```
+set protocols ospf area 0 virtual-link neighbor-id 2.2.2.2 transit-area 1
+```
+
+It comes up when area 1 reaches 2.2.2.2, costs what that path costs, and takes the
+interface timers and authentication statements. `show ospf interface` lists it as
+`vl-2.2.2.2`. Its packets follow the kernel routing table, so with `routing-options
+kernel no-install` only a far end one hop away can be reached. One virtual link per
+far end router.
 
 External routes are advertised through an export policy, as on Junos. The host's own
 networks (`direct`) and static routes in the kernel (`static`) are the sources.

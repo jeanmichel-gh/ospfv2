@@ -144,4 +144,34 @@ class TestCoreAbr < Test::Unit::TestCase
     assert_equal [[4, '7.7.7.7', '0.0.0.0', 12]], specs(t, '0.0.0.0')
     assert_empty specs(t, '0.0.0.1'), 'the ASBR is in that area'
   end
+
+  def test_appendix_e_says_once_when_ids_run_out
+    t = table([make_route('10.9.0.0', 16, :intra, 5, '0.0.0.0'), make_route('10.9.0.0', 24, :intra, 6, '0.0.0.0'),
+               make_route('10.9.0.255', 32, :intra, 7, '0.0.0.0')])
+    2.times { specs(t, '0.0.0.1') }
+    assert_equal 1, @lab.log.count { |l| l.include?('no link state id left for 10.9.0.255/32') }
+  end
+
+  def test_nothing_is_redone_when_nothing_changed
+    assert @lab.run_until(120) { converged? }
+    @lab.advance(15)
+    calls = 0
+    @r2.define_singleton_method(:summaries_for) { |*a| calls += 1; super(*a) }
+    3.times { @r2.compute_routes }
+    assert_equal 0, calls
+    @r1.interfaces['eth1'].cost = 40
+    assert @lab.run_until(30) { calls.positive? }
+  end
+
+  # RFC 3509: a router in two areas, neither the backbone, is no ABR.
+  def test_two_areas_without_the_backbone_make_no_abr
+    lab = CoreLab.new
+    a = lab.segment
+    b = lab.segment
+    r = lab.router('7.7.7.7', [a, '10.7.1.1/30', { type: :p2p, area: 1 }], [b, '10.7.2.1/30', { type: :p2p, area: 2 }])
+    lab.start
+    lab.advance(5)
+    refute r.abr?
+    assert_equal 0, r.areas[1].lsdb[[1, r.router_id, r.router_id]].router_body[0] & 1
+  end
 end

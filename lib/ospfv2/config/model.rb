@@ -35,7 +35,7 @@ module OSPFv2
         197 => 'openfabric (FRR)', 198 => 'srte (FRR)'
       }.freeze
 
-      attr_reader :router_id, :interfaces, :warnings, :kernel, :export, :areas
+      attr_reader :router_id, :interfaces, :warnings, :kernel, :export, :areas, :virtual_links
 
       def initialize(tree)
         @errors = []
@@ -45,12 +45,18 @@ module OSPFv2
         @errors << 'routing-options router-id is required' unless @router_id
         @interfaces = {}
         @areas = {}
+        @virtual_links = {}
         areas = data.dig('protocols', 'ospf', 'area') || {}
         areas.each do |area, a|
           (a['interface'] || {}).each { |name, i| interface(area, name, i) }
           area_options(area, a)
         end
+        areas.each { |area, a| virtual_link_options(area, a.dig('virtual-link', 'neighbor-id') || {}) }
         @kernel = kernel_options(data.dig('routing-options', 'kernel') || {})
+        unless @kernel[:install] || @virtual_links.empty?
+          @warnings << 'virtual links send through the kernel routing table; with kernel no-install, ' \
+                       'one whose other end is more than a hop away cannot come up'
+        end
         @export = export_policy(data)
         @warnings << 'no OSPF interfaces configured' if @interfaces.empty? && @errors.empty?
         raise Error, @errors.join("\n") unless @errors.empty?
@@ -82,6 +88,45 @@ module OSPFv2
         @interfaces[name] = opts.freeze
       end
 
+      VL_OPTIONS = { 'hello-interval' => :hello_interval, 'dead-interval' => :dead_interval,
+                     'retransmit-interval' => :rxmt_interval, 'transit-delay' => :transmit_delay }.freeze
+
+      # neighbor router id => { transit_area:, hello_interval:, ..., auth: }
+      def virtual_link_options(area, links)
+        links.each do |rid, v|
+          where = "virtual-link neighbor-id #{rid}"
+          if area != '0.0.0.0'
+            @errors << "#{where}: virtual links belong under area 0.0.0.0, not #{area}"
+            next
+          end
+          transit = v['transit-area']
+          if transit.nil?
+            @errors << "#{where}: transit-area is required"
+            next
+          end
+          if transit == '0.0.0.0'
+            @errors << "#{where}: the transit area cannot be the backbone"
+            next
+          end
+          if @areas[transit]
+            @errors << "#{where}: transit area #{transit} is a #{@areas[transit].keys.first}; virtual links cannot cross it"
+            next
+          end
+          if rid == @router_id
+            @errors << "#{where}: that is our own router id"
+            next
+          end
+          unless @interfaces.any? { |_, i| i[:area] == transit }
+            @warnings << "#{where}: no interface of ours in transit area #{transit}"
+          end
+          opts = { transit_area: transit }
+          VL_OPTIONS.each { |word, key| opts[key] = v[word] if v.key?(word) }
+          auth = authentication(where, v['authentication'])
+          opts[:auth] = auth if auth
+          @virtual_links[rid] = opts.freeze
+        end
+      end
+
       # area => { stub: { default_metric:, no_summaries: } }, areas with
       # options only.
       def area_options(area, a)
@@ -109,6 +154,13 @@ module OSPFv2
           return nil
         end
         p = Policy.from_config(name, policy)
+        p.terms.each do |t|
+          t.filters.each do |f|
+            next unless f.upto && f.upto < f.prefix_len
+            @errors << "policy-statement #{name} term #{t.name}: route-filter upto /#{f.upto} is shorter than " \
+                       "the prefix /#{f.prefix_len}"
+          end
+        end
         @warnings << "policy-statement #{name} accepts nothing" if p.terms.none? { |t| t.action == :accept }
         p
       end

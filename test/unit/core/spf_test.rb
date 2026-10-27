@@ -383,6 +383,57 @@ class TestCoreSpf < Test::Unit::TestCase
     assert_nil t.routers.keys.find { |rid, _| rid == A['1.1.1.1'] }
   end
 
+  def test_equal_externals_through_different_forwarding_addresses_keep_both_paths
+    lsas = square
+    lsas[1] = rtr('2.2.2.2', p2p(2, 1) + p2p(2, 4) + [loopback(2)], flags: 2)
+    lsas[2] = rtr('3.3.3.3', p2p(3, 1) + p2p(3, 4) + [loopback(3)], flags: 2)
+    t = spf(lsas, square_ifaces, externals: [external('9.0.0.0', 8, '2.2.2.2', 20, fwd: '10.2.4.1'),
+                                             external('9.0.0.0', 8, '3.3.3.3', 20, fwd: '10.3.4.1')])
+    assert_equal ['via 10.1.2.2 eth1', 'via 10.1.3.2 eth2'], hops(route(t, '9.0.0.0/8'))
+  end
+
+  def test_one_area_per_entry
+    a0 = Spf::Area.new(id: 0, lsas: [rtr('1.1.1.1', p2p(1, 2)), rtr('2.2.2.2', p2p(2, 1) + [[:stub, '9.9.9.9', '255.255.255.255', 1]])],
+                       interfaces: [iface('eth1', 1, 2)])
+    a1 = Spf::Area.new(id: 1, lsas: [rtr('1.1.1.1', p2p(1, 3)), rtr('3.3.3.3', p2p(3, 1) + [[:stub, '9.9.9.9', '255.255.255.255', 1]])],
+                       interfaces: [iface('eth2', 1, 3)])
+    r = route(Spf.run(router_id: '1.1.1.1', areas: [a0, a1]), '9.9.9.9/32')
+    assert_equal ['via 10.1.2.2 eth1'], hops(r), 'the equal path through area 1 is not mixed in'
+    assert_equal 0, r.area
+  end
+
+  # RFC 3509: in two areas but not the backbone, a router is no ABR and
+  # uses the summaries of both; an ABR whose backbone has no neighbor
+  # does too.
+  def test_inter_area_without_a_live_backbone
+    sa = Spf::Area.new(id: 1, lsas: [rtr('1.1.1.1', p2p(1, 2)), rtr('2.2.2.2', p2p(2, 1), flags: 1),
+                                     summary('172.16.0.0', 16, '2.2.2.2', 5)], interfaces: [iface('eth1', 1, 2)])
+    sb = Spf::Area.new(id: 2, lsas: [rtr('1.1.1.1', p2p(1, 3)), rtr('3.3.3.3', p2p(3, 1), flags: 1),
+                                     summary('172.17.0.0', 16, '3.3.3.3', 5)], interfaces: [iface('eth2', 1, 3)])
+    t = Spf.run(router_id: '1.1.1.1', areas: [sa, sb])
+    assert route(t, '172.16.0.0/16') && route(t, '172.17.0.0/16')
+    lo = Spf::Area.new(id: 0, lsas: [rtr('1.1.1.1', [loopback(1)])],
+                       interfaces: [Spf::Link.new(name: 'lo', address: '1.1.1.1', prefix_len: 32)])
+    t = Spf.run(router_id: '1.1.1.1', areas: [lo, sa, sb])
+    assert route(t, '172.16.0.0/16') && route(t, '172.17.0.0/16'), 'a loopback alone in area 0 is no live backbone'
+  end
+
+  def test_a_type_7_forwarding_address_needs_its_longest_match_inside_the_nssa
+    nssa = [rtr('1.1.1.1', p2p(1, 2), flags: 1), rtr('2.2.2.2', p2p(2, 1) + [[:stub, '172.16.0.0', '255.255.0.0', 1]], flags: 2),
+            summary('172.16.1.0', 24, '1.1.1.1', 1)]
+    t7 = Lsa.build(type: 7, ls_id: '9.0.0.0', advr: '2.2.2.2', seq: 1, options: 0x08,
+                   body: [Addr.mask(8), 0x8000_0000 | 20, A['172.16.0.9'], 0].pack('NNNN'))
+    ok = Spf.run(router_id: '1.1.1.1', areas: [Spf::Area.new(id: 1, lsas: nssa + [t7], interfaces: [iface('eth1', 1, 2)], nssa: true)])
+    assert route(ok, '9.0.0.0/8'), 'inside the /16, intra-area'
+    t7b = Lsa.build(type: 7, ls_id: '9.0.0.0', advr: '2.2.2.2', seq: 2, options: 0x08,
+                    body: [Addr.mask(8), 0x8000_0000 | 20, A['172.16.1.9'], 0].pack('NNNN'))
+    other = Spf::Area.new(id: 0, lsas: [rtr('1.1.1.1', p2p(1, 3)), rtr('3.3.3.3', p2p(3, 1), flags: 1),
+                                        summary('172.16.1.0', 24, '3.3.3.3', 1)], interfaces: [iface('eth2', 1, 3)])
+    bad = Spf.run(router_id: '1.1.1.1', areas: [Spf::Area.new(id: 1, lsas: nssa + [t7b], interfaces: [iface('eth1', 1, 2)], nssa: true), other])
+    assert route(bad, '172.16.1.0/24').path_type == :inter
+    assert_nil route(bad, '9.0.0.0/8'), 'its longest match is an inter-area route: rejected'
+  end
+
   # 5,000 externals with a forwarding address on a 1,024-router grid: the
   # forwarding address lookup must not scan the table per LSA.
   def test_many_externals_with_forwarding_addresses_are_fast

@@ -53,4 +53,21 @@ class TestConfigPolicy < Test::Unit::TestCase
     assert_empty t.load('set policy-options policy-statement X term a from route-filter 10.9.9.9/16 exact')
     assert_match(%r{route-filter 10\.9\.0\.0/16}, t.to_set.join("\n"), 'host bits cleared')
   end
+
+  # Junos: the longest filter containing the route decides.
+  def test_the_longest_route_filter_decides
+    p = policy('term a from route-filter 10.0.0.0/8 orlonger', 'term a from route-filter 10.1.0.0/16 exact',
+               'term a then accept')
+    assert p.evaluate(route('10.2.0.0/16'))
+    assert p.evaluate(route('10.1.0.0/16'))
+    assert_nil p.evaluate(route('10.1.1.0/24')), 'the /16 exact filter is the longest match and says no'
+    p = policy('term a from route-filter 10.0.0.0/8 exact', 'term a from route-filter 10.0.0.0/8 longer',
+               'term a then accept')
+    assert p.evaluate(route('10.0.0.0/8'))
+    assert p.evaluate(route('10.9.0.0/16')), 'several match types on one prefix'
+    err = assert_raise(Error) do
+      policy('term a from route-filter 10.0.0.0/16 upto /8', 'term a then accept')
+    end
+    assert_match(%r{upto /8 is shorter than the prefix /16}, err.message)
+  end
 end

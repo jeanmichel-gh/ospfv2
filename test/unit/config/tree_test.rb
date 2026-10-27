@@ -160,4 +160,17 @@ class TestConfigTree < Test::Unit::TestCase
     assert_match(/unknown 'bogus'/, t.load('set protocols ospf area 2 stub default-metric 20 bogus').join)
     assert_equal before, t.to_set, 'all or nothing'
   end
+
+  def test_only_leaves_and_flags_follow_on_one_line
+    t = Tree.new
+    assert_match(/'authentication' cannot follow a value/,
+                 t.load('set protocols ospf area 0 interface eth1 metric 5 authentication md5 1 key x').join)
+    assert_empty t.to_set
+    require 'ospfv2/command_line/grammar'
+    c = OSPFv2::CommandLine::ConfigCompleter
+    after = c.options(%w[protocols ospf area 0 interface eth1 metric 5]).map(&:first)
+    assert_include after, 'passive'
+    assert_not_include after, 'authentication'
+    assert_equal [['<cr>', '']], c.options(%w[protocols ospf area 0 interface eth1 metric 5], siblings: false)
+  end
 end

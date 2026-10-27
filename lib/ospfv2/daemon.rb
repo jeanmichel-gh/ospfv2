@@ -264,26 +264,69 @@ module OSPFv2
       apply_kernel(model.kernel)
       apply_areas(model.areas)
       sync_interfaces
+      apply_virtual_links(model.virtual_links)
       @export = model.export
       export_routes
     end
 
-    # Area options (stub). A change restarts the area's interfaces: the
-    # options in hellos change, so neighbors must start over.
+    # Area options (stub, NSSA). Becoming or ceasing to be a stub or NSSA
+    # changes the options in hellos, so the area's interfaces restart and
+    # neighbors start over. Other changes (default metric, no-summaries,
+    # default-lsa) only change what the ABR originates.
     def apply_areas(areas)
       want = areas.to_h { |id, o| [Core::Addr.to_i(id), o] }
-      changed = (want.keys | @instance.area_options.keys).reject { |id| want[id] == @instance.area_options[id] }
+      have = @instance.area_options
+      changed = (want.keys | have.keys).reject { |id| want[id] == have[id] }
       @instance.area_options = want
       changed.each do |id|
-        log(:info, "area #{Core::Addr.to_s(id)}: options changed, restarting its interfaces")
-        (@instance.areas[id]&.interfaces || []).map(&:name).each { |name| remove(name) }
+        if want[id]&.keys != have[id]&.keys
+          log(:info, "area #{Core::Addr.to_s(id)}: area type changed, restarting its interfaces")
+          (@instance.areas[id]&.interfaces || []).map(&:name).each { |name| remove(name) }
+        else
+          log(:info, "area #{Core::Addr.to_s(id)}: options changed")
+          @instance.areas[id]&.schedule_origination
+          @instance.spf.trigger(:area, Core::Addr.to_s(id))
+        end
+      end
+    end
+
+    # Virtual links: added, removed, or replaced when their settings change.
+    def apply_virtual_links(want)
+      have = @instance.virtual_links
+      @applied_vls ||= {}
+      (have.keys.map { |id| Core::Addr.to_s(id) } | want.keys).each do |rid|
+        next if want[rid] && want[rid] == @applied_vls[rid] && have.key?(Core::Addr.to_i(rid))
+        # A new key or password applies in place, as on interfaces.
+        if want[rid] && @applied_vls[rid] && have.key?(Core::Addr.to_i(rid)) &&
+           want[rid].except(:auth) == @applied_vls[rid].except(:auth)
+          have[Core::Addr.to_i(rid)].auth = want[rid][:auth]
+          @applied_vls[rid] = want[rid]
+          log(:info, "virtual link to #{rid}: authentication changed")
+          next
+        end
+        if have.key?(Core::Addr.to_i(rid))
+          @instance.remove_virtual_link(rid)
+          @applied_vls.delete(rid)
+        end
+        next unless (w = want[rid])
+        @instance.add_virtual_link(neighbor: rid, transit_area: w[:transit_area], **w.except(:transit_area))
+        @applied_vls[rid] = w
+        log(:info, "virtual link to #{rid} through area #{w[:transit_area]} configured")
       end
     end
 
     # protocols ospf export: the host's networks and static routes the
     # policy accepts become AS-external-LSAs. Rechecked with the links.
     def export_routes
-      want = @export ? export_candidates.filter_map { |c| (a = @export.evaluate(c)) && c.merge(a) } : []
+      # A prefix both direct and static goes out once: the first the policy
+      # accepts, direct first.
+      want = []
+      if @export
+        export_candidates.group_by { |c| [c[:prefix], c[:prefix_len]] }.each_value do |cs|
+          c = cs.sort_by { |x| x[:protocol] == :direct ? 0 : 1 }.find { |x| @export.evaluate(x) }
+          want << c.merge(@export.evaluate(c)) if c
+        end
+      end
       return if want == @exported
       @exported = want
       log(:info, "exporting #{want.size} external routes") if want.size != @instance.externals.size
@@ -301,7 +344,11 @@ module OSPFv2
           out << { protocol: :direct, prefix: Core::Addr.to_i(ip) & Core::Addr.mask(len), prefix_len: len }
         end
       end
-      @system.static_routes.each { |p, len| out << { protocol: :static, prefix: p, prefix_len: len } }
+      # A kernel we cannot read just now keeps the last list: better than
+      # withdrawing every static route we advertise.
+      statics = @system.static_routes
+      @statics = statics if statics
+      (@statics || []).each { |p, len| out << { protocol: :static, prefix: p, prefix_len: len } }
       out.uniq.sort_by { |c| [c[:prefix], c[:prefix_len], c[:protocol]] }
     end
 
