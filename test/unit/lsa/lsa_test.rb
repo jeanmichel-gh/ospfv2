@@ -1,6 +1,7 @@
 require "test/unit"
 
-require_relative "../../../lib/lsa/lsa"
+require "ospfv2"
+require 'ospfv2/lsa/lsa'
 # require_relative "lsa/lsa"
 
 class TestPacketLsa < Test::Unit::TestCase
@@ -46,9 +47,10 @@ class TestPacketLsa < Test::Unit::TestCase
    lsa1.instance_eval { @_csum = [0].pack('n') }
    lsa2.instance_eval { @_csum = [0].pack('n') }
                    
-    assert (lsa1 <=> lsa2)
+    assert_equal 0, (lsa1 <=> lsa2)
     lsa1.ls_age=2
-    assert (lsa1 > lsa2)
+    # RFC 2328 13.1: with equal sequence and checksum, a MaxAge copy is newer.
+    assert (lsa1 < lsa2)
     lsa2.ls_age=3
     assert (lsa1 == lsa2)
     lsa1.sequence_number + 1

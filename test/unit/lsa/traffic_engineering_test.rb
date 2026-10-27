@@ -1,7 +1,7 @@
 require "test/unit"
 
-require "lsa/traffic_engineering"
-require 'lsa/tlv/tlv_factory'
+require 'ospfv2/lsa/traffic_engineering'
+require 'ospfv2/lsa/tlv/tlv_factory'
 
 class TestLsaTlvTrafficEngineering < Test::Unit::TestCase
   include OSPFv2

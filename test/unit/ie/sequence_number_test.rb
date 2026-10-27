@@ -1,6 +1,6 @@
 require "test/unit"
 
-require "ie/sequence_number"
+require 'ospfv2/ie/sequence_number'
 
 class TestIeSequenceNumber < Test::Unit::TestCase
   include OSPFv2

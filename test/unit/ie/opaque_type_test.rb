@@ -1,9 +1,9 @@
 
 require "test/unit"
-require 'ie/opaque_type'
+require 'ospfv2/ie/opaque_type'
 
 
-class TestIeLsType < Test::Unit::TestCase
+class TestIeOpaqueType < Test::Unit::TestCase
   include OSPFv2
   def test_new
     assert OpaqueType.new

@@ -1,6 +1,6 @@
 require "test/unit"
-require "ie/router_link"
-require 'ie/router_link_factory'
+require 'ospfv2/ie/router_link'
+require 'ospfv2/ie/router_link_factory'
 class TestIeRouterLink < Test::Unit::TestCase
   include OSPFv2
   def tests

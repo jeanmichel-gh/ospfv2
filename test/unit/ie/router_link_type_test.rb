@@ -1,6 +1,6 @@
 
 require "test/unit"
-require 'ie/router_link_type'
+require 'ospfv2/ie/router_link_type'
 
 
 class TestIeRouterLinkType < Test::Unit::TestCase

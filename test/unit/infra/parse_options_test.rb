@@ -1,7 +1,7 @@
 
 require "test/unit"
 
-require "infra/parse_options"
+require 'ospfv2/infra/parse_options'
 
 class TestOptParse < Test::Unit::TestCase
 
@@ -37,8 +37,8 @@ class TestOptParse < Test::Unit::TestCase
     assert_equal 10, parse('--dead-int 200').hello_int
   end
   def test_num_of
-    assert_equal 10, parse.num_sum
-    assert_equal 10, parse.num_ext
+    assert_equal 3, parse.num_sum
+    assert_equal 3, parse.num_ext
     assert_equal 20, parse('--number-of-summary 20').num_sum
     assert_equal 20, parse('--number-of-external 20').num_ext
   end

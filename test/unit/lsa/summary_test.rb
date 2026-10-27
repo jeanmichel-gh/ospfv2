@@ -1,5 +1,5 @@
 require "test/unit"
-require "lsa/summary"
+require 'ospfv2/lsa/summary'
 
 class TestLsaSummary < Test::Unit::TestCase
   include OSPFv2

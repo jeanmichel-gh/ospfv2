@@ -1,6 +1,6 @@
 require "test/unit"
 
-require "ie/external_route"
+require 'ospfv2/ie/external_route'
 
 class TestIeExternalRoute < Test::Unit::TestCase
   

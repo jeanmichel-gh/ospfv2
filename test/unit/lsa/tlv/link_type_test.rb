@@ -1,6 +1,6 @@
 require "test/unit"
 
-require "lsa/tlv/link_type"
+require 'ospfv2/lsa/tlv/link_type'
 
 class TestLsaTlvLinkType < Test::Unit::TestCase
   include OSPFv2

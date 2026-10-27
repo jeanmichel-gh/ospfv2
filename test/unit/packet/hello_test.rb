@@ -1,5 +1,5 @@
 require "test/unit"
-require "packet/hello"
+require 'ospfv2/packet/hello'
 
 class TestHello < Test::Unit::TestCase
   include OSPFv2

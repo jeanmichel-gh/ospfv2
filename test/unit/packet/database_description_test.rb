@@ -1,6 +1,6 @@
 require "test/unit"
 require 'pp'
-require "packet/database_description"
+require 'ospfv2/packet/database_description'
 
 class TestPacketDatabaseDescription < Test::Unit::TestCase
   include OSPFv2

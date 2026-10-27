@@ -1,0 +1,245 @@
+#--
+# Copyright 2010 Jean-Michel Esnault.
+# All rights reserved.
+# See LICENSE.txt for permissions.
+#
+#
+# This file is part of OSPFv2.
+# 
+# OSPFv2 is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+# 
+# OSPFv2 is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with OSPFv2.  If not, see <http://www.gnu.org/licenses/>.
+#++
+
+
+require 'ipaddr'
+
+class String
+  
+  def to_underscore
+    gsub(/([A-Z]+|[A-Z][a-z])/) {|x| ' ' + x }.gsub(/[A-Z][a-z]+/) {|x| ' ' + x }.split.collect{|x| x.downcase}.join('_')
+  end
+  
+  def to_camel
+    split('_').collect {|x| x.capitalize}.join
+  end
+  
+  def hexlify
+    l,n,ls,s=0,0,[''],self.dup
+    while s.size>0
+      l = s.slice!(0,16)
+      ls << format("0x%4.4x:  %s", n, l.unpack("n#{l.size/2}").collect { |x| format("%4.4x",x) }.join(' '))
+      n+=1
+    end
+    if l.size%2 >0
+      ns = if l.size>1 then 1 else 0 end
+      ls.last << format("%s%2.2x",' '*ns,l[-1])
+    end
+    ls
+  end
+  
+end
+
+class Symbol
+  def to_klass
+    to_s.to_camel.to_sym
+  end
+  def to_setter
+    (to_s + "=").to_sym
+  end
+end
+
+class Object
+  def to_shex(*args)
+    self.respond_to?(:encode) ? self.encode(*args).unpack('H*')[0] : ""
+  end
+  def to_shex_len(len, *args)
+    s = to_shex(*args)
+    "#{s[0..len]}#{s.size>len ? '...' : ''}"
+  end
+  def to_shex4_len(len, *args)
+    s = to_shex4(*args)
+    "#{s[0..len]}#{s.size>len ? '...' : ''}"
+  end
+  def to_bitstring
+    if self.respond_to?(:encode)
+      self.enc.unpack('B*')[0]
+    else
+      ""
+    end
+  end
+end
+
+class Time
+  class << self
+    def to_ts
+      Time.now.strftime("%M:%S")
+    end
+  end
+end
+
+module OSPFv2
+
+  # Class level attribute helpers used by the OSPF classes.
+  # Extend a class with this module instead of patching Class.
+  module Attributes
+    # Defines a reader and a writer that validates the value.
+    def attr_checked(attribute, &validation)
+      define_method "#{attribute}=" do |val|
+        raise ArgumentError, "Invalid attribute #{val.inspect}" unless validation.call(val)
+        instance_variable_set("@#{attribute}", val)
+      end
+      define_method attribute do
+        instance_variable_get "@#{attribute}"
+      end
+    end
+
+    # Defines writers that wrap the value in the IE class of the same name,
+    # e.g. attr_writer_delegate :area_id builds AreaId.new(value).
+    def attr_writer_delegate(*args)
+      args.each do |name|
+        define_method "#{name}=" do |value|
+          instance_variable_set("@#{name}",
+                                self.class.const_get(name.to_s.to_camel.to_sym).new(value))
+        end
+      end
+    end
+  end
+
+  # IPv4 helpers. They used to be monkey patches on IPAddr,
+  # one of which shadowed the stdlib IPAddr#netmask.
+  module IP
+    module_function
+
+    # Builds an IPAddr from a packed string, an Integer, an Array of octets
+    # or anything IPAddr.new accepts.
+    def create(arg)
+      case arg
+      when IPAddr  then arg.dup
+      when Integer then IPAddr.new_ntoh([arg].pack('N'))
+      when Array   then IPAddr.new_ntoh(arg.pack('C*'))
+      when String  then packed?(arg) ? IPAddr.new_ntoh(arg) : IPAddr.new(arg)
+      else IPAddr.new(arg)
+      end
+    end
+
+    # "10.0.0.1/24" => [IPAddr(10.0.0.0/24), "10.0.0.1", 24, "10.0.0.0", "255.255.255.0"]
+    def to_arr(prefix)
+      address, mlen = prefix.split('/')
+      ip = IPAddr.new(prefix)
+      [ip, address, mlen.to_i, ip.to_s, ip.netmask]
+    end
+
+    # Host +i+ inside +net+: host(IPAddr.new('10.0.0.0/30'), 1) => "10.0.0.1/30"
+    def host(net, i)
+      "#{create(net.to_i + i)}/#{net.prefix}"
+    end
+
+    # The n-th network of the same size after +net+:
+    # nth_network(IPAddr.new('10.0.0.0/30'), 2) => "10.0.0.8/30"
+    def nth_network(net, n)
+      max_len = net.ipv4? ? 32 : 128
+      "#{create(net.to_i + n * 2**(max_len - net.prefix))}/#{net.prefix}"
+    end
+
+    def to_s_net(net)
+      "#{net}/#{net.prefix}"
+    end
+
+    # A 4 or 16 byte binary string rather than a dotted or colon notation.
+    def packed?(s)
+      [4, 16].include?(s.bytesize) && !s.match?(/\A[\h.:]+\z/)
+    end
+  end
+
+  module Common
+    
+    def ivar_to_klassname(ivar)
+      ivar.to_s.to_camel.to_sym
+    end
+    
+    def set(h)
+      # p "\n\n\n#{self.class}: IN SET(): ivars; #{ivars.inspect} - h: #{h.inspect}:"
+      for key in [ivars].flatten
+        # p key
+        if h.has_key?(key) and ! h[key].nil?
+          # puts "  h has key #{key}"
+          begin
+            klassname = key.to_klass
+            if self.class.const_defined?(klassname)
+              # puts "    class #{klassname} exists! => set @#{key.to_s} = #{klassname}.new(#{h[key]})"
+              instance_variable_set("@#{key.to_s}", self.class.const_get(klassname).new(h[key]))
+            elsif OSPFv2.const_defined?(klassname)
+              # puts "    class OSPFv2::#{klassname} exists! => set @#{key.to_s} = #{klassname}.new(#{h[key]})"
+              instance_variable_set("@#{key.to_s}", OSPFv2.const_get(klassname).new(h[key]))
+            # elsif OSPFv2::LSDB::const_defined?(klassname)
+            #   # puts "    class OSPFv2::LSDB::#{klassname} exists! => set @#{key.to_s} = #{klassname}.new(#{h[key]})"
+            #   instance_variable_set("@#{key.to_s}", OSPFv2::LSDB::const_get(klassname).new(h[key]))
+            elsif self.respond_to?(key.to_setter)
+              # puts "    self respond to #{key.to_setter} => self.__send__ #{key.to_setter}, #{h[key]}"
+              self.send key.to_setter, h[key]
+            #elsif  has an instance variable of that name ? 
+            #or create ivar on the fly ?
+            else
+              # puts "    just set ivar: @#{key} = #{h[key]}"
+              instance_variable_set("@#{key.to_s}", h[key])
+            end
+          rescue ArgumentError => e
+            raise
+            # 
+            # #FIXME: attr_writer_delegate generate a NameError (in link_state_database)
+            # p "WE HAVE A NAME ERROR: #{e.inspect}"
+            # # instance_variable_set("@#{key.to_s}", h[key])
+          ensure
+            h.delete(key)
+          end
+        else
+          # puts "did not find #{key} in #{h.inspect}"
+        end
+      end
+    end
+
+    def to_hash
+      h = {}
+      for key in [ivars].flatten
+        ivar = instance_variable_get("@#{key.to_s}")
+        if ivar.respond_to?(:to_hash)
+          # p "#{key} respond to hash"
+          # p ivar
+          # p "#{key} --"
+          # p ivar
+          h.store(key,ivar.to_hash)
+        elsif ivar.is_a?(Array)
+          h.store(key, ivar.collect { |x| x.respond_to?(:to_hash) ? x.to_hash : x })
+        else
+          # p "#{key} don't respond to hast"
+          # p ivar
+          # p ivar.class
+          # p "#{key} --"
+          #FIXME: ivar.to_s ? ivar.value ? ivar.hash_value ? 
+          h.store(key,ivar) unless ivar.nil?
+        end
+      end
+      h
+    end
+  end
+
+  module Common
+   
+    def ivars
+      instance_variables.reject { |x| x =~ /^@_/ }.collect { |x| x[1..-1].to_sym }
+    end
+    
+  end
+  
+end
+

@@ -1,6 +1,6 @@
 
 require "test/unit"
-require 'ie/au_type'
+require 'ospfv2/ie/au_type'
 
 class TestIeAuType < Test::Unit::TestCase
   include OSPFv2

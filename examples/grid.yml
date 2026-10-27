@@ -1,0 +1,44 @@
+# A 4x4 grid of routers behind the simulated router, plus summaries
+# and externals. Run it with:  ospfv2 run examples/grid.yml --web 8080
+#
+# The simulated router (named "sim") forms the adjacency with the router
+# under test on `interface`. Grid routers are named r<row>c<col>.
+
+simulator:
+  router_id: 1.1.1.1
+  interface: 192.168.1.123/24   # address on the segment shared with the DUT
+  area: 0.0.0.0
+  hello_interval: 10            # must match the DUT
+  network_type: broadcast       # or p2p
+  # device: eth1                # bind to one interface
+
+lsdb:
+  link_prefix: 13.0.0.0/30      # router-to-router links are carved from here
+  refresh_time: 1800            # re-originate LSAs older than this (seconds)
+
+grid:
+  columns: 4
+  rows: 4
+  metric: 10
+  attach_to: r1c1               # grid router linked to the simulated router
+
+routers:
+  - name: abr1
+    id: 10.0.0.1
+    loopback: 10.255.0.1
+    summaries:
+      - { prefix: 30.0.0.0/24, count: 25, metric: 10 }
+
+  - name: asbr1
+    id: 10.0.0.2
+    networks:
+      - 172.16.10.0/24
+      - { prefix: 172.16.20.0/24, metric: 20 }
+    externals:
+      - { prefix: 50.0.0.0/24, count: 50, metric: 20, type: 2, tag: 100 }
+      - { prefix: 60.0.0.0/16, metric: 5, type: 1 }
+
+links:
+  - { from: r4c4, to: abr1, metric: 5 }
+  - { from: r4c1, to: asbr1 }
+  - [abr1, asbr1, { metric: 50, state: down }]

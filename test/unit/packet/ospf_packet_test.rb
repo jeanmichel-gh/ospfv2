@@ -1,6 +1,7 @@
 
 require "test/unit"
-require 'packet/ospf_packet'
+require "ospfv2"
+require 'ospfv2/packet/ospf_packet'
 
 class TestOspfPacket < Test::Unit::TestCase
   include OSPFv2

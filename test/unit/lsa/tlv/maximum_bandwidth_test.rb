@@ -1,6 +1,6 @@
 require "test/unit"
 
-require "lsa/tlv/maximum_bandwidth"
+require 'ospfv2/lsa/tlv/maximum_bandwidth'
 
 class TestLsaTlvMaximumBandwidth < Test::Unit::TestCase
   include OSPFv2

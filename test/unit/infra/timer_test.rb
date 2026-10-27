@@ -1,8 +1,9 @@
 require "test/unit"
 
-require "infra/timer"
+require 'ospfv2/infra/timer'
 
 class TestInfraTimer < Test::Unit::TestCase
+  include OSPFv2
 
   Timer1 = Class.new(Timer)
   Timer2 = Class.new(Timer)
@@ -55,6 +56,7 @@ class TestInfraTimer < Test::Unit::TestCase
 end
 
 class TestPeriodicTimer < Test::Unit::TestCase
+  include OSPFv2
 
   PeriodicTimer1 = Class.new(PeriodicTimer)
 
@@ -76,6 +78,8 @@ class TestPeriodicTimer < Test::Unit::TestCase
     assert_equal [:ev_timer_fire, :"TestPeriodicTimer::PeriodicTimer1"], @evQ.deq[0,2]
     assert_equal ['DONE',3], @evQ.deq
     assert_equal [:ev_timer_fire, :"TestPeriodicTimer::PeriodicTimer1"], @evQ.deq[0,2]
+  ensure
+    p&.cancel # or it keeps firing after the test, when @evQ is gone
   end
 
   def test_stop

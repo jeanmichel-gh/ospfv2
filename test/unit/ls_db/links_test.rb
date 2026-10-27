@@ -1,6 +1,6 @@
 require "test/unit"
 
-require "ls_db/links"
+require 'ospfv2/ls_db/links'
 
 class TestLsDbLinks < Test::Unit::TestCase
   include OSPFv2::LSDB
