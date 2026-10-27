@@ -163,7 +163,12 @@ module OSPFv2
               cmd 'events', 'Recent protocol events', action: { view: :log, style: :ios }
             end
             cmd 'route', 'IP routing table' do
-              cmd 'ospf', 'Routes OSPF would install', action: { view: :routes, style: :ios_rib }
+              cmd 'ospf', 'OSPF routes in the kernel', action: { view: :fib, style: :ios }
+            end
+          end
+          cmd 'route', 'Routing table (Junos style)' do
+            cmd 'protocol', 'Routes of one protocol' do
+              cmd 'ospf', 'OSPF routes in the kernel', action: { view: :fib, style: :junos }
             end
           end
           cmd 'configuration', 'Running configuration', action: { view: :configuration }

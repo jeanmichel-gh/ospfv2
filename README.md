@@ -10,8 +10,8 @@ It targets Ruby 3.1 and later (CI covers 3.2 to 4.0), uses the standard library 
 and ships as a Docker image.
 
 A second mode is on its way: `ospfd`, an OSPFv2 router you configure and query with
-`ospf-cli` in Junos or IOS terms. It forms adjacencies, floods, authenticates and
-computes routes today. Installing those routes in Linux comes next. See
+`ospf-cli` in Junos or IOS terms. It forms adjacencies, floods, authenticates,
+computes routes and installs them in the Linux routing table. See
 [Router mode](#router-mode-ospfd-and-ospf-cli).
 
 ## Quick start
@@ -149,7 +149,9 @@ simulator through your browser.
 originates router and network LSAs, authenticates packets, and computes the routing
 table: intra-area, inter-area and external type 1 and 2 routes, with equal-cost
 multipath. SPF runs with the RFC 8405 back-off (50 ms after a quiet spell, slower while
-the network keeps changing). It does not install routes in Linux yet; that comes next.
+the network keeps changing). The routes go into the Linux routing table over netlink.
+
+ospfd needs CAP_NET_RAW for OSPF packets and CAP_NET_ADMIN for routes (root has both).
 
 ```sh
 sudo bin/ospfd -f /etc/ospfv2/ospfd.conf      # foreground; -l FILE to log to a file
@@ -198,6 +200,31 @@ That is how keys roll over without dropping adjacencies.
 Commit writes the file given with `-f` (mode 0600, as `set` lines) and keeps the
 previous versions next to it as `ospfd.conf.rollback.N`. `kill -HUP` reloads the file.
 
+### Routes in the kernel
+
+ospfd installs every OSPF route that goes through a gateway. Networks the host sits
+on are already connected routes and are left alone. Equal-cost paths go in as one
+multipath route.
+
+| Statement under `routing-options kernel` | Default |
+| --- | --- |
+| `metric N` | 20: the kernel route metric, lower wins between routes to one prefix |
+| `protocol 5..255` | 89: the protocol id on our routes (`ip route show proto 89`) |
+| `table ID` | 254, the main table |
+| `no-install` | off: compute routes, install none |
+
+Only routes carrying our protocol id are ever read, changed or deleted, so routes from
+FRR (188), static routes and DHCP are safe. Changes go in as replace, so a route never
+disappears while it changes; deletes go last. A route the kernel refuses is retried
+every 5 seconds and shown in `show route protocol ospf`. Every 60 seconds the kernel
+is read back and any drift repaired, with a log line per repair.
+
+On a clean stop the routes are withdrawn. After a crash they stay in the kernel; the
+restarted ospfd keeps them until OSPF has converged (or 60 seconds), then removes the
+ones it no longer has, so traffic it forwards has no gap. Traffic back to the router
+still drops while the neighbors rebuild their adjacencies: avoiding that needs graceful
+restart, which is not implemented yet.
+
 A metric or authentication change applies without touching adjacencies. Other changes
 to an interface restart it. An interface that does not exist yet, is down or has no
 IPv4 address waits, and starts within 5 seconds of appearing.
@@ -212,7 +239,8 @@ Junos forms print Junos style, IOS forms print IOS style.
 | `show ospf interface [detail]` | `show ip ospf interface [brief]` |
 | `show ospf database [router\|network\|netsummary\|asbrsummary\|external] [detail]` | `show ip ospf database [router\|network\|summary\|asbr-summary\|external]` |
 | `show ospf overview` | `show ip ospf` |
-| `show ospf route [detail]` | `show ip ospf route` (FRR style), `show ip route ospf` |
+| `show ospf route [detail]` (computed) | `show ip ospf route` (computed, FRR style) |
+| `show route protocol ospf` (in the kernel) | `show ip route ospf` (in the kernel) |
 | `show ospf log` (SPF runs) | `show ip ospf statistics` (SPF runs) |
 | `show ospf events` | `show ip ospf events` |
 | `show ospf statistics` (packets) | `show ip ospf traffic` |

@@ -88,6 +88,10 @@ class TestFrrInterop < Test::Unit::TestCase
     ok = @lab.wait_for(30) { @lab.frr_neighbor_state == 'Full' && @lab.cli('show ospf neighbor').include?('Full') }
     assert ok, "frr #{@lab.frr_neighbor_state.inspect}\n#{@lab.cli('show ospf neighbor')}\n#{@lab.core_log.lines.last(20).join}"
     assert_match(/2\.2\.2\.2\s+1\s+FULL\/DR/, @lab.cli('show ip ospf neighbor'))
+    assert @lab.wait_for(15) { @lab.core_kernel_routes == ['2.2.2.2 via 10.0.12.2 dev veth0 metric 20'] },
+           "kernel: #{@lab.core_kernel_routes.inspect}"
+    assert_match(%r{^2\.2\.2\.2/32\s+\*\[OSPF/10\] metric 10\n\s+>  to 10\.0\.12\.2 via veth0$},
+                 @lab.cli('show route protocol ospf'))
 
     out = @lab.cli('configure', 'set protocols ospf area 0 interface veth0 metric 33', 'commit')
     assert_match(/commit complete/, out)

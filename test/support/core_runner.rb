@@ -12,6 +12,9 @@
 #                          "auth": {"type": "md5", "keys": {"1": "secret"}}},
 #                         {"name": "lo", "address": "1.1.1.1/32", "passive": true}]}
 #
+# With "fib": true the routes go into the namespace's kernel table over
+# netlink (protocol 89, main table), and SIGTERM withdraws them.
+#
 # STATE holds neighbors, LSDB keys, packet counters, the routing table,
 # and every LSA in hex (lsas: {area: [hex]}, externals: [hex]) so a test
 # can rerun SPF on the same database from another router's point of view.
@@ -20,6 +23,8 @@
 
 require 'json'
 require 'ospfv2/core'
+require 'ospfv2/fib'
+require 'ospfv2/fib/netlink'
 
 config = JSON.parse(File.read(ARGV.fetch(0)), symbolize_names: true)
 state_file = ARGV.fetch(1)
@@ -52,10 +57,17 @@ config.fetch(:interfaces).each do |i|
   end
 end
 loop_.call { router.start }
+fib = nil
+if config[:fib]
+  log = ->(level, msg) { warn "#{level} #{msg}" unless level == :debug }
+  fib = OSPFv2::Fib::Manager.new(loop: loop_, backend: OSPFv2::Fib::Netlink.new, logger: log)
+  loop_.call { fib.attach(router) }
+end
 
-%w[TERM INT].each { |sig| trap(sig) { exit } }
+stop = false
+%w[TERM INT].each { |sig| trap(sig) { stop = true } }
 
-loop do
+until stop
   state = loop_.call do
     {
       neighbors: router.neighbor_summaries.map { |n| n.slice(:router_id, :address, :state) },
@@ -66,11 +78,16 @@ loop do
                      next_hops: r.next_hops.map { |h| [h.interface, h.gateway && OSPFv2::Core::Addr.to_s(h.gateway)] } }]
       end,
       lsas: router.areas.values.to_h { |a| [a.id_s, a.lsdb.live.map { |l| l.bytes.unpack1('H*') }] },
+      fib: fib && { holding: fib.holding?, failed: fib.failed.size },
       externals: router.as_lsdb.live.map { |l| l.bytes.unpack1('H*') }
     }
   end
   tmp = "#{state_file}.tmp"
   File.write(tmp, JSON.generate(state))
   File.rename(tmp, state_file)
-  sleep 1
+  10.times { sleep 0.1 unless stop }
+end
+loop_.call do
+  router.stop
+  fib&.detach
 end

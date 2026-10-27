@@ -21,7 +21,11 @@ module OSPFv2
 
       DEFAULT_HELLO = 10 # as Core::Interface; checked by a test
 
-      attr_reader :router_id, :interfaces, :warnings
+      # Kernel route install defaults (routing-options kernel).
+      KERNEL = { install: true, metric: 20, protocol: 89, table: 254 }.freeze
+      KERNEL_TABLES = { 253 => 'default', 255 => 'local' }.freeze
+
+      attr_reader :router_id, :interfaces, :warnings, :kernel
 
       def initialize(tree)
         @errors = []
@@ -34,6 +38,7 @@ module OSPFv2
         areas.each do |area, a|
           (a['interface'] || {}).each { |name, i| interface(area, name, i) }
         end
+        @kernel = kernel_options(data.dig('routing-options', 'kernel') || {})
         @warnings << 'no OSPF interfaces configured' if @interfaces.empty? && @errors.empty?
         raise Error, @errors.join("\n") unless @errors.empty?
         freeze
@@ -62,6 +67,18 @@ module OSPFv2
         auth = authentication(name, i['authentication'])
         opts[:auth] = auth if auth
         @interfaces[name] = opts.freeze
+      end
+
+      def kernel_options(k)
+        out = KERNEL.merge(k.slice('metric', 'protocol', 'table').transform_keys(&:to_sym))
+        out[:install] = false if k['no-install']
+        if (name = KERNEL_TABLES[out[:table]])
+          @errors << "routing-options kernel table #{out[:table]} is the kernel's #{name} table; pick another"
+        end
+        if [186, 187, 188, 189, 192].include?(out[:protocol])
+          @warnings << "routing-options kernel protocol #{out[:protocol]} is the id another routing daemon uses"
+        end
+        out.freeze
       end
 
       def authentication(name, a)
