@@ -20,9 +20,6 @@ module OSPFv2
       attr_reader :iface, :router_id, :address, :state, :priority, :dr, :bdr, :options,
                   :ls_request, :retransmit, :dd_seq, :last_change, :state_changes
 
-      # Last cryptographic sequence number accepted from this neighbor.
-      attr_accessor :crypto_seq
-
       def initialize(iface, router_id:, address:)
         @iface = iface
         @router_id = router_id

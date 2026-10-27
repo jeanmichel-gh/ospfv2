@@ -144,6 +144,16 @@ module OSPFv2
 
       NULL_AUTH = Auth::Null.new
 
+      Header = Struct.new(:type, :router_id, :area_id)
+
+      # The type, router id and area id of a packet, before any check
+      # that costs a hash. Raises Error if there is no full header.
+      def peek(bytes)
+        raise Error, "packet too short (#{bytes.bytesize})" if bytes.bytesize < HEADER_SIZE
+        _, type, _, rid, aid = bytes.unpack('CCnNN')
+        Header.new(type, rid, aid)
+      end
+
       # Builds a packet and authenticates it with +auth+.
       def encode(body, router_id:, area_id:, auth: NULL_AUTH)
         payload = body.encode
@@ -157,6 +167,7 @@ module OSPFv2
       # Trailing bytes after the OSPF length and any authentication data,
       # such as a Cisco LLS block, are ignored.
       def decode(bytes, auth: NULL_AUTH)
+        bytes = bytes.b unless bytes.encoding == Encoding::BINARY
         raise Error, "packet too short (#{bytes.bytesize})" if bytes.bytesize < HEADER_SIZE
         ver, type, len, rid, aid, _csum, autype, authf = bytes.unpack('CCnNNnna8')
         raise Error, "version #{ver}, expected 2" unless ver == VERSION

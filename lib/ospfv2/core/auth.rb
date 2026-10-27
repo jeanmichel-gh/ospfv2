@@ -22,6 +22,11 @@ module OSPFv2
     # #seal takes an encoded packet whose checksum and authentication
     # fields are zero and returns the bytes to send. #open checks a
     # received packet and returns an Auth::Result, or raises Auth::Error.
+    #
+    # Not implemented: key lifetimes (RFC 2328 D.3 start and stop times;
+    # the send key is chosen by configuration) and the RFC 7474 extended
+    # sequence number. Without RFC 7474 a neighbor's newest packet can be
+    # replayed until its next one arrives, as RFC 2328 D.5.2 allows.
     module Auth
       class Error < StandardError; end
 
@@ -53,11 +58,13 @@ module OSPFv2
 
       # Builds the authentication for an interface from a spec Hash, a
       # Symbol (:none) or nil. +clock+ returns wall-clock seconds and seeds
-      # the cryptographic sequence number so it survives a restart.
-      def build(spec = nil, clock: nil, **inline)
+      # the cryptographic sequence number so it survives a restart. Pass
+      # the interface's +sequence+ so a key change never moves it back.
+      def build(spec = nil, clock: nil, sequence: nil, **inline)
         # Auth.build(type: :md5, ...) arrives as keywords, not a Hash.
         spec = inline if spec.nil? && !inline.empty?
         clock ||= -> { Time.now.to_i }
+        sequence ||= Sequence.new(clock)
         return spec if spec.respond_to?(:seal) && spec.respond_to?(:open)
         return Null.new if spec.nil? || spec == :none
         raise ArgumentError, "authentication must be a Hash, got #{spec.inspect}" unless spec.is_a?(Hash)
@@ -73,10 +80,10 @@ module OSPFv2
           Simple.new(spec[:password])
         when :crypto
           check_keys(spec, %i[type keys send_key])
-          Crypto.new(keys: crypto_keys(spec[:keys], nil), send_key: spec[:send_key], clock: clock)
+          Crypto.new(keys: crypto_keys(spec[:keys], nil), send_key: spec[:send_key], sequence: sequence)
         when *ALGORITHMS.keys
           check_keys(spec, %i[type keys send_key])
-          Crypto.new(keys: crypto_keys(spec[:keys], type), send_key: spec[:send_key], clock: clock)
+          Crypto.new(keys: crypto_keys(spec[:keys], type), send_key: spec[:send_key], sequence: sequence)
         else
           raise ArgumentError, "unknown authentication type #{type.inspect} " \
                                "(none, simple, #{ALGORITHMS.keys.join(', ')}, crypto)"
@@ -125,6 +132,27 @@ module OSPFv2
       end
 
       def autype_of(raw) = raw.byteslice(14, 2).unpack1('n')
+
+      # The cryptographic sequence number we send (RFC 2328 D.3). It never
+      # goes down: it starts from the wall clock, so it stays ahead of what
+      # neighbors saw before a restart, and moves one per packet when
+      # several go out in the same second. It stops at 2**32 - 1 rather
+      # than wrap to 0, which every neighbor would take as a replay.
+      class Sequence
+        MAX = 0xffff_ffff
+
+        attr_reader :last
+
+        def initialize(clock = -> { Time.now.to_i })
+          @clock = clock
+          @last = 0
+        end
+
+        def next
+          now = [@clock.call.to_i, MAX].min
+          @last = now > @last ? now : [@last + 1, MAX].min
+        end
+      end
 
       # ---- AuType 0 ----
       class Null
@@ -221,7 +249,7 @@ module OSPFv2
       class Crypto
         attr_reader :keys, :send_key
 
-        def initialize(keys:, send_key: nil, clock: -> { Time.now.to_i })
+        def initialize(keys:, send_key: nil, sequence: Sequence.new)
           raise ArgumentError, 'cryptographic authentication needs at least one key' if keys.empty?
           ids = keys.map(&:id)
           raise ArgumentError, "duplicate key id(s): #{ids.tally.select { |_, n| n > 1 }.keys.join(', ')}" if ids.uniq.size != ids.size
@@ -230,8 +258,7 @@ module OSPFv2
           @send_key = send_key ? @keys[send_key] : @keys.values.max_by(&:id)
           raise ArgumentError, "send key #{send_key} is not configured" unless @send_key
 
-          @clock = clock
-          @seq = 0
+          @sequence = sequence
         end
 
         def autype = CRYPTO
@@ -242,12 +269,7 @@ module OSPFv2
           { type: :crypto, send_key: @send_key.id, keys: @keys.values.map { |k| { id: k.id, algorithm: k.algorithm } } }
         end
 
-        # The sequence number never goes down, and starts from the wall
-        # clock so it stays ahead of what neighbors saw before a restart.
-        def next_seq
-          now = @clock.call.to_i & 0xffff_ffff
-          @seq = now > @seq ? now : (@seq + 1) & 0xffff_ffff
-        end
+        def next_seq = @sequence.next
 
         def seal(raw)
           key = @send_key

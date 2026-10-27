@@ -285,6 +285,156 @@ class TestCoreAuth < Test::Unit::TestCase
     assert_equal 0, a.interfaces['eth0'].stats[:drop_auth] + b.interfaces['eth0'].stats[:drop_auth]
   end
 
+  # ---- review findings ----
+
+  def capture_hellos(lan, from_ip)
+    seen = []
+    lan.drop_if do |bytes, from, _|
+      seen << bytes.dup if from == from_ip && bytes.getbyte(1) == Wire::HELLO
+      false
+    end
+    seen
+  end
+
+  def test_hello_replayed_from_a_spoofed_address_makes_no_neighbor
+    spec = { type: :md5, keys: { 1 => 'secret' } }
+    lan, a, b = lan_pair(spec, spec)
+    hellos = capture_hellos(lan, '10.0.0.2')
+    @lab.start
+    @lab.converge([a, b])
+    eth = a.interfaces['eth0']
+    10.times do
+      eth.transport.receive(hellos.last, '10.0.0.77')
+      @lab.advance(5)
+    end
+    assert_equal ['10.0.0.2'], a.neighbors.map { |n| Addr.to_s(n.address) }
+    assert_equal [Addr.to_i('10.0.0.2'), Addr.to_i('10.0.0.1')].sort, [eth.dr, eth.bdr].sort
+    # Each replay is dropped: by the sequence check when the neighbor sent
+    # something newer since, else by the router id check.
+    assert_equal 10, eth.stats[:drop_hello] + eth.stats[:drop_auth]
+    assert(@lab.log.any? { |l| l.include?('is already neighbor 2.2.2.2@10.0.0.2') })
+  end
+
+  def test_packet_replayed_from_another_neighbors_address_leaves_it_alone
+    spec = { type: :md5, keys: { 1 => 'secret' } }
+    lan = @lab.segment
+    rs = %w[1 2 3].map { |i| @lab.router("#{i}.#{i}.#{i}.#{i}", [lan, "10.0.0.#{i}/24", { auth: spec }]) }
+    a = rs[0]
+    hellos = capture_hellos(lan, '10.0.0.2')
+    @lab.start
+    @lab.converge(rs, adjacent: [[rs[2], rs[0]], [rs[2], rs[1]]])
+    c_nbr = a.neighbors.find { |n| Addr.to_s(n.address) == '10.0.0.3' }
+    changes = c_nbr.state_changes
+    20.times do
+      a.interfaces['eth0'].transport.receive(hellos.last, '10.0.0.3')
+      @lab.advance(3)
+    end
+    assert_equal '3.3.3.3', Addr.to_s(c_nbr.router_id)
+    assert c_nbr.full?
+    assert_equal changes, c_nbr.state_changes
+    assert(@lab.log.any? { |l| l.include?('router id 2.2.2.2 from 10.0.0.3, where neighbor 3.3.3.3@10.0.0.3 is') })
+  end
+
+  def test_a_key_change_after_a_burst_keeps_the_sequence_going_up
+    spec = { type: :md5, keys: { 1 => 'secret' } }
+    _, a, b = lan_pair(spec, spec)
+    @lab.start
+    @lab.converge([a, b])
+    eth = a.interfaces['eth0']
+    500.times { eth.auth.next_seq } # a burst puts it ahead of the clock
+    ahead = eth.auth.next_seq
+    eth.auth = spec
+    assert_operator eth.auth.next_seq, :>, ahead
+    eth.auth = nil
+    eth.auth = { type: :hmac_sha256, keys: { 1 => 'other' } }
+    assert_operator eth.auth.next_seq, :>, ahead, 'through null and another algorithm too'
+
+    eth.auth = spec
+    changes = b.neighbors.first.state_changes
+    @lab.advance(60)
+    assert_equal changes, b.neighbors.first.state_changes
+    assert_equal 0, b.interfaces['eth0'].stats[:drop_auth]
+  end
+
+  def test_neighbor_restart_forms_the_adjacency_again
+    spec = { type: :md5, keys: { 1 => 'secret' } }
+    _, a, b = lan_pair(spec, spec)
+    @lab.start
+    @lab.converge([a, b])
+    b.stop
+    @lab.advance(60)
+    assert_empty a.neighbors
+    b.start
+    @lab.converge([a, b])
+  end
+
+  def test_sequence_stops_at_the_top_instead_of_wrapping
+    t = Auth::Sequence::MAX - 1
+    seq = Auth::Sequence.new(-> { t })
+    assert_equal Auth::Sequence::MAX - 1, seq.next
+    assert_equal Auth::Sequence::MAX, seq.next
+    assert_equal Auth::Sequence::MAX, seq.next
+    t = 2**40
+    assert_equal Auth::Sequence::MAX, seq.next
+  end
+
+  def test_auth_data_length_and_key_id_edges
+    auth = crypto(:md5, { 0 => 'zero' })
+    bytes = encode(auth)
+    assert_equal 0, Wire.decode(bytes, auth: auth).key_id, 'key id 0 is a key like any other'
+    [0, 255].each do |len|
+      bad = bytes.dup.tap { |b| b.setbyte(19, len) }
+      assert_raise(Wire::AuthError, "length #{len}") { Wire.decode(bad, auth: auth) }
+    end
+  end
+
+  def test_hmac_key_lengths_around_the_hash_size
+    { 'SHA1' => [:hmac_sha1, 20], 'SHA256' => [:hmac_sha256, 32] }.each do |digest, (type, len)|
+      [len, len + 1, 64].each do |klen|
+        secret = 's' * klen
+        bytes = encode(crypto(type, { 1 => secret }))
+        pkt = packet_part(bytes)
+        key = klen > len ? OpenSSL::Digest.digest(digest, secret) : secret
+        expected = OpenSSL::HMAC.digest(digest, key, pkt + ([0x878F_E1F3].pack('N') * (len / 4)))
+        assert_equal expected, bytes.byteslice(pkt.bytesize, len), "#{type} with a #{klen} byte key"
+      end
+    end
+  end
+
+  def test_decode_takes_strings_in_any_encoding
+    auth = crypto(:hmac_sha256, { 1 => 'k' })
+    utf8 = encode(auth).dup.force_encoding(Encoding::UTF_8)
+    assert_equal HELLO, Wire.decode(utf8, auth: auth).body
+  end
+
+  def test_fuzzed_packets_only_raise_wire_errors
+    rng = Random.new(7)
+    auths = [Auth.build(nil), Auth.build(type: :simple, password: 'p'), crypto(:md5, { 1 => 'k' }),
+             crypto(:hmac_sha512, { 1 => 'k' })]
+    lsu = Wire::LinkStateUpdate.new(lsas: [Lsa.build(type: 5, ls_id: 1, advr: 2, seq: Lsa::INITIAL_SEQ,
+                                                     body: [0xffffff00, 20, 0, 0].pack('N4'))])
+    auths.each do |auth|
+      [HELLO, lsu].each do |body|
+        good = encode(auth, body)
+        1500.times do
+          b = good.dup
+          case rng.rand(4)
+          when 0 then rng.rand(1..4).times { i = rng.rand(b.bytesize); b.setbyte(i, rng.rand(256)) }
+          when 1 then b = b.byteslice(0, rng.rand(b.bytesize))
+          when 2 then b << Random.bytes(rng.rand(1..40))
+          when 3 then b[2, 2] = [rng.rand(65_536)].pack('n')
+          end
+          begin
+            Wire.decode(b, auth: auth)
+          rescue Wire::Error
+            nil
+          end
+        end
+      end
+    end
+    assert true, 'nothing but Wire::Error escaped'
+  end
+
   def test_big_digest_still_fits_the_mtu
     spec = { type: :hmac_sha512, keys: { 1 => 'k' } }
     seg = @lab.segment

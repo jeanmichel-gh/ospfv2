@@ -62,6 +62,7 @@ module OSPFv2
         @bdr = 0
         @neighbors = {}
         @delayed_acks = []
+        @crypto_seqs = {} # router id => highest cryptographic sequence number accepted
         @stats = Hash.new(0)
       end
 
@@ -70,7 +71,11 @@ module OSPFv2
       # Replaces the authentication (Auth.build spec or object). Takes
       # effect on the next packet sent or received.
       def auth=(spec)
-        @auth = Auth.build(spec, clock: -> { @instance.loop.clock.wall.to_i })
+        clock = -> { @instance.loop.clock.wall.to_i }
+        # One sequence for the life of the interface: a new key or a new
+        # Auth object must never send a lower number than the last one.
+        @auth_sequence ||= Auth::Sequence.new(clock)
+        @auth = Auth.build(spec, clock: clock, sequence: @auth_sequence)
       end
 
       # Largest packet body that fits the MTU with our authentication.
@@ -120,6 +125,7 @@ module OSPFv2
         @neighbors.values.each { |n| n.kill('InterfaceDown') }
         @going_down = false
         @neighbors.clear
+        @crypto_seqs.clear
         @delayed_acks.clear
         @dr = @bdr = 0
         @transport&.stop
@@ -145,6 +151,7 @@ module OSPFv2
       # A neighbor reached Down: forget it.
       def forget(nbr)
         @neighbors.delete(neighbor_key(nbr.router_id, nbr.address)) if @neighbors.values.include?(nbr)
+        @crypto_seqs.delete(nbr.router_id) unless @neighbors.each_value.any? { |n| n.router_id == nbr.router_id }
       end
 
       # ---- receive (RFC 2328 8.2) ----
@@ -152,14 +159,23 @@ module OSPFv2
       def receive(bytes, from)
         return unless up?
         from_i = Addr.to_i(from)
-        pkt = Wire.decode(bytes, auth: @auth)
-        @stats[:"rx_#{pkt.name}"] += 1
-        return drop(pkt.name, "area #{Addr.to_s(pkt.area_id)} from #{from}, ours is #{Addr.to_s(@area.id)}") unless pkt.area_id == @area.id
-        return drop(pkt.name, "router id #{Addr.to_s(pkt.router_id)} from #{from} is ours") if pkt.router_id == @instance.router_id
-        return drop(pkt.name, "source #{from} not on #{Addr.to_s(network)}/#{@prefix_len}") if broadcast? && (from_i & mask) != network
+        # Checks that cost nothing come before any hash is computed.
+        hdr = Wire.peek(bytes)
+        name = Wire::NAMES.fetch(hdr.type, :packet)
+        @stats[:"rx_#{name}"] += 1
+        return drop(name, "area #{Addr.to_s(hdr.area_id)} from #{from}, ours is #{Addr.to_s(@area.id)}") unless hdr.area_id == @area.id
+        return drop(name, "router id #{Addr.to_s(hdr.router_id)} from #{from} is ours") if hdr.router_id == @instance.router_id
+        return drop(name, "source #{from} not on #{Addr.to_s(network)}/#{@prefix_len}") if broadcast? && (from_i & mask) != network
+        # On a LAN a neighbor is its address. A packet from that address
+        # with another router id is a replay, a spoof or a renumbered
+        # router; the real neighbor's state stays untouched either way.
+        if broadcast? && (at = @neighbors[from_i]) && at.router_id != hdr.router_id
+          return drop(name, "router id #{Addr.to_s(hdr.router_id)} from #{from}, where neighbor #{at} is")
+        end
 
+        pkt = Wire.decode(bytes, auth: @auth)
         key = neighbor_key(pkt.router_id, from_i)
-        return if pkt.crypto_seq && replayed?(pkt, @neighbors[key], from)
+        return if pkt.crypto_seq && replayed?(pkt, from)
 
         if pkt.type == Wire::HELLO
           receive_hello(pkt, from_i)
@@ -174,7 +190,7 @@ module OSPFv2
           when Wire::ACK then nbr.receive_ack(pkt.body)
           end
         end
-        @neighbors[key]&.crypto_seq = pkt.crypto_seq if pkt.crypto_seq
+        record_crypto_seq(pkt) if pkt.crypto_seq
       rescue Wire::AuthError => e
         drop(:auth, "from #{from}: #{e.message}")
       rescue Wire::Error => e
@@ -241,12 +257,25 @@ module OSPFv2
       end
 
       # RFC 2328 D.5.2: the cryptographic sequence number from a neighbor
-      # never goes down. A lower one is a replay.
-      def replayed?(pkt, nbr, from)
-        last = nbr&.crypto_seq
+      # never goes down. A lower one is a replay. The highest number is
+      # kept per router id, not per address, so a packet replayed from
+      # another source address is caught too. As the RFC allows, an equal
+      # number passes: the newest packet can be replayed until the next
+      # one arrives (RFC 7474 closes that; not implemented).
+      def replayed?(pkt, from)
+        last = @crypto_seqs[pkt.router_id]
         return false unless last && pkt.crypto_seq < last
-        drop(:auth, "from #{from}: sequence #{pkt.crypto_seq} below #{last} from #{nbr}, replayed?")
+        drop(:auth, "from #{from}: sequence #{pkt.crypto_seq} below #{last} from #{Addr.to_s(pkt.router_id)}, replayed?")
         true
+      end
+
+      # Remembers the sequence number once the packet was accepted and
+      # its router id is a neighbor.
+      def record_crypto_seq(pkt)
+        rid = pkt.router_id
+        return unless @neighbors.each_value.any? { |n| n.router_id == rid }
+        last = @crypto_seqs[rid]
+        @crypto_seqs[rid] = pkt.crypto_seq if last.nil? || pkt.crypto_seq > last
       end
 
       def change(new_state, event)
@@ -278,6 +307,11 @@ module OSPFv2
         key = neighbor_key(rid, from)
         nbr = @neighbors[key]
         if nbr.nil?
+          # One router id, one neighbor: a hello claiming a router id we
+          # already know at another address is a replay or a duplicate id.
+          if broadcast? && (other = @neighbors.each_value.find { |n| n.router_id == rid })
+            return drop(:hello, "router id #{Addr.to_s(rid)} from #{Addr.to_s(from)} is already neighbor #{other}")
+          end
           nbr = @neighbors[key] = Neighbor.new(self, router_id: rid, address: from)
           @instance.log(:info, self, "new neighbor #{nbr}")
         end
