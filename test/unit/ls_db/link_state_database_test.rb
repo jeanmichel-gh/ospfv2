@@ -259,6 +259,20 @@ class TestLsDbLinkStateDatabase < Test::Unit::TestCase
     # ls_db.all.each { |l| puts l.to_s_junos  }
   end
 
+  # RFC 2328 13.7: only an ack for the instance we hold clears it.
+  def test_ack_for_an_older_instance_does_not_count
+    db = LinkStateDatabase.new(area_id: 0)
+    db << Router.new(advertising_router: '1.1.1.1', ls_id: '1.1.1.1', sequence_number: 0x80000001)
+    old_hdr = Lsa.new_ntop(db.all.first.encode[0, 20]) # acks carry bare headers
+    newer = db.all.first
+    newer.force_refresh(nil)
+    assert_equal 1, db.all_not_acked.size
+    db.ls_ack(old_hdr)
+    assert_equal 1, db.all_not_acked.size, 'ack for the older instance was taken'
+    db.ls_ack(Lsa.new_ntop(newer.encode[0, 20]))
+    assert_equal 0, db.all_not_acked.size
+  end
+
   private
   
   def _sent_lsu

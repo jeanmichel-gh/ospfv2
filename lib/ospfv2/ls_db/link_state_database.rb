@@ -150,10 +150,13 @@ module LSDB
       lsa
     end
         
-    def ls_ack(lsa)
-      
-      lsa = lookup(lsa)
-      if lsa
+    # Clears the retransmit flag when +hdr+ acknowledges the instance we
+    # hold. An ack for an older instance must not count (RFC 2328 13.7):
+    # it arrives when a peer acks the previous update just after we
+    # flooded a new one, and the new one would never be retransmitted.
+    def ls_ack(hdr)
+      lsa = lookup(hdr)
+      if lsa && (lsa <=> hdr).zero?
         if lsa.maxaged?
           @ls_db.delete(lsa.key)
         else
