@@ -151,6 +151,22 @@ module OSPFv2
         'hmac-sha-384' => :hmac_sha384, 'hmac-sha-512' => :hmac_sha512
       }.freeze
 
+      # authentication { simple-password; md5/hmac-* ID key S; send-key },
+      # for interfaces and virtual links alike.
+      AUTHENTICATION = proc do
+        container 'authentication', help: 'Packet authentication' do
+          leaf 'simple-password', Schema.hint(T.string(8), '<password>'), help: 'Clear text password (RFC 2328)',
+                                                                           secret: true
+          AUTH_ALGORITHMS.each do |word, algo|
+            max = algo == :md5 ? 16 : 255
+            keyed_leaf word, key: Schema.hint(T.range(0, 255), '<key-id>'), sub: 'key',
+                             type: Schema.hint(T.string(max), '<secret>'), secret: true,
+                             help: algo == :md5 ? 'Keyed MD5 (RFC 2328)' : "HMAC-#{word.split('-', 2).last.upcase} (RFC 5709)"
+          end
+          leaf 'send-key', Schema.hint(T.range(0, 255), '<key-id>'), help: 'Key to sign with (default: highest id)'
+        end
+      end
+
       ROOT = Node.new('', :container).tap do |root|
         root.instance_eval do
           container 'routing-options', help: 'Protocol-independent routing options' do
@@ -192,6 +208,16 @@ module OSPFv2
             container 'ospf', help: 'OSPF version 2' do
               leaf 'export', NAME, help: 'Policy choosing routes to advertise as AS externals'
               list 'area', key: AREA, help: 'OSPF area' do
+                container 'virtual-link', help: 'Virtual links to area border routers (backbone only)' do
+                  list 'neighbor-id', key: IPV4, help: 'Router id of the other end' do
+                    leaf 'transit-area', AREA, help: 'Non-backbone area the link crosses'
+                    leaf 'hello-interval', Schema.hint(T.range(1, 65_535), '<seconds>'), help: 'Hello interval'
+                    leaf 'dead-interval', Schema.hint(T.range(1, 65_535), '<seconds>'), help: 'Dead interval'
+                    leaf 'retransmit-interval', Schema.hint(T.range(1, 65_535), '<seconds>'), help: 'LSA retransmit interval'
+                    leaf 'transit-delay', Schema.hint(T.range(1, 65_535), '<seconds>'), help: 'Transmit delay'
+                    instance_eval(&Schema::AUTHENTICATION)
+                  end
+                end
                 container 'stub', help: 'No external routes here; area border routers send a default instead' do
                   leaf 'default-metric', Schema.hint(T.range(1, 16_777_214), '<1..16777214>'),
                        help: 'Cost of the default route the ABR sends (default 1)'
@@ -216,17 +242,7 @@ module OSPFv2
                   flag 'mtu-ignore', help: 'Do not check the neighbor MTU'
                   flag 'passive', help: 'Advertise the subnet, form no adjacency'
                   flag 'disable', help: 'Keep the configuration, do not run OSPF here'
-                  container 'authentication', help: 'Packet authentication' do
-                    leaf 'simple-password', Schema.hint(T.string(8), '<password>'), help: 'Clear text password (RFC 2328)',
-                                                                                     secret: true
-                    AUTH_ALGORITHMS.each do |word, algo|
-                      max = algo == :md5 ? 16 : 255
-                      keyed_leaf word, key: Schema.hint(T.range(0, 255), '<key-id>'), sub: 'key',
-                                       type: Schema.hint(T.string(max), '<secret>'), secret: true,
-                                       help: algo == :md5 ? 'Keyed MD5 (RFC 2328)' : "HMAC-#{word.split('-', 2).last.upcase} (RFC 5709)"
-                    end
-                    leaf 'send-key', Schema.hint(T.range(0, 255), '<key-id>'), help: 'Key to sign with (default: highest id)'
-                  end
+                  instance_eval(&Schema::AUTHENTICATION)
                 end
               end
             end

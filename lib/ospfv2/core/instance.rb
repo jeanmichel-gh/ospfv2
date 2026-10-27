@@ -8,6 +8,7 @@ require_relative 'wire'
 require_relative 'neighbor'
 require_relative 'interface'
 require_relative 'area'
+require_relative 'virtual_link'
 require_relative 'spf'
 require_relative 'spf_scheduler'
 
@@ -39,7 +40,7 @@ module OSPFv2
       AREA_SCOPE = [1, 2, 3, 4, 7].freeze
 
       attr_reader :router_id, :loop, :areas, :interfaces, :as_lsdb, :random, :events, :stats,
-                  :route_table, :spf, :spf_log, :externals
+                  :route_table, :spf, :spf_log, :externals, :virtual_links
       # area id => { stub: { default_metric:, no_summaries: } }
       attr_accessor :area_options
 
@@ -63,6 +64,7 @@ module OSPFv2
         @route_table = Spf::Table.empty
         @spf_log = []
         @externals = {} # key => spec, the AS-external-LSAs we originate
+        @virtual_links = {} # neighbor router id => VirtualLink
         @exported = []  # the external routes we were given to advertise
         @area_options = {}
         @spf_skipped = []
@@ -103,6 +105,28 @@ module OSPFv2
           raise
         end
         iface
+      end
+
+      # A virtual link to area border router +neighbor+ across +transit_area+
+      # (RFC 2328 15). It comes up once the transit area's SPF reaches the
+      # other end. opts: hello_interval, dead_interval, rxmt_interval,
+      # transmit_delay, auth.
+      def add_virtual_link(neighbor:, transit_area:, **opts)
+        transit = Addr.to_i(transit_area.is_a?(Integer) ? transit_area : transit_area.to_s)
+        rid = Addr.to_i(neighbor)
+        raise ArgumentError, 'a virtual link cannot cross the backbone' if transit.zero?
+        raise ArgumentError, "virtual link to #{Addr.to_s(rid)} already exists" if @virtual_links.key?(rid)
+        vl = VirtualLink.new(self, neighbor_id: rid, transit_area_id: transit, area: area(0), **opts)
+        area(0).interfaces << vl
+        @interfaces[vl.name] = vl
+        @virtual_links[rid] = vl
+        update_virtual_links(@route_table) if @running
+        vl
+      end
+
+      def remove_virtual_link(neighbor)
+        vl = @virtual_links.delete(Addr.to_i(neighbor)) or return nil
+        remove_interface(vl.name)
       end
 
       # Takes interface +name+ down and forgets it. Our network-LSA for it,
@@ -192,12 +216,15 @@ module OSPFv2
         nil
       end
 
-      def lsdbs_for(area)
-        area.external_capable? ? [area.lsdb, @as_lsdb] : [area.lsdb]
+      # Databases summarized in DDs; AS-external LSAs never go over
+      # virtual links (RFC 2328 10.3).
+      def lsdbs_for(area, virtual: false)
+        area.external_capable? && !virtual ? [area.lsdb, @as_lsdb] : [area.lsdb]
       end
 
       def scope_interfaces(type, area)
-        AS_SCOPE.include?(type) ? @interfaces.values.select { |i| i.area.external_capable? } : area.interfaces
+        return area.interfaces unless AS_SCOPE.include?(type)
+        @interfaces.values.select { |i| i.area.external_capable? && !i.virtual? }
       end
 
       # ---- hooks from interfaces and neighbors ----
@@ -206,6 +233,8 @@ module OSPFv2
         nbr.iface.forget(nbr) if new == :down
         if old == :full || new == :full
           nbr.iface.area.schedule_origination
+          # The V bit in the transit area's router-LSA follows the link.
+          @areas[nbr.iface.transit_area_id]&.schedule_origination if nbr.iface.virtual?
           @spf.trigger(:neighbor, Addr.to_s(nbr.router_id))
         end
         @listeners.each { |l| l.call(nbr, old, new) }
@@ -277,9 +306,10 @@ module OSPFv2
             next
           end
           db = lsdb_for(lsa.type, area)
+          db = nil if iface.virtual? && AS_SCOPE.include?(lsa.type)
           unless db
             why = case lsa.type
-                  when *AS_SCOPE then 'AS-external LSA in a stub area or NSSA'
+                  when *AS_SCOPE then iface.virtual? ? 'AS-external LSA over a virtual link' : 'AS-external LSA in a stub area or NSSA'
                   when 7 then 'type 7 LSA outside an NSSA'
                   else "unsupported type #{lsa.type}"
                   end
@@ -442,6 +472,7 @@ module OSPFv2
         @stats[:spf_runs] += 1
         prev = @route_table
         replace_routes(table, reasons, Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0)
+        update_virtual_links(table)
         # Summaries and externals depend on the table and on how we sit in
         # our areas. When neither changed, there is nothing to redo: with
         # many routes that saves seconds per run.
@@ -461,6 +492,56 @@ module OSPFv2
         routers = table.routers.transform_values { |r| [r.path_type, r.cost, r.tag, r.next_hops.map(&:sort_key).sort] }
         areas = @areas.values.map { |a| [a.id, a.active?, a.interfaces.select(&:up?).map { |i| [i.name, i.address] }] }
         [abr?, areas, @area_options, routers]
+      end
+
+      # ---- virtual links (RFC 2328 15) ----
+
+      # After each SPF: a virtual link is up while the transit area reaches
+      # the other end (an area border router, 16.1 step 4). Its cost is the
+      # path's; its addresses are ours on the way out and the other end's
+      # in the transit area.
+      def update_virtual_links(table)
+        @virtual_links.each_value do |vl|
+          entry = table.routers[[vl.neighbor_id, vl.transit_area_id]]
+          area = @areas[vl.transit_area_id]
+          hop = entry&.next_hops&.first
+          iface = hop && @interfaces[hop.interface]
+          remote = entry && area && virtual_remote(area, vl.neighbor_id, hop)
+          if entry && entry.path_type == :intra && iface && remote && area.active? && !area.stub? && !area.nssa?
+            vl.reach(cost: entry.cost, local: iface.address, remote: remote, via: iface.name)
+          else
+            vl.unreach
+          end
+        end
+      end
+
+      # The other end's address: the next hop when it is our neighbor,
+      # else an interface address from its router-LSA in the transit area.
+      def virtual_remote(area, rid, hop)
+        if hop.gateway
+          nbr = @interfaces[hop.interface]&.neighbors&.each_value&.find { |n| n.address == hop.gateway }
+          return hop.gateway if nbr&.router_id == rid
+        end
+        lsa = area.lsdb[[1, rid, rid]] or return nil
+        link = lsa.router_links.find { |l| [1, 2].include?(l.type) } or return nil
+        link.data
+      rescue Lsa::Error
+        nil
+      end
+
+      # A backbone packet that came in on +phys+, a non-backbone interface:
+      # for the virtual link to its sender through that area, if any.
+      def virtual_receive(bytes, from, phys)
+        hdr = Wire.peek(bytes)
+        vl = @virtual_links.each_value.find { |v| v.transit_area_id == phys.area.id && v.neighbor_id == hdr.router_id }
+        return phys.drop(:packet, "backbone packet from #{from}, no virtual link to #{Addr.to_s(hdr.router_id)}") unless vl
+        vl.receive(bytes, from)
+      end
+
+      # Sends a virtual link's packet out of the interface its path takes.
+      def virtual_send(vl, bytes, dest)
+        iface = vl.via && @interfaces[vl.via]
+        iface&.transport&.send_packet(bytes, dest)
       end
 
       # ---- log ----
@@ -664,9 +745,10 @@ module OSPFv2
 
       def spf_areas
         @areas.values.map do |a|
-          links = a.interfaces.select(&:up?).map do |i|
+          links = a.interfaces.select(&:up?).sort_by { |i| i.virtual? ? 1 : 0 }.map do |i|
             Spf::Link.new(name: i.name, address: i.address, prefix_len: i.prefix_len,
-                          neighbors: i.full_neighbors.to_h { |n| [n.router_id, n.address] })
+                          neighbors: i.full_neighbors.to_h { |n| [n.router_id, n.address] },
+                          virtual: i.virtual? ? [i.neighbor_id, i.transit_area_id] : nil)
           end
           Spf::Area.new(id: a.id, lsas: a.lsdb.live, interfaces: links, nssa: a.nssa?,
                         no_summaries: a.nssa&.[](:no_summaries) == true)

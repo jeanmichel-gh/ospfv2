@@ -90,6 +90,13 @@
   type 3 default
 * Interop: stub, totally stubby and NSSA areas behind our ABR, with FRR
   inside; equal-cost failover in the kernel within the dead interval
+* Virtual links (RFC 2328 15, 16.3; area 0 virtual-link neighbor-id R
+  transit-area A, with timers and authentication): up while the transit
+  area reaches the other end, unicast across it, MTU 0 in DDs, no
+  AS-external LSAs over it, type 4 links in the backbone router-LSA, the
+  V bit in the transit area, next hops from the transit area, and transit
+  area summaries checked for shorter paths. Interop with FRR across two
+  hops of a transit area
 * Area border routers per RFC 3509: attached to the backbone and another
   area; without a backbone neighbor, every area's summaries count
 * NSSA review fixes: border routers ignore each other's type 7 default,

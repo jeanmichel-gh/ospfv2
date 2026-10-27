@@ -264,6 +264,7 @@ module OSPFv2
       apply_kernel(model.kernel)
       apply_areas(model.areas)
       sync_interfaces
+      apply_virtual_links(model.virtual_links)
       @export = model.export
       export_routes
     end
@@ -286,6 +287,23 @@ module OSPFv2
           @instance.areas[id]&.schedule_origination
           @instance.spf.trigger(:area, Core::Addr.to_s(id))
         end
+      end
+    end
+
+    # Virtual links: added, removed, or replaced when their settings change.
+    def apply_virtual_links(want)
+      have = @instance.virtual_links
+      @applied_vls ||= {}
+      (have.keys.map { |id| Core::Addr.to_s(id) } | want.keys).each do |rid|
+        next if want[rid] && want[rid] == @applied_vls[rid] && have.key?(Core::Addr.to_i(rid))
+        if have.key?(Core::Addr.to_i(rid))
+          @instance.remove_virtual_link(rid)
+          @applied_vls.delete(rid)
+        end
+        next unless (w = want[rid])
+        @instance.add_virtual_link(neighbor: rid, transit_area: w[:transit_area], **w.except(:transit_area))
+        @applied_vls[rid] = w
+        log(:info, "virtual link to #{rid} through area #{w[:transit_area]} configured")
       end
     end
 

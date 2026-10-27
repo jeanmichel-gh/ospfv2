@@ -15,6 +15,9 @@
 # "areas": {"0.0.0.1": {"stub": {"no_summaries": true}}} sets area options;
 # {"nssa": {"default_lsa": {"metric": 5, "type": 2}, "no_summaries": false}}.
 #
+# "virtual_links": [{"neighbor": "2.2.2.2", "transit_area": "0.0.0.1"}] sets
+# up virtual links.
+#
 # "externals": [{"prefix": "203.0.113.0/24", "metric": 7, "type": 1, "tag": 9}]
 # are advertised as AS-external-LSAs.
 #
@@ -71,6 +74,9 @@ config.fetch(:interfaces).each do |i|
               priority: i[:priority] || 1, auth: auth_spec(i[:auth])
     )
   end
+end
+(config[:virtual_links] || []).each do |v|
+  router.add_virtual_link(neighbor: v.fetch(:neighbor), transit_area: v.fetch(:transit_area))
 end
 loop_.call { router.start }
 if config[:externals]

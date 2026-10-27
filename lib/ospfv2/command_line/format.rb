@@ -81,13 +81,15 @@ module OSPFv2
           out << row([i['name'], state, i['area'], i['dr_id'], i['bdr_id'], i['neighbors']], widths)
           next unless detail
           addr, len = i['address'].split('/')
-          out << "  Type: #{i['type'] == 'p2p' ? 'P2P' : 'LAN'}, Address: #{addr}, Mask: #{mask(len.to_i)}, " \
+          type = { 'p2p' => 'P2P', 'virtual' => 'Virtual' }.fetch(i['type'], 'LAN')
+          out << "  Virtual link to #{i['neighbor_id']} through area #{i['transit_area']}, peer #{i['remote']}" if i['type'] == 'virtual'
+          out << "  Type: #{type}, Address: #{addr}, Mask: #{mask(len.to_i)}, " \
                  "MTU: #{i['mtu']}, Cost: #{i['cost']}"
           if i['passive']
             out << '  Passive: no hellos, advertised as a stub network'
             next
           end
-          out << "  DR addr: #{i['dr']}, BDR addr: #{i['bdr']}, Priority: #{i['priority']}" unless i['type'] == 'p2p'
+          out << "  DR addr: #{i['dr']}, BDR addr: #{i['bdr']}, Priority: #{i['priority']}" unless %w[p2p virtual].include?(i['type'])
           out << "  Adj count: #{i['adjacent']}"
           out << "  Hello: #{i['hello_interval']}, Dead: #{i['dead_interval']}, ReXmit: #{i['rxmt_interval']}"
           out << "  Auth: #{i['auth']}"
@@ -109,12 +111,14 @@ module OSPFv2
           next "#{i['name']} is not running OSPF: #{i['reason']}" if i['state'] == 'pending'
           lines = ["#{i['name']} is up, line protocol is up",
                    "  Internet Address #{i['address']}, Area #{ios_area(i['area'])}",
-                   "  Process ID 1, Router ID #{router_id}, Network Type #{i['type'] == 'p2p' ? 'POINT_TO_POINT' : 'BROADCAST'}, Cost: #{i['cost']}"]
+                   "  Process ID 1, Router ID #{router_id}, Network Type " \
+                   "#{{ 'p2p' => 'POINT_TO_POINT', 'virtual' => 'VIRTUAL_LINK' }.fetch(i['type'], 'BROADCAST')}, Cost: #{i['cost']}"]
+          lines << "  Virtual link to router #{i['neighbor_id']}, transit area #{ios_area(i['transit_area'])}" if i['type'] == 'virtual'
           if i['passive']
             lines << '  No Hellos (Passive interface)'
           else
             lines << "  Transmit Delay is 1 sec, State #{ios_if_state(i)}, Priority #{i['priority']}"
-            unless i['type'] == 'p2p'
+            unless %w[p2p virtual].include?(i['type'])
               lines << "  Designated Router (ID) #{i['dr_id']}, Interface address #{i['dr']}"
               lines << "  Backup Designated router (ID) #{i['bdr_id']}, Interface address #{i['bdr']}"
             end

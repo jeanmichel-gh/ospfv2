@@ -32,10 +32,11 @@ module OSPFv2
       # and optionally its neighbors' addresses by router id, used for a
       # point-to-point next hop when the neighbor's router-LSA does not
       # say its address on our subnet (an unnumbered link, say).
-      Link = Struct.new(:name, :address, :prefix_len, :neighbors, keyword_init: true) do
-        def initialize(name:, address:, prefix_len:, neighbors: {})
+      # +virtual+: [neighbor router id, transit area id] for a virtual link.
+      Link = Struct.new(:name, :address, :prefix_len, :neighbors, :virtual, keyword_init: true) do
+        def initialize(name:, address:, prefix_len:, neighbors: {}, virtual: nil)
           super(name: name, address: Addr.to_i(address), prefix_len: prefix_len,
-                neighbors: neighbors.to_h { |rid, ip| [Addr.to_i(rid), Addr.to_i(ip)] })
+                neighbors: neighbors.to_h { |rid, ip| [Addr.to_i(rid), Addr.to_i(ip)] }, virtual: virtual)
         end
 
         def mask = Addr.mask(prefix_len)
@@ -168,8 +169,11 @@ module OSPFv2
           @attached = @areas.select { |a| a.interfaces.any? && a.lsas.any? { |l| l.key == [1, @root, @root] } }
           @abr = @attached.size > 1 && @attached.any? { |a| a.id.zero? }
           @backbone_routers = 0
-          @areas.each { |a| intra_area(a) }
+          # Transit areas before the backbone: a virtual link's next hops
+          # come from the transit area's tree (16.1.1).
+          @areas.sort_by { |a| a.id.zero? ? 1 : 0 }.each { |a| intra_area(a) }
           inter_area
+          transit_areas
           external
           @routes.each_value { |r| finish(r) }
           @routers.each_value { |r| finish(r) }
@@ -263,9 +267,9 @@ module OSPFv2
             links = router_links(v.lsa) or return
             links.each do |link|
               case link.type
-              when 1 # point-to-point
+              when 1, 4 # point-to-point, virtual link
                 w = db.router(link.id)
-                next unless w && links_back?(w, v.id)
+                next unless w && links_back?(w, v.id, link.type)
                 yield [:router, link.id], w, link.metric, link
               when 2 # transit network; link id is the DR's address
                 w = db.network(link.id)
@@ -284,7 +288,7 @@ module OSPFv2
           end
         end
 
-        def links_back?(w_lsa, v_id)
+        def links_back?(w_lsa, v_id, type = 1)
           kind, id = v_id
           if w_lsa.type == 2
             return false unless kind == :router
@@ -294,7 +298,7 @@ module OSPFv2
           else
             links = router_links(w_lsa) or return false
             if kind == :router
-              links.any? { |l| l.type == 1 && l.id == id }
+              links.any? { |l| l.type == type && l.id == id }
             else
               links.any? { |l| l.type == 2 && l.id == id }
             end
@@ -304,9 +308,14 @@ module OSPFv2
         # ---- 16.1.1: next hops ----
 
         def next_hops(area, parent, w_id, w_lsa, link)
-          if parent.id == [:router, @root]
-            iface = area.interfaces.find { |i| i.address == link.data } ||
-                    area.interfaces.find { |i| i.on?(link.data) }
+          if parent.id == [:router, @root] && link.type == 4
+            # Over a virtual link: the transit area's path to its other end.
+            vl = area.interfaces.find { |i| i.virtual && i.virtual[0] == w_id[1] } or return []
+            entry = @routers[[w_id[1], vl.virtual[1]]]
+            entry && entry.path_type == :intra ? entry.next_hops.dup : []
+          elsif parent.id == [:router, @root]
+            iface = area.interfaces.reject(&:virtual).find { |i| i.address == link.data } ||
+                    area.interfaces.reject(&:virtual).find { |i| i.on?(link.data) }
             return [] unless iface
             return [NextHop.new(iface.name, nil)] if w_id[0] == :network
             # The neighbor's address: its link back to us on this subnet.
@@ -343,7 +352,7 @@ module OSPFv2
               next unless l.type == 3
               len = prefix_len(l.data, v.lsa) or next
               hops = if v.id[1] == @root
-                       iface = area.interfaces.find { |i| i.on?(l.id) }
+                       iface = area.interfaces.reject(&:virtual).find { |i| i.on?(l.id) }
                        iface ? [NextHop.new(iface.name, nil)] : []
                      else
                        v.next_hops
@@ -356,12 +365,12 @@ module OSPFv2
         def add_intra(area, prefix, len, cost, hops, advr)
           key = [prefix, len]
           cur = @routes[key]
-          if cur.nil? || cur.path_type != :intra || cost < cur.cost
+          # One area per entry (RFC 2328 11): of equal paths in two areas,
+          # the lower area id's is kept, whatever order areas are computed.
+          if cur.nil? || cur.path_type != :intra || cost < cur.cost || (cost == cur.cost && area.id < cur.area)
             @routes[key] = Route.new(prefix: prefix, prefix_len: len, path_type: :intra, cost: cost,
                                      area: area.id, next_hops: hops.dup, advr: advr)
           elsif cost == cur.cost && cur.area == area.id
-            # One area per entry (RFC 2328 11): an equal path through
-            # another area is not added.
             cur.next_hops |= hops
           end
         end
@@ -401,6 +410,46 @@ module OSPFv2
                 add_inter(@routers, [l.ls_id, area.id], 32, area, cost, br, asbr: true)
               end
             end
+          end
+        end
+
+        # 16.3: an area border router attached to a transit area (one a
+        # virtual link crosses, V bit set) checks that area's summaries for
+        # shorter paths to backbone and inter-area destinations.
+        def transit_areas
+          return unless @abr
+          @attached.each do |area|
+            next if area.id.zero? || !transit_capable?(area)
+            area.lsas.each do |l|
+              next unless [3, 4].include?(l.type) && !l.max_age? && l.advr != @root
+              parts = summary_body(l) or next
+              mask, metric = parts
+              next if metric == LS_INFINITY
+              br = @routers[[l.advr, area.id]]
+              next unless br && br.path_type == :intra && br.tag && br.tag[:abr]
+              cur = if l.type == 3
+                      len = prefix_len(mask, l) or next
+                      @routes[[l.ls_id & mask, len]]
+                    else
+                      @routers[[l.ls_id, 0]]
+                    end
+              next unless cur && %i[intra inter].include?(cur.path_type) && cur.area.to_i.zero?
+              cost = br.cost + metric
+              if cost < cur.cost
+                cur.cost = cost
+                cur.next_hops = br.next_hops.dup
+              elsif cost == cur.cost
+                cur.next_hops |= br.next_hops
+              end
+            end
+          end
+        end
+
+        def transit_capable?(area)
+          area.lsas.any? do |l|
+            next false unless l.type == 1 && !l.max_age?
+            parts = router_body(l)
+            parts && (parts[0] & 4) == 4
           end
         end
 

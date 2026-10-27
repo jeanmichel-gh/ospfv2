@@ -93,6 +93,10 @@ module OSPFv2
       def p2p? = @type == :p2p
       def passive? = @passive
       def up? = @state != :down
+      def virtual? = false
+
+      # Where hellos go; a virtual link sends them to the other end.
+      def hello_destination = AllSPFRouters
 
       def mask = Addr.mask(@prefix_len)
       def network = @address & mask
@@ -173,7 +177,12 @@ module OSPFv2
         hdr = Wire.peek(bytes)
         name = Wire::NAMES.fetch(hdr.type, :packet)
         @stats[:"rx_#{name}"] += 1
-        return drop(name, "area #{Addr.to_s(hdr.area_id)} from #{from}, ours is #{Addr.to_s(@area.id)}") unless hdr.area_id == @area.id
+        unless hdr.area_id == @area.id
+          # Backbone packets on a non-backbone interface are for a virtual
+          # link through this area (RFC 2328 8.2).
+          return @instance.virtual_receive(bytes, from, self) if hdr.area_id.zero? && !@area.id.zero?
+          return drop(name, "area #{Addr.to_s(hdr.area_id)} from #{from}, ours is #{Addr.to_s(@area.id)}")
+        end
         return drop(name, "router id #{Addr.to_s(hdr.router_id)} from #{from} is ours") if hdr.router_id == @instance.router_id
         return drop(name, "source #{from} not on #{Addr.to_s(network)}/#{@prefix_len}") if broadcast? && (from_i & mask) != network
         # On a LAN a neighbor is its address. A packet from that address
@@ -303,7 +312,7 @@ module OSPFv2
         hello = Wire::Hello.new(netmask: mask, hello_interval: @hello_interval, options: options,
                                 priority: @priority, dead_interval: @dead_interval,
                                 dr: @dr, bdr: @bdr, neighbors: nbrs)
-        send_packet(hello, AllSPFRouters)
+        send_packet(hello, hello_destination)
       end
 
       def receive_hello(pkt, from)

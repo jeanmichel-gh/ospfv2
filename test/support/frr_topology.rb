@@ -24,7 +24,7 @@ class FrrTopology
   ROOT = FrrLab::ROOT
 
   Router = Struct.new(:name, :kind, :router_id, :loopback_area, :extra, :frr_extra, :dummies, :links, :fib,
-                      :externals, :areas, keyword_init: true)
+                      :externals, :areas, :virtual_links, keyword_init: true)
   Link = Struct.new(:ifname, :peer, :address, :prefix_len, :p2p, :area, :cost, keyword_init: true)
 
   attr_reader :routers, :dir
@@ -46,10 +46,11 @@ class FrrTopology
   # fib: install routes in the namespace's kernel table
   # externals: [{ prefix:, metric:, type:, tag: }] to advertise
   # areas: { '0.0.0.1' => { stub: {} } }
-  def core(name, router_id, loopback_area: 0, fib: false, externals: nil, dummies: {}, areas: nil)
+  # virtual_links: [{ neighbor: '2.2.2.2', transit_area: '0.0.0.1' }]
+  def core(name, router_id, loopback_area: 0, fib: false, externals: nil, dummies: {}, areas: nil, virtual_links: nil)
     @routers[name] = Router.new(name: name, kind: :core, router_id: router_id, loopback_area: loopback_area,
                                 extra: [], frr_extra: [], dummies: dummies, links: [], fib: fib, externals: externals,
-                                areas: areas)
+                                areas: areas, virtual_links: virtual_links)
   end
 
   # Joins a and b on +subnet+; a gets the first host address, b the second.
@@ -205,7 +206,7 @@ class FrrTopology
     ifaces << { name: 'lo', address: "#{r.router_id}/32", passive: true, area: OSPFv2::Core::Addr.to_s(r.loopback_area) }
     cfg = File.join(@dir, "#{r.name}.json")
     File.write(cfg, JSON.generate(router_id: r.router_id, interfaces: ifaces, fib: r.fib, externals: r.externals,
-                                  areas: r.areas))
+                                  areas: r.areas, virtual_links: r.virtual_links))
     @pids[r.name] = Process.spawn('ip', 'netns', 'exec', ns(r.name), RbConfig.ruby, "-I#{ROOT}/lib",
                                   "#{ROOT}/test/support/core_runner.rb", cfg, state_file(r.name),
                                   %i[out err] => [File.join(@dir, "#{r.name}.log"), 'a'])

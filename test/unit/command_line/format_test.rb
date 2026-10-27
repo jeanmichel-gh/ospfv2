@@ -90,4 +90,20 @@ class TestCommandLineFormat < Test::Unit::TestCase
                  'refused change, old route still forwarding')
     assert_match(%r{^O        2\.2\.2\.2/32 \[110/-\] via 10\.0\.0\.2, eth0, kernel metric 100$}, F.render(:fib, :ios, f))
   end
+
+  def test_virtual_links_in_interface_views
+    vl = { 'name' => 'vl-2.2.2.2', 'state' => 'point_to_point', 'state_name' => 'PtToPt', 'area' => '0.0.0.0',
+           'dr_id' => '0.0.0.0', 'bdr_id' => '0.0.0.0', 'neighbors' => 1, 'adjacent' => 1, 'type' => 'virtual',
+           'address' => '10.0.23.2/32', 'mtu' => 1500, 'cost' => 10, 'priority' => 1, 'hello_interval' => 10,
+           'dead_interval' => 40, 'rxmt_interval' => 5, 'auth' => 'none', 'neighbor_id' => '2.2.2.2',
+           'transit_area' => '0.0.0.1', 'remote' => '10.0.23.1', 'dr' => '0.0.0.0', 'bdr' => '0.0.0.0' }
+    junos = F.render(:interfaces, :junos, [vl], detail: true)
+    assert_match(/Virtual link to 2\.2\.2\.2 through area 0\.0\.0\.1, peer 10\.0\.23\.1/, junos)
+    assert_match(/Type: Virtual/, junos)
+    assert_no_match(/DR addr/, junos)
+    ios = F.render(:interfaces, :ios, [vl], detail: true, router_id: '3.3.3.3')
+    assert_match(/Network Type VIRTUAL_LINK, Cost: 10/, ios)
+    assert_match(/Virtual link to router 2\.2\.2\.2, transit area 1/, ios)
+    assert_no_match(/Designated Router/, ios)
+  end
 end

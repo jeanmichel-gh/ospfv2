@@ -235,6 +235,17 @@ set protocols ospf area 5 nssa no-summaries
 Every router in the area must agree on stub or NSSA, or they will not become
 neighbors. Changing it restarts the area's interfaces.
 
+An area with no backbone interface can reach the backbone through a virtual link
+across another area, to an area border router of that area:
+
+```
+set protocols ospf area 0 virtual-link neighbor-id 2.2.2.2 transit-area 1
+```
+
+It comes up when area 1 reaches 2.2.2.2, costs what that path costs, and takes the
+interface timers and authentication statements. `show ospf interface` lists it as
+`vl-2.2.2.2`.
+
 External routes are advertised through an export policy, as on Junos. The host's own
 networks (`direct`) and static routes in the kernel (`static`) are the sources.
 

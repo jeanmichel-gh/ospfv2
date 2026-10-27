@@ -83,6 +83,7 @@ module OSPFv2
       # network every packet goes to AllSPFRouters (RFC 2328 8.1), which
       # also works for /31 and unnumbered peers.
       def unicast_destination
+        return @address if @iface.virtual? # unicast across the transit area
         @iface.p2p? ? AllSPFRouters : @address
       end
 
@@ -147,7 +148,8 @@ module OSPFv2
           return unless @state == :exstart
         end
 
-        if dd.mtu > @iface.mtu && !@iface.mtu_ignore
+        # Virtual links say MTU 0 and are not checked (RFC 2328 10.6).
+        if dd.mtu > @iface.mtu && !@iface.mtu_ignore && !@iface.virtual?
           @iface.drop(:dd, "MTU mismatch: neighbor #{self} says #{dd.mtu}, ours is #{@iface.mtu}")
           return
         end
@@ -310,6 +312,7 @@ module OSPFv2
             seq_number_mismatch("unsupported LSA type #{h.type}")
             return
           end
+          next if h.type == 5 && @iface.virtual? # never over virtual links (10.6)
           if h.type == 5 && !@iface.area.external_capable?
             seq_number_mismatch('AS-external LSA offered in a stub area or NSSA') # RFC 2328 10.6
             return
@@ -341,7 +344,7 @@ module OSPFv2
 
       def negotiation_done
         @db_summary = []
-        instance.lsdbs_for(@iface.area).each do |db|
+        instance.lsdbs_for(@iface.area, virtual: @iface.virtual?).each do |db|
           db.each do |lsa|
             if lsa.max_age?
               add_retransmit(lsa) # RFC 2328 10.3: MaxAge LSAs go here instead
@@ -378,7 +381,7 @@ module OSPFv2
       end
 
       def send_dd(flags, headers, seq = @dd_seq)
-        dd = Wire::DatabaseDescription.new(mtu: @iface.mtu, options: @iface.options, flags: flags,
+        dd = Wire::DatabaseDescription.new(mtu: @iface.virtual? ? 0 : @iface.mtu, options: @iface.options, flags: flags,
                                            seq: seq, headers: headers)
         @last_sent_dd = dd
         # The initial DD carries no summary, so more is still to come.
