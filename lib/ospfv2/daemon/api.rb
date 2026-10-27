@@ -141,6 +141,24 @@ module OSPFv2
         # server closed by #stop
       end
 
+      # Closing a socket with unread input makes the kernel send a reset,
+      # which can overtake our last reply. Half-close, then read and
+      # discard what is left for a moment, then close.
+      def close_gently(sock, max_bytes: 4 * MAX_LINE, max_wait: 1.0)
+        sock.close_write
+        deadline = Process.clock_gettime(Process::CLOCK_MONOTONIC) + max_wait
+        drained = 0
+        while drained < max_bytes
+          left = deadline - Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          break unless left.positive? && sock.wait_readable(left)
+          chunk = sock.read_nonblock(65_536, exception: false)
+          break if chunk.nil? || chunk == :wait_readable
+          drained += chunk.bytesize
+        end
+      rescue SystemCallError, IOError
+        nil
+      end
+
       def reject(client, why)
         client.write_nonblock("#{JSON.generate(error: why)}\n", exception: false)
         client.close
@@ -152,6 +170,7 @@ module OSPFv2
         while sock.wait_readable(IDLE) && (line = sock.gets(MAX_LINE))
           unless line.end_with?("\n") || line.bytesize < MAX_LINE
             sock.write("#{JSON.generate(error: "request longer than #{MAX_LINE} bytes")}\n")
+            close_gently(sock)
             return
           end
           resp = begin

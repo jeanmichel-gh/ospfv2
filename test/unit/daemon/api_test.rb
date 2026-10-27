@@ -99,7 +99,8 @@ class TestDaemonApi < Test::Unit::TestCase
   def test_oversized_request_is_refused
     @api.start
     s = UNIXSocket.new(@api.path)
-    Thread.new { s.write('x' * (Daemon::Api::MAX_LINE + 10)) rescue nil }
+    # Twice the limit: plenty left unread when the server answers.
+    Thread.new { s.write('x' * (2 * Daemon::Api::MAX_LINE)) rescue nil }
     resp = JSON.parse(s.gets)
     assert_match(/longer than/, resp['error'])
     assert_nil s.gets, 'and the connection is closed'
