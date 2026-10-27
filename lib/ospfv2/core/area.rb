@@ -34,6 +34,7 @@ module OSPFv2
       # Builds the LSAs this router wants in the area and hands each one
       # to the instance, which originates it if it changed.
       def originate
+        return unless @instance.areas[@id].equal?(self) # the area was dropped
         @instance.originate(self, router_lsa_spec)
         @interfaces.each do |iface|
           key = [2, iface.address, @instance.router_id]

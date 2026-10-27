@@ -1,0 +1,189 @@
+# frozen_string_literal: true
+
+require 'test/unit'
+require 'tmpdir'
+require 'stringio'
+require 'ospfv2/daemon'
+require 'ospfv2/daemon/api'
+require 'ospfv2/command_line/shell'
+
+# ospf-cli against a daemon in the same process, with a core peer, on a
+# fake clock.
+class TestCommandLineShell < Test::Unit::TestCase
+  include OSPFv2
+
+  def setup
+    @dir = Dir.mktmpdir('ospf-cli')
+    @loop = EventLoop.new(clock: Clock::Fake.new, on_error: ->(e) { raise e })
+    hub = Transport::Hub.new
+    system = Daemon::FakeSystem.new
+    system.set('eth1', '10.0.0.1/24')
+    system.set('lo', '1.1.1.1/32')
+    @daemon = Daemon.new(config_path: File.join(@dir, 'ospfd.conf'), loop: @loop, system: system,
+                         transport: ->(_n, ip) { Transport::Loopback.new(hub, ip) })
+    @daemon.start
+    @peer = Core::Instance.new(router_id: '2.2.2.2', loop: @loop)
+    @peer.add_interface(name: 'e0', address: '10.0.0.2/24', transport: Transport::Loopback.new(hub, '10.0.0.2'))
+    @peer.start
+    @sh = CommandLine::Shell.new(CommandLine::LocalClient.new(Daemon::Api.new(@daemon, path: '/unused')))
+  end
+
+  def teardown
+    FileUtils.remove_entry(@dir)
+  end
+
+  def run_lines(*lines)
+    lines.map { |l| @sh.execute(l) }
+  end
+
+  def configured
+    out = run_lines('configure', 'set routing-options router-id 1.1.1.1', 'set protocols ospf area 0 interface eth1',
+                    'set protocols ospf area 0 interface lo passive', 'commit', 'exit')
+    assert_equal 'commit complete', out[4]
+    @loop.run_until(120) { @peer.neighbors.first&.full? }
+    @loop.advance(5)
+  end
+
+  def test_configuration_mode
+    assert_equal 'Entering configuration mode', @sh.execute('configure')
+    assert_equal :configure, @sh.mode
+    assert_equal 'ospf# ', @sh.prompt
+    assert_equal '', @sh.execute('set routing-options router-id 1.1.1.1')
+    assert_match(/error: syntax error, unknown 'metrik'/, @sh.execute('set protocols ospf area 0 interface eth1 metrik 5'))
+    assert_equal '', @sh.execute('set prot ospf ar 0 int eth1 met 20')
+    assert_equal "+ set routing-options router-id 1.1.1.1\n+ set protocols ospf area 0.0.0.0 interface eth1 metric 20",
+                 @sh.execute('show | compare')
+    assert_equal @sh.execute('show | compare'), @sh.execute('compare')
+    assert_match(/metric 20;/, @sh.execute('show'))
+    assert_equal 'configuration check succeeds', @sh.execute('commit check')
+    assert_equal 'commit complete', @sh.execute('commit comment metric for eth1')
+    assert_equal '[no changes]', @sh.execute('compare')
+    assert_match(/metric for eth1/, @sh.execute('history'))
+    assert_equal '', @sh.execute('delete protocols ospf area 0 interface eth1 metric')
+    assert_match(/changed but not committed/, @sh.execute('exit'))
+    assert_equal :operational, @sh.mode
+    assert_match(/Entering configuration mode\nThe configuration has been changed/, @sh.execute('configure'))
+    assert_equal 'Uncommitted changes discarded', @sh.execute('discard')
+    assert_equal 'Exiting configuration mode', @sh.execute('end')
+  end
+
+  def test_commit_failure_is_reported
+    run_lines('configure', 'set protocols ospf area 0 interface eth1')
+    assert_equal "error: commit failed\n  routing-options router-id is required", @sh.execute('commit')
+  end
+
+  def test_rollback
+    configured
+    run_lines('configure', 'set protocols ospf area 0 interface eth1 metric 9', 'commit')
+    assert_match(/rollback 1 loaded/, @sh.execute('rollback 1'))
+    assert_equal '- set protocols ospf area 0.0.0.0 interface eth1 metric 9', @sh.execute('compare')
+    assert_match(/error: syntax error, unknown 'x' after 'rollback'/, @sh.execute('rollback x'))
+  end
+
+  def test_commit_takes_only_check_or_a_comment
+    run_lines('configure', 'set routing-options router-id 1.1.1.1')
+    assert_match(/error: syntax error, unknown 'chekc' after 'commit'/, @sh.execute('commit chekc'))
+    assert_match(/error: syntax error, unknown 'extra'/, @sh.execute('commit check extra'))
+    assert @daemon.candidate_changed?, 'nothing was committed'
+    assert_match(/commit complete\z/, @sh.execute('commit comment two words | here'))
+    assert_equal 'two words', @daemon.commit_history.first[:comment], 'a pipe after a comment is cut off'
+  end
+
+  def test_bad_input_never_crashes_the_shell
+    configured
+    ['show ospf log | last -1', 'show ospf log | last 99999999999999999999', 'show ospf log | last x',
+     'show ospf neighbor |', 'show ospf neighbor | | count', '"', 'show "ospf', '| count'].each do |line|
+      out = @sh.execute(line)
+      assert_match(/\Aerror: /, out, line)
+    end
+    assert_equal 3, @sh.execute('show ospf log | last 3').lines.size
+  end
+
+  def test_pipes_inside_quotes_are_text
+    @sh.execute('configure')
+    assert_equal '', @sh.execute('set protocols ospf area 0 interface eth1 authentication simple-password "a|b"')
+    assert_match(/simple-password "<hidden>"/, @sh.execute('show | display set'))
+  end
+
+  def test_run_takes_operational_commands_only
+    @sh.execute('configure')
+    assert_match(/error: run takes show and clear commands/, @sh.execute('run exit'))
+    assert_match(/error: run takes show and clear commands/, @sh.execute('run configure'))
+    assert_equal :configure, @sh.mode
+    assert_match(/not configured/, @sh.execute('run show ospf overview'))
+  end
+
+  def test_junos_and_ios_show_commands
+    configured
+    nbr = @sh.execute('show ospf neighbor')
+    assert_match(/\AAddress\s+Interface\s+State\s+ID\s+Pri\s+Dead\n10\.0\.0\.2\s+eth1\s+Full\s+2\.2\.2\.2\s+1\s+\d+\z/, nbr)
+    ios = @sh.execute('show ip ospf neighbor')
+    assert_match(/\ANeighbor ID\s+Pri\s+State\s+Dead Time\s+Address\s+Interface\n2\.2\.2\.2\s+1\s+FULL\/DR\s+00:00:\d\d\s+10\.0\.0\.2\s+eth1\z/, ios)
+    assert_equal ios, @sh.execute('sh ip os nei'), 'unique prefixes work'
+    assert_match(/eth1\s+BDR\s+0\.0\.0\.0\s+2\.2\.2\.2\s+1\.1\.1\.1\s+1/, @sh.execute('show ospf interface'))
+    assert_match(/eth1\s+1\s+0\s+10\.0\.0\.1\/24\s+10\s+BDR\s+1\/1/, @sh.execute('show ip ospf interface brief'))
+    assert_match(/Designated Router \(ID\) 2\.2\.2\.2, Interface address 10\.0\.0\.2/, @sh.execute('show ip ospf interface'))
+    db = @sh.execute('show ospf database')
+    assert_match(/OSPF database, Area 0\.0\.0\.0/, db)
+    assert_match(/^Router  \*1\.1\.1\.1\s+1\.1\.1\.1\s+0x8000000\d/, db)
+    assert_match(/^Network  10\.0\.0\.2\s+2\.2\.2\.2/, db)
+    assert_match(/Router Link States \(Area 0\).*1\.1\.1\.1\s+1\.1\.1\.1\s+\d+\s+0x8000000\d 0x[0-9A-F]{6} 2/m,
+                 @sh.execute('show ip ospf database'))
+    assert_match(/attached router 1\.1\.1\.1/, @sh.execute('show ospf database network detail'))
+    assert_match(/Router ID: 1\.1\.1\.1/, @sh.execute('show ospf overview'))
+    assert_match(/Routing Process "ospf 1" with ID 1\.1\.1\.1/, @sh.execute('show ip ospf'))
+    assert_match(/hello\s+\d+\s+\d+/, @sh.execute('show ospf statistics'))
+    assert_match(/neighbor 2\.2\.2\.2@10\.0\.0\.2: loading -> full/, @sh.execute('show ospf log'))
+    assert_equal "1 neighbor cleared", @sh.execute('clear ospf neighbor 2.2.2.2')
+  end
+
+  def test_pipes
+    configured
+    assert_equal 'Count: 2 lines', @sh.execute('show ospf neighbor | count')
+    assert_equal 1, @sh.execute('show ospf database | match ^Router.*2\.2\.2\.2').lines.size
+    assert_no_match(/Network/, @sh.execute('show ospf database | except network'))
+    json = JSON.parse(@sh.execute('show ospf neighbor | display json'))
+    assert_equal 'full', json.first['state']
+    assert_equal json, JSON.parse(@sh.execute('show ospf neighbor | json'))
+    assert_match(/\Aset routing-options router-id 1\.1\.1\.1/, @sh.execute('show configuration | display set'))
+    assert_equal 2, @sh.execute('show ospf log | last 2').lines.size
+    assert_match(/error: unknown pipe 'frob'/, @sh.execute('show ospf neighbor | frob'))
+    assert_match(/error: bad pattern/, @sh.execute('show ospf neighbor | match ('))
+  end
+
+  def test_errors
+    assert_match(/error: incomplete command: show/, @sh.execute('show'))
+    assert_match(/error: syntax error, unknown 'neighbour'/, @sh.execute('show ospf neighbour'))
+    assert_match(/error: ambiguous 'c' : |error: ambiguous 'c': clear, configure/, @sh.execute('c'))
+    assert_match(/not configured/, @sh.execute('show ospf overview'))
+  end
+
+  def test_question_mark_help
+    help = @sh.execute('show ospf ?')
+    assert_match(/\APossible completions:\n  neighbor\s+Neighbors\n/, help)
+    assert_match(/  ospf\s+OSPF process/, @sh.execute('show ip o?'))
+    assert_match(/<cr>/, @sh.execute('show ospf neighbor ?'))
+    @sh.execute('configure')
+    assert_match(/  routing-options\s+Protocol-independent/, @sh.execute('set ?'))
+    assert_match(/  md5\s+Keyed MD5/, @sh.execute('set protocols ospf area 0 interface eth1 authentication ?'))
+    assert_match(/<1\.\.65535>/, @sh.execute('set protocols ospf area 0 interface eth1 metric ?'))
+    assert_match(/<area-id>/, @sh.execute('set protocols ospf area ?'))
+  end
+
+  def test_tab_completion
+    assert_equal ['neighbor'], @sh.completions('show ospf ', 'ne')
+    assert_equal %w[ospf], @sh.completions('sh ', 'o')
+    assert_equal %w[clear configure], @sh.completions('', 'c')
+    @sh.execute('configure')
+    assert_equal ['passive'], @sh.completions('set protocols ospf area 0 interface eth1 ', 'pa')
+    assert_equal ['protocols'], @sh.completions('set ', 'pro')
+    assert_equal %w[commit compare], @sh.completions('', 'com').sort
+  end
+
+  def test_reads_commands_from_a_pipe
+    configured
+    out = StringIO.new
+    @sh.interactive(input: StringIO.new("show ospf neighbor | count\nexit\nshow ospf overview\n"), output: out)
+    assert_equal "Count: 2 lines\n", out.string, 'stops at exit'
+  end
+end

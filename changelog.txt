@@ -28,6 +28,17 @@
   digests shrink the room for LSAs so packets still fit the MTU
 * Interop tests against FRRouting ospfd in network namespaces, with and
   without authentication (OSPFV2_FRR=1, run as root; a CI job runs them)
+* ospfd: runs the core from a configuration file, answers a JSON
+  management API on a Unix socket, reloads on SIGHUP
+* Junos-style configuration (OSPFv2::Config): set and delete statements
+  with unique-prefix abbreviations, curly and set displays, hidden
+  secrets, shared candidate, commit, commit check, compare, rollback 1..9.
+  Metric and authentication changes apply without restarting the
+  interface; interfaces missing on the host wait until they appear
+* ospf-cli: Junos and IOS forms of show ospf neighbor, interface,
+  database, overview, log and statistics, clear ospf neighbor, pipes
+  (match, except, count, last, display json, display set), ? help and
+  Tab completion, one-shot mode with -c
 
 === 0.1.0 2026-10-24
 

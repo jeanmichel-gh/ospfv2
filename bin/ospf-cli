@@ -1,0 +1,47 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# ospf-cli: the command line for ospfd, with Junos and IOS command forms.
+#
+#   ospf-cli                                   interactive
+#   ospf-cli -c 'show ospf neighbor'           one command, then exit
+#   ospf-cli < commands.txt                    commands from a file
+
+$LOAD_PATH.unshift File.expand_path('../lib', __dir__)
+require 'optparse'
+require 'socket'
+require 'ospfv2/command_line/shell'
+
+$stdout.sync = true
+
+socket = ENV.fetch('OSPFV2_SOCKET', OSPFv2::CommandLine::Client::DEFAULT_SOCKET)
+commands = []
+OptionParser.new do |o|
+  o.banner = 'Usage: ospf-cli [options]'
+  o.on('-s', '--socket PATH', "ospfd management socket (default #{socket})") { |v| socket = v }
+  o.on('-c', '--command CMD', 'Run CMD and exit; repeat for several') { |v| commands << v }
+  o.on('-h', '--help', 'This help') do
+    puts o
+    exit
+  end
+end.parse!
+
+client = OSPFv2::CommandLine::Client.new(socket)
+shell = OSPFv2::CommandLine::Shell.new(client, hostname: Socket.gethostname.split('.').first)
+
+status = 0
+if commands.empty?
+  begin
+    shell.interactive
+  rescue Interrupt
+    puts
+  end
+else
+  commands.each do |cmd|
+    out = shell.execute(cmd)
+    puts out unless out.empty?
+    status = 1 if out.start_with?('error:')
+  end
+end
+client.close
+exit status

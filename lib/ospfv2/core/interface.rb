@@ -78,6 +78,15 @@ module OSPFv2
         @auth = Auth.build(spec, clock: clock, sequence: @auth_sequence)
       end
 
+      # Changes the cost without touching adjacencies; the router-LSA is
+      # originated again.
+      def cost=(value)
+        raise ArgumentError, 'cost must be 1..65535' unless value.is_a?(Integer) && value.between?(1, 65_535)
+        return if value == @cost
+        @cost = value
+        @area.schedule_origination if up?
+      end
+
       # Largest packet body that fits the MTU with our authentication.
       def max_body = Wire.max_body(@mtu, @auth.trailer_size)
       def broadcast? = @type == :broadcast

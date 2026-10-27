@@ -1,0 +1,87 @@
+#!/usr/bin/env ruby
+# frozen_string_literal: true
+
+# ospfd: the OSPFv2 router daemon. See ospf-cli to talk to it.
+
+$LOAD_PATH.unshift File.expand_path('../lib', __dir__)
+require 'optparse'
+require 'ospfv2/version'
+require 'ospfv2/daemon'
+require 'ospfv2/daemon/api'
+
+$stdout.sync = true
+$stderr.sync = true
+
+opts = {
+  config: '/etc/ospfv2/ospfd.conf',
+  socket: ENV.fetch('OSPFV2_SOCKET', '/run/ospfv2/ospfd.sock'),
+  group: nil, log: '-', debug: false
+}
+OptionParser.new do |o|
+  o.banner = 'Usage: ospfd [options]'
+  o.separator ''
+  o.separator 'Runs OSPFv2 on the interfaces named in the configuration. Configure it with ospf-cli.'
+  o.separator ''
+  o.on('-f', '--config FILE', "Configuration file (default #{opts[:config]})") { |v| opts[:config] = v }
+  o.on('-s', '--socket PATH', "Management socket (default #{opts[:socket]})") { |v| opts[:socket] = v }
+  o.on('-g', '--group NAME', 'Group allowed to use the socket (default: root only)') { |v| opts[:group] = v }
+  o.on('-l', '--log FILE', 'Log file, - for stderr (default)') { |v| opts[:log] = v }
+  o.on('-d', '--debug', 'Log debug messages too') { opts[:debug] = true }
+  o.on('-v', '--version', 'Show the version') do
+    require 'ospfv2/version'
+    puts "ospfd #{OSPFv2::VERSION}"
+    exit
+  end
+  o.on('-h', '--help', 'This help') do
+    puts o
+    exit
+  end
+end.parse!
+
+out = opts[:log] == '-' ? $stderr : File.open(opts[:log], File::WRONLY | File::APPEND | File::CREAT, 0o640).tap { |f| f.sync = true }
+lock = Mutex.new
+logger = lambda do |level, msg|
+  next if level == :debug && !opts[:debug]
+  lock.synchronize { out.puts "#{Time.now.utc.strftime('%FT%TZ')} #{level.to_s.ljust(5)} #{msg}" }
+end
+
+daemon = OSPFv2::Daemon.new(config_path: opts[:config], logger: logger)
+api = OSPFv2::Daemon::Api.new(daemon, path: opts[:socket], group: opts[:group], logger: logger)
+
+begin
+  daemon.start
+  api.start
+rescue SystemCallError, OSPFv2::PermissionError, OSPFv2::Daemon::Api::InUse, ArgumentError => e
+  warn "ospfd: #{e.message}"
+  exit 1
+end
+logger.call(:info, "ospfd #{OSPFv2::VERSION} up, config #{opts[:config]}, socket #{opts[:socket]}")
+
+signals = Queue.new
+%w[TERM INT HUP].each { |sig| trap(sig) { signals << sig } }
+
+loop do
+  case signals.pop
+  when 'HUP'
+    # Reload: the file replaces the candidate, then commit. Not over
+    # someone's uncommitted changes, and never fatal.
+    begin
+      if daemon.candidate_changed?
+        logger.call(:error, 'reload skipped: the candidate has uncommitted changes; commit or discard them first')
+        next
+      end
+      daemon.load_override(File.exist?(opts[:config]) ? File.read(opts[:config]) : '')
+      r = daemon.commit(save: false, comment: 'SIGHUP reload')
+      logger.call(r[:ok] ? :info : :error, r[:ok] ? 'configuration reloaded' : "reload failed: #{r[:errors].join('; ')}")
+    rescue OSPFv2::Config::Error => e
+      logger.call(:error, "reload failed: #{OSPFv2::Config::Tree.hide_secrets(e.message)}")
+    rescue StandardError => e
+      logger.call(:error, "reload failed: #{e.class}: #{e.message}")
+    end
+  else
+    logger.call(:info, 'stopping')
+    api.stop
+    daemon.stop
+    exit 0
+  end
+end
