@@ -1,3 +1,13 @@
+=== Unreleased
+
+* Event loop for the router core: one thread owns protocol state, other
+  threads use #post and #call (OSPFv2::EventLoop)
+* Timer scheduler on a binary heap, with restartable one shot timers and
+  drift-free periodic timers with optional jitter (OSPFv2::Scheduler)
+* Real and fake clocks. With Clock::Fake, tests run hours of protocol
+  time in milliseconds and repeat exactly (OSPFv2::Clock)
+* The simulator still uses the thread-per-timer OSPFv2::Timer for now
+
 === 0.1.0 2026-10-24
 
 * Runs on Ruby 3.1+ (Fixnum, missing opaque.rb, IE method_missing, sprintf ages)

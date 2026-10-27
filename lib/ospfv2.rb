@@ -11,6 +11,7 @@
 require_relative 'ospfv2/version'
 require_relative 'ospfv2/infra/ospf_common'
 require_relative 'ospfv2/infra/ospf_constants'
+require_relative 'ospfv2/infra/event_loop'
 require_relative 'ospfv2/lsa/lsa_factory'
 require_relative 'ospfv2/packet/packets'
 require_relative 'ospfv2/ls_db/link_state_database'
