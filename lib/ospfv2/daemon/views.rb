@@ -27,6 +27,7 @@ module OSPFv2
             end,
             neighbors: { total: r.neighbors.size, full: states.fetch(:full, 0) },
             external_lsas: r.as_lsdb.size,
+            spf: { runs: r.spf.runs, last_ago: r.spf_log.last && ago(r.spf_log.last.time), routes: r.routes.size },
             lsa_originated: r.stats[:lsa_originated], lsa_installed: r.stats[:lsa_installed]
           )
         end
@@ -65,6 +66,35 @@ module OSPFv2
         end
       end
 
+      # The routing table: network routes and the ABRs and ASBRs used to
+      # reach the rest.
+      def routes
+        on_loop do |r|
+          next { routes: [], routers: [] } unless r
+          t = r.route_table
+          { routes: t.routes.values.sort_by { |x| [x.prefix, x.prefix_len] }.map { |x| route(x) },
+            routers: t.routers.values.sort_by { |x| [x.prefix, x.area || 0] }.map do |x|
+              route(x).merge(router_id: Core::Addr.to_s(x.prefix), abr: x.tag[:abr], asbr: x.tag[:asbr])
+            end }
+        end
+      end
+
+      # SPF state and the last runs, newest last.
+      def spf(count = 100)
+        on_loop do |r|
+          next { configured: false } unless r
+          s = r.spf
+          { configured: true, state: s.state, runs: s.runs, routes: r.routes.size,
+            next_run_in: s.next_run_in&.round(3),
+            settings: s.settings.transform_values { |v| (v * 1000).round },
+            log: r.spf_log.last(count).map do |x|
+              { time: x.time.utc.iso8601, ago: ago(x.time), duration_ms: (x.duration * 1000).round(3),
+                routes: x.routes, added: x.diff.added.size, changed: x.diff.changed.size,
+                removed: x.diff.removed.size, reasons: x.reasons.map { |y| { kind: y.kind, detail: y.detail } } }
+            end }
+        end
+      end
+
       # Recent events, debug ones left out.
       def log(count = 100)
         on_loop do |r|
@@ -84,6 +114,15 @@ module OSPFv2
 
       def on_loop(&block)
         @daemon.loop.call { block.call(@daemon.instance) }
+      end
+
+      def ago(time) = (@daemon.loop.clock.wall - time).floor
+
+      def route(x)
+        { prefix: x.dest_s, path_type: x.path_type, cost: x.cost, type2_cost: x.type2_cost, area: x.area_s,
+          next_hops: x.next_hops.map { |h| { interface: h.interface, gateway: h.gateway && Core::Addr.to_s(h.gateway) } },
+          advr: x.advr && Core::Addr.to_s(x.advr), tag: x.tag.is_a?(Integer) ? x.tag : nil,
+          forwarding: x.forwarding && Core::Addr.to_s(x.forwarding) }
       end
 
       def uptime

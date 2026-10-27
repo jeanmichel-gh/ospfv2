@@ -91,12 +91,12 @@ class TestCommandLineShell < Test::Unit::TestCase
 
   def test_bad_input_never_crashes_the_shell
     configured
-    ['show ospf log | last -1', 'show ospf log | last 99999999999999999999', 'show ospf log | last x',
+    ['show ospf events | last -1', 'show ospf events | last 99999999999999999999', 'show ospf events | last x',
      'show ospf neighbor |', 'show ospf neighbor | | count', '"', 'show "ospf', '| count'].each do |line|
       out = @sh.execute(line)
       assert_match(/\Aerror: /, out, line)
     end
-    assert_equal 3, @sh.execute('show ospf log | last 3').lines.size
+    assert_equal 3, @sh.execute('show ospf events | last 3').lines.size
   end
 
   def test_pipes_inside_quotes_are_text
@@ -133,8 +133,38 @@ class TestCommandLineShell < Test::Unit::TestCase
     assert_match(/Router ID: 1\.1\.1\.1/, @sh.execute('show ospf overview'))
     assert_match(/Routing Process "ospf 1" with ID 1\.1\.1\.1/, @sh.execute('show ip ospf'))
     assert_match(/hello\s+\d+\s+\d+/, @sh.execute('show ospf statistics'))
-    assert_match(/neighbor 2\.2\.2\.2@10\.0\.0\.2: loading -> full/, @sh.execute('show ospf log'))
+    assert_match(/neighbor 2\.2\.2\.2@10\.0\.0\.2: loading -> full/, @sh.execute('show ospf events'))
+    assert_match(/hello\s+\d+\s+\d+/, @sh.execute('show ip ospf traffic'))
     assert_equal "1 neighbor cleared", @sh.execute('clear ospf neighbor 2.2.2.2')
+  end
+
+  def test_routes_and_spf
+    @peer.add_interface(name: 'lo', address: '2.2.2.2/32', passive: true)
+    configured
+    @loop.run_until(30) { @daemon.instance.routes.size == 3 && !@daemon.instance.spf.pending? }
+    junos = @sh.execute('show ospf route')
+    assert_match(/^Topology default Route Table:/, junos)
+    assert_match(%r{^2\.2\.2\.2/32\s+Intra\s+Network\s+IP\s+20 eth1\s+10\.0\.0\.2$}, junos)
+    assert_match(%r{^10\.0\.0\.0/24\s+Intra\s+Network\s+IP\s+10 eth1$}, junos)
+    assert_match(/area 0\.0\.0\.0, origin 2\.2\.2\.2/, @sh.execute('show ospf route detail'))
+    frr = @sh.execute('show ip ospf route')
+    assert_match(%r{^N    2\.2\.2\.2/32\s+\[20\] area: 0\.0\.0\.0\n\s+via 10\.0\.0\.2, eth1$}, frr)
+    assert_match(%r{^N    10\.0\.0\.0/24\s+\[10\] area: 0\.0\.0\.0\n\s+directly attached to eth1$}, frr)
+    rib = @sh.execute('show ip route ospf')
+    assert_match(%r{^O        2\.2\.2\.2/32 \[110/20\] via 10\.0\.0\.2, eth1$}, rib)
+    assert_no_match(/10\.0\.0\.0/, rib, 'connected networks are not OSPF routes')
+    assert_equal rib, @sh.execute('sh ip ro os')
+    log = @sh.execute('show ospf log')
+    assert_match(/^SPF runs: [1-9]\d*, state: (short|long) wait/, log)
+    assert_match(/initial 50 ms, short 200 ms, long 2000 ms, learn 1000 ms, holddown 10000 ms/, log)
+    assert_match(/\+\d+ ~\d+ -\d+\s+.*router 2\.2\.2\.2/, log)
+    stats = @sh.execute('show ip ospf statistics')
+    assert_match(/SPF algorithm executed [1-9]\d* times/, stats)
+    assert_match(/^00:00:0\d\s+\d+\s+\d+\s+\+\d+ ~\d+ -\d+\s+.*\bR\b/, stats)
+    assert_match(/SPF: [1-9]\d* runs, last 00:00:0\d ago, 3 routes/, @sh.execute('show ospf overview'))
+    assert_match(/SPF algorithm executed/, @sh.execute('show ip ospf'))
+    json = JSON.parse(@sh.execute('show ospf route | display json'))
+    assert_equal '2.2.2.2/32', json['routes'].find { |r| r['advr'] == '2.2.2.2' && r['prefix'].end_with?('/32') }['prefix']
   end
 
   def test_pipes
@@ -146,7 +176,7 @@ class TestCommandLineShell < Test::Unit::TestCase
     assert_equal 'full', json.first['state']
     assert_equal json, JSON.parse(@sh.execute('show ospf neighbor | json'))
     assert_match(/\Aset routing-options router-id 1\.1\.1\.1/, @sh.execute('show configuration | display set'))
-    assert_equal 2, @sh.execute('show ospf log | last 2').lines.size
+    assert_equal 2, @sh.execute('show ospf events | last 2').lines.size
     assert_match(/error: unknown pipe 'frob'/, @sh.execute('show ospf neighbor | frob'))
     assert_match(/error: bad pattern/, @sh.execute('show ospf neighbor | match ('))
   end

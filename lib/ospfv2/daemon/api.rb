@@ -29,6 +29,8 @@ module OSPFv2
         'show.database' => ->(d, p) { d.views.database(detail: p['detail'] == true) },
         'show.log' => ->(d, p) { d.views.log((p['count'] || 100).to_i.clamp(1, 2000)) },
         'show.statistics' => ->(d, _) { d.views.statistics },
+        'show.routes' => ->(d, _) { d.views.routes },
+        'show.spf' => ->(d, p) { d.views.spf((p['count'] || 100).to_i.clamp(1, 100)) },
         'show.configuration' => lambda do |d, p|
           d.show_configuration(candidate: p['candidate'] == true, format: p['format'] == 'set' ? :set : :curly)
         end,

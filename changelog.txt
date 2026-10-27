@@ -39,6 +39,24 @@
   database, overview, log and statistics, clear ospf neighbor, pipes
   (match, except, count, last, display json, display set), ? help and
   Tab completion, one-shot mode with -c
+* Routing table calculation (OSPFv2::Core::Spf, RFC 2328 16): intra-area
+  Dijkstra with the two-way check, next hops on LANs and point-to-point
+  links, equal-cost multipath (16 paths), inter-area routes through ABRs,
+  AS external routes type 1 and 2 with forwarding addresses and ASBRs
+  found through type 4 summaries. A 1,024-router grid takes about 40 ms
+* SPF back-off per RFC 8405 (OSPFv2::Core::SpfScheduler): initial 50 ms,
+  short 200 ms, long 2 s, time to learn 1 s, holddown 10 s. Runs when an
+  LSA's contents change, an LSA reaches MaxAge, or an interface or
+  adjacency comes or goes
+* The router keeps its routing table and tells listeners what changed
+  (Instance#routes, #on_route_change); the last 100 SPF runs are kept
+* ospf-cli: show ospf route [detail], show ip ospf route, show ip route
+  ospf; show ospf log and show ip ospf statistics now show SPF runs;
+  protocol events moved to show ospf events, packet counters on IOS to
+  show ip ospf traffic
+* Interop test: on a four-router FRR topology (ECMP, an ABR, type 1 and
+  type 2 externals), SPF over our database gives FRR's own table
+  exactly, before and after a metric change and a withdrawn external
 
 === 0.1.0 2026-10-24
 

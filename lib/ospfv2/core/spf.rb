@@ -76,7 +76,23 @@ module OSPFv2
         end
       end
 
-      Table = Struct.new(:routes, :routers, :stats, keyword_init: true)
+      Table = Struct.new(:routes, :routers, :stats, keyword_init: true) do
+        def self.empty = new(routes: {}, routers: {}, stats: { vertices: 0, areas: 0, skipped: [] })
+      end
+
+      # What changed between two route tables: Routes added and removed,
+      # and [old, new] pairs for routes that changed.
+      Diff = Struct.new(:added, :changed, :removed) do
+        def empty? = added.empty? && changed.empty? && removed.empty?
+        def to_s = "+#{added.size} ~#{changed.size} -#{removed.size}"
+      end
+
+      def self.diff(old, new)
+        added = new.reject { |k, _| old.key?(k) }.values
+        removed = old.reject { |k, _| new.key?(k) }.values
+        changed = new.filter_map { |k, r| (o = old[k]) && !r.same_as?(o) ? [o, r] : nil }
+        Diff.new(added, changed, removed)
+      end
 
       # Runs the whole calculation. +max_paths+ caps equal-cost next hops.
       def self.run(router_id:, areas:, externals: [], max_paths: 16)

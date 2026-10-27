@@ -29,7 +29,11 @@ module OSPFv2
           show ospf interface         show ip ospf interface brief
           show ospf database          show ip ospf database router
           show ospf overview          show ip ospf
-          show ospf log               show configuration
+          show ospf route             show ip ospf route          show ip route ospf
+          show ospf log (SPF runs)    show ip ospf statistics
+          show ospf events            show ip ospf events
+          show ospf statistics        show ip ospf traffic
+          show configuration
           clear ospf neighbor         clear ip ospf process
           configure                   (then set, delete, show, compare, commit, rollback, exit)
         Type ? at the end of a line for the options there, Tab to complete.
@@ -168,7 +172,7 @@ module OSPFv2
       end
 
       def needs_router_id?(a)
-        a[:style] == :ios && %i[interfaces database].include?(a[:view])
+        a[:style] == :ios && %i[interfaces database spf].include?(a[:view])
       end
 
       # ---- configuration mode ----

@@ -10,8 +10,8 @@ It targets Ruby 3.1 and later (CI covers 3.2 to 4.0), uses the standard library 
 and ships as a Docker image.
 
 A second mode is on its way: `ospfd`, an OSPFv2 router you configure and query with
-`ospf-cli` in Junos or IOS terms. It forms adjacencies, floods and authenticates today.
-Route computation (SPF) and installing routes in Linux come next. See
+`ospf-cli` in Junos or IOS terms. It forms adjacencies, floods, authenticates and
+computes routes today. Installing those routes in Linux comes next. See
 [Router mode](#router-mode-ospfd-and-ospf-cli).
 
 ## Quick start
@@ -144,10 +144,12 @@ simulator through your browser.
 
 ## Router mode: ospfd and ospf-cli
 
-`ospfd` runs OSPFv2 on the host's interfaces. It does not compute routes yet: SPF and
-the Linux route table come next. Today it forms adjacencies
+`ospfd` runs OSPFv2 on the host's interfaces. It forms adjacencies
 (broadcast with DR/BDR election, point-to-point, passive), keeps the database in sync,
-originates router and network LSAs, and authenticates packets.
+originates router and network LSAs, authenticates packets, and computes the routing
+table: intra-area, inter-area and external type 1 and 2 routes, with equal-cost
+multipath. SPF runs with the RFC 8405 back-off (50 ms after a quiet spell, slower while
+the network keeps changing). It does not install routes in Linux yet; that comes next.
 
 ```sh
 sudo bin/ospfd -f /etc/ospfv2/ospfd.conf      # foreground; -l FILE to log to a file
@@ -210,8 +212,10 @@ Junos forms print Junos style, IOS forms print IOS style.
 | `show ospf interface [detail]` | `show ip ospf interface [brief]` |
 | `show ospf database [router\|network\|netsummary\|asbrsummary\|external] [detail]` | `show ip ospf database [router\|network\|summary\|asbr-summary\|external]` |
 | `show ospf overview` | `show ip ospf` |
-| `show ospf log` | `show ip ospf events` |
-| `show ospf statistics` | `show ip ospf statistics` |
+| `show ospf route [detail]` | `show ip ospf route` (FRR style), `show ip route ospf` |
+| `show ospf log` (SPF runs) | `show ip ospf statistics` (SPF runs) |
+| `show ospf events` | `show ip ospf events` |
+| `show ospf statistics` (packets) | `show ip ospf traffic` |
 | `clear ospf neighbor [ROUTER-ID]` | `clear ip ospf process` |
 | `show configuration` | |
 

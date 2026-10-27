@@ -136,8 +136,12 @@ module OSPFv2
                 end
               end
             end
+            cmd 'route', 'OSPF routing table', action: { view: :routes, style: :junos } do
+              cmd 'detail', 'With area, origin and tag', action: { view: :routes, style: :junos, detail: true }
+            end
             cmd 'overview', 'Router id, areas, counts', action: { view: :overview, style: :junos }
-            cmd 'log', 'Recent protocol events', action: { view: :log, style: :junos }
+            cmd 'log', 'SPF runs: when, why, how long', action: { view: :spf, style: :junos }
+            cmd 'events', 'Recent protocol events', action: { view: :log, style: :junos }
             cmd 'statistics', 'Packet counters per interface', action: { view: :statistics, style: :junos }
           end
           cmd 'ip', 'IP information (IOS style)' do
@@ -153,8 +157,13 @@ module OSPFv2
                   cmd word, "#{word.capitalize} LSAs", action: { view: :database, style: :ios, type: type, detail: true }
                 end
               end
-              cmd 'statistics', 'Packet counters per interface', action: { view: :statistics, style: :ios }
+              cmd 'route', 'OSPF routing table', action: { view: :routes, style: :ios }
+              cmd 'statistics', 'SPF runs', action: { view: :spf, style: :ios }
+              cmd 'traffic', 'Packet counters per interface', action: { view: :statistics, style: :ios }
               cmd 'events', 'Recent protocol events', action: { view: :log, style: :ios }
+            end
+            cmd 'route', 'IP routing table' do
+              cmd 'ospf', 'Routes OSPF would install', action: { view: :routes, style: :ios_rib }
             end
           end
           cmd 'configuration', 'Running configuration', action: { view: :configuration }
