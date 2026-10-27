@@ -7,13 +7,15 @@ Gem::Specification.new do |spec|
   spec.version       = OSPFv2::VERSION
   spec.authors       = ['Jean-Michel Esnault']
   spec.email         = ['ospfv2@esnault.org']
-  spec.summary       = 'OSPFv2 neighbor and topology simulator written in Ruby.'
+  spec.summary       = 'OSPFv2 router and topology simulator written in Ruby.'
   spec.description   = <<~DESC
     Brings up an OSPFv2 adjacency with a router under test and floods a
     synthetic link state database behind it: grids of routers, stub
     networks, summary, ASBR summary, AS external and TE opaque LSAs.
     Topologies are described in YAML or Ruby and can be driven live
     from an interactive console or a small web dashboard.
+    ospfd is a full OSPFv2 router: areas, stub and NSSA, virtual links,
+    SPF, routes in the Linux kernel, configured in Junos style.
   DESC
   spec.homepage      = 'https://github.com/jeanmichel-gh/ospfv2'
   spec.license       = 'GPL-3.0-or-later'

@@ -9,7 +9,7 @@ LSAs, flap links and watch SPF, or check how a router handles summaries and exte
 It targets Ruby 3.1 and later (CI covers 3.2 to 4.0), uses the standard library only,
 and ships as a Docker image.
 
-A second mode is on its way: `ospfd`, an OSPFv2 router you configure and query with
+Since 1.0 it has a second mode: `ospfd`, an OSPFv2 router you configure and query with
 `ospf-cli` in Junos or IOS terms. It forms adjacencies, floods, authenticates,
 computes routes and installs them in the Linux routing table. See
 [Router mode](#router-mode-ospfd-and-ospf-cli).
