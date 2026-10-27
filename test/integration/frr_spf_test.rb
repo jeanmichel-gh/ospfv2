@@ -18,6 +18,10 @@ require 'ospfv2/core/spf'
 #   r2's table: same routes, types, costs and next hops (ECMP included).
 # * r1's own table must be r2's, one LAN hop further: every cost 10 more,
 #   every next hop r2.
+#
+# r1 also installs its routes in its namespace's kernel table: they must
+# match its table, carry pings across the topology, survive a crash and
+# restart, and leave on a clean stop.
 class TestFrrSpf < Test::Unit::TestCase
   include OSPFv2::Core
 
@@ -30,7 +34,7 @@ class TestFrrSpf < Test::Unit::TestCase
     ok, why = FrrLab.available?
     omit(why) unless ok
     @t = FrrTopology.new("spf#{Process.pid % 1000}")
-    @t.core('r1', '1.1.1.1')
+    @t.core('r1', '1.1.1.1', fib: true)
     @t.frr('r2', '2.2.2.2')
     @t.frr('r3', '3.3.3.3')
     @t.frr('r4', '4.4.4.4', loopback_area: 1, frr_extra: EXT, extra: ['redistribute connected route-map EXT'],
@@ -141,4 +145,53 @@ class TestFrrSpf < Test::Unit::TestCase
     assert_tables_agree(all - ['192.0.2.0/24'])
     refute core_routes.key?('192.0.2.0/24')
   end
+
+  # "ip route" lines r1's kernel should hold: its routes through a gateway.
+  def expected_kernel
+    core_routes.filter_map do |prefix, (_, _, _, hops)|
+      next if hops.any? { |_, gw| gw.nil? }
+      dest = prefix.end_with?('/32') ? prefix.delete_suffix('/32') : prefix
+      dest = 'default' if dest == '0.0.0.0/0'
+      raise "unexpected ECMP from r1: #{hops}" unless hops.size == 1
+      "#{dest} via #{hops[0][1]} dev #{hops[0][0]} metric 20"
+    end.sort
+  end
+
+  def ping(dest)
+    @t.run_in('r1', 'ping', '-c', '1', '-W', '1', '-I', '1.1.1.1', dest).last
+  end
+
+  def test_routes_reach_the_kernel_and_carry_traffic
+    all = %w[3.3.3.3/32 4.4.4.4/32 10.0.34.0/24 192.0.2.0/24 198.51.100.0/24]
+    assert_tables_agree(all)
+    assert @t.wait_for(15) { @t.kernel_routes('r1') == expected_kernel },
+           "kernel:\n#{@t.kernel_routes('r1').join("\n")}\nexpected:\n#{expected_kernel.join("\n")}"
+    assert_equal 8, expected_kernel.size
+    %w[4.4.4.4 192.0.2.1 198.51.100.1].each do |dest|
+      assert @t.wait_for(20) { ping(dest) }, "ping #{dest} from r1"
+    end
+
+    # A crash leaves the routes in the kernel; the restarted router keeps
+    # them while it learns the network again, so traffic it sends keeps
+    # its way out. (Traffic back to us still drops while the neighbors
+    # rebuild their adjacency with us: that takes graceful restart,
+    # RFC 3623, a later phase.)
+    before = @t.kernel_routes('r1')
+    @t.stop_core('r1', signal: 'KILL')
+    assert_equal before, @t.kernel_routes('r1')
+    @t.restart_core('r1')
+    assert @t.wait_for(10) { @t.core_state('r1').dig('fib', 'holding') == true }
+    assert_equal before, @t.kernel_routes('r1'), 'held while converging'
+    assert @t.wait_for(60) { @t.core_state('r1').dig('fib', 'holding') == false }
+    assert @t.wait_for(15) { @t.kernel_routes('r1') == expected_kernel }
+    assert_equal before, @t.kernel_routes('r1'), 'the same routes once converged'
+    assert @t.wait_for(20) { ping('4.4.4.4') }, 'forwarding again'
+    assert_match(/kept from before|keeping them until converged/, @t.core_log('r1'))
+
+    # A clean stop takes them out.
+    @t.stop_core('r1')
+    assert_empty @t.kernel_routes('r1')
+    refute ping('4.4.4.4')
+  end
 end
+

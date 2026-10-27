@@ -28,6 +28,7 @@ module OSPFv2
             neighbors: { total: r.neighbors.size, full: states.fetch(:full, 0) },
             external_lsas: r.as_lsdb.size,
             spf: { runs: r.spf.runs, last_ago: r.spf_log.last && ago(r.spf_log.last.time), routes: r.routes.size },
+            fib: fib_summary,
             lsa_originated: r.stats[:lsa_originated], lsa_installed: r.stats[:lsa_installed]
           )
         end
@@ -79,6 +80,27 @@ module OSPFv2
         end
       end
 
+      # Our routes in the kernel against what OSPF wants there. The kernel
+      # is read now, so drift shows.
+      def fib
+        on_loop do |r|
+          k = @daemon.kernel_settings
+          f = @daemon.fib
+          base = { configured: !r.nil?, install: k ? k[:install] : true, error: @daemon.fib_error,
+                   protocol: k&.dig(:protocol), table: k&.dig(:table), metric: k&.dig(:metric) }
+          next base.merge(routes: []) unless f && r
+          rib = r.routes
+          rows = f.status(fresh: true).map do |e|
+            x = rib[e.key[0, 2]]
+            { prefix: (e.want || e.have).dest_s, state: e.state, error: e.error, metric: e.key[2],
+              want: e.want && fib_hops(e.want), have: e.have && fib_hops(e.have),
+              path_type: x&.path_type, cost: x&.cost, type2_cost: x&.type2_cost }
+          end
+          base.merge(holding: f.holding?, repairs: f.repairs, last_reconcile: f.last_reconcile&.utc&.iso8601,
+                     routes: rows)
+        end
+      end
+
       # SPF state and the last runs, newest last.
       def spf(count = 100)
         on_loop do |r|
@@ -118,11 +140,22 @@ module OSPFv2
 
       def ago(time) = (@daemon.loop.clock.wall - time).floor
 
+      def fib_hops(route) = route.next_hops.map { |i, g| { interface: i, gateway: g && Core::Addr.to_s(g) } }
+
       def route(x)
         { prefix: x.dest_s, path_type: x.path_type, cost: x.cost, type2_cost: x.type2_cost, area: x.area_s,
           next_hops: x.next_hops.map { |h| { interface: h.interface, gateway: h.gateway && Core::Addr.to_s(h.gateway) } },
           advr: x.advr && Core::Addr.to_s(x.advr), tag: x.tag.is_a?(Integer) ? x.tag : nil,
           forwarding: x.forwarding && Core::Addr.to_s(x.forwarding) }
+      end
+
+      def fib_summary
+        k = @daemon.kernel_settings
+        return { install: false } if k && !k[:install]
+        return { install: true, error: @daemon.fib_error } unless @daemon.fib
+        states = @daemon.fib.status.map(&:state).tally
+        { install: true, installed: states.fetch(:installed, 0), failed: states.fetch(:failed, 0),
+          held: states.fetch(:held, 0), protocol: k[:protocol], table: k[:table] }
       end
 
       def uptime

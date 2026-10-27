@@ -55,6 +55,22 @@
   ospf; show ospf log and show ip ospf statistics now show SPF runs;
   protocol events moved to show ospf events, packet counters on IOS to
   show ip ospf traffic
+* Routes into the Linux kernel (OSPFv2::Fib): a manager that keeps the
+  kernel in line with the routing table, and a pure Ruby rtnetlink
+  backend. Routes through a gateway only, ECMP as one multipath route,
+  our own protocol id (89) so other routes are never touched, new routes
+  never overwrite another route at the same prefix and metric, replace
+  before delete, retries for refused routes, a 60 s reconcile that repairs
+  drift, withdraw on clean stop, routes kept across a crash until OSPF
+  has converged
+* routing-options kernel metric, protocol, table and no-install; ids other
+  daemons use are refused, and routes left under old settings are swept
+* ospf-cli: show route protocol ospf (Junos) and show ip route ospf (IOS)
+  show what is in the kernel and flag anything that differs; the
+  overview shows the kernel route count
+* Interop: on the FRR topology our routes reach the kernel, carry pings
+  across it, survive a crash and restart, and leave on a clean stop.
+  Netlink tests in a network namespace (run as root)
 * Interop test: on a four-router FRR topology (ECMP, an ABR, type 1 and
   type 2 externals), SPF over our database gives FRR's own table
   exactly, before and after a metric change and a withdrawn external

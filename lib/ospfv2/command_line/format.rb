@@ -18,11 +18,8 @@ module OSPFv2
         when :log then log(data)
         when :statistics then statistics(data)
         when :routes
-          case style
-          when :ios then ios_routes(data)
-          when :ios_rib then ios_rib(data)
-          else junos_routes(data, detail)
-          end
+          style == :ios ? ios_routes(data) : junos_routes(data, detail)
+        when :fib then style == :ios ? ios_fib(data) : junos_fib(data)
         when :spf then style == :ios ? ios_spf(data, router_id) : junos_spf(data)
         else data.to_s
         end
@@ -210,6 +207,7 @@ module OSPFv2
           out << "      Up (in full state): #{a['full_neighbors']}"
         end
         out << "  External LSAs: #{o['external_lsas']}"
+        out << "  Kernel: #{fib_summary(o['fib'])}"
         spf = o['spf'] || {}
         out << "  SPF: #{spf['runs'].to_i} runs#{spf['last_ago'] ? ", last #{duration(spf['last_ago'])} ago" : ''}, " \
                "#{spf['routes'].to_i} routes"
@@ -223,6 +221,7 @@ module OSPFv2
                " Time elapsed: #{clock(o['uptime'])}",
                " Number of external LSA #{o['external_lsas']}",
                " Number of areas in this router is #{o['areas'].size}"]
+        out << " Kernel routes: #{fib_summary(o['fib'])}"
         o['areas'].each do |a|
           name = a['area'] == '0.0.0.0' ? 'BACKBONE(0)' : "#{ios_area(a['area'])}"
           out << "    Area #{name}"
@@ -300,20 +299,90 @@ module OSPFv2
 
       IOS_CODES = { 'intra' => 'O', 'inter' => 'O IA', 'ext1' => 'O E1', 'ext2' => 'O E2' }.freeze
 
-      # "show ip route ospf": what OSPF puts in the routing table.
-      # Networks we are on stay connected routes and are left out.
-      def ios_rib(data)
-        out = ['Codes: O - OSPF, IA - OSPF inter area, E1 - OSPF external type 1, E2 - OSPF external type 2', '']
-        data['routes'].each do |r|
-          hops = r['next_hops']
-          next if hops.empty? || hops.any? { |h| h['gateway'].nil? }
-          metric = r['path_type'] == 'ext2' ? r['type2_cost'] : r['cost']
-          lead = format('%-8s %s ', IOS_CODES.fetch(r['path_type'], 'O'), r['prefix'])
-          hops.each_with_index do |h, i|
-            out << "#{i.zero? ? lead : ' ' * lead.size}[110/#{metric}] via #{h['gateway']}, #{h['interface']}"
+      # Why the kernel does not match, or nil when it does.
+      def fib_problem(r)
+        case r['state']
+        when 'failed' then "not installed: #{r['error']}"
+        when 'missing' then 'not in the kernel yet'
+        when 'different' then "the kernel has #{fib_hops_s(r['have'])}"
+        when 'extra' then 'in the kernel but OSPF no longer has it; the next sync removes it'
+        when 'held' then 'kept from before a restart until OSPF converges'
+        end
+      end
+
+      def fib_hops_s(hops) = hops.map { |h| "via #{h['gateway']} #{h['interface']}" }.join(', ')
+
+      def fib_off(f)
+        return 'OSPF is not configured' unless f['configured']
+        return 'OSPF routes are not installed (routing-options kernel no-install)' unless f['install']
+        return "OSPF routes are not installed: #{f['error']}" if f['error']
+        nil
+      end
+
+      def fib_metric(r) = r['path_type'] == 'ext2' ? r['type2_cost'] : r['cost']
+
+      # Junos "show route protocol ospf": what is in the kernel.
+      def junos_fib(f)
+        off = fib_off(f)
+        return off if off
+        rows = f['routes']
+        active = rows.count { |r| r['have'] }
+        name = f['table'] == 254 ? 'inet.0' : "table #{f['table']}"
+        dests = rows.map { |r| r['prefix'] }.uniq.size
+        out = ["#{name}: #{dests} destinations, #{rows.size} routes (#{active} active, 0 holddown, 0 hidden)",
+               '+ = Active Route, - = Last Active, * = Both', '']
+        rows.each do |r|
+          inkernel = !r['have'].nil?
+          pref = %w[ext1 ext2].include?(r['path_type']) ? 150 : 10
+          metric = fib_metric(r)
+          out << format('%-18s %s[OSPF/%d]%s%s', r['prefix'], inkernel ? '*' : ' ', pref, metric ? " metric #{metric}" : '',
+                        kernel_metric_note(f, r))
+          (r['have'] || r['want'] || []).each_with_index do |h, i|
+            out << format('%20s%s  to %s via %s', '', i.zero? && inkernel ? '>' : ' ', h['gateway'], h['interface'])
           end
+          problem = fib_problem(r)
+          out << "                    #{problem}" if problem
         end
         out.join("\n")
+      end
+
+      # IOS "show ip route ospf": what is in the kernel. Anything that does
+      # not match is listed after the table.
+      def ios_fib(f)
+        off = fib_off(f)
+        return "% #{off}" if off
+        out = ['Codes: O - OSPF, IA - OSPF inter area, E1 - OSPF external type 1, E2 - OSPF external type 2', '']
+        notes = []
+        f['routes'].each do |r|
+          problem = fib_problem(r)
+          notes << "% #{r['prefix']} #{problem}" if problem
+          hops = r['have'] or next
+          code = IOS_CODES.fetch(r['path_type'].to_s, 'O')
+          lead = format('%-8s %s ', code, r['prefix'])
+          metric = fib_metric(r) || '-'
+          hops.each_with_index do |h, i|
+            out << "#{i.zero? ? lead : ' ' * lead.size}[110/#{metric}] via #{h['gateway']}, #{h['interface']}" \
+                   "#{i.zero? ? kernel_metric_note(f, r) : ''}"
+          end
+        end
+        out << '' unless notes.empty?
+        (out + notes).join("\n")
+      end
+
+      # The kernel metric, when it is not the configured one (a metric
+      # change under way, routes held from before a restart).
+      def kernel_metric_note(f, r)
+        r['metric'] && r['metric'] != f['metric'] ? ", kernel metric #{r['metric']}" : ''
+      end
+
+      def fib_summary(k)
+        return 'unknown' unless k
+        return 'routes not installed (no-install)' unless k['install']
+        return "routes not installed: #{k['error']}" if k['error'] || k['installed'].nil?
+        s = "#{k['installed']} routes installed, protocol #{k['protocol']}, table #{k['table']}"
+        s += ", #{k['failed']} refused" if k['failed'].to_i.positive?
+        s += ", #{k['held']} held from before a restart" if k['held'].to_i.positive?
+        s
       end
 
       # ---- SPF ----

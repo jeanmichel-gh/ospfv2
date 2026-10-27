@@ -134,6 +134,11 @@ class FrrLab
 
   def socket_path = File.join(@dir, 'ospfd.sock')
 
+  # Our routes in the core namespace's kernel table.
+  def core_kernel_routes
+    `ip -n #{@core_ns} route show proto 89`.lines.map(&:strip).reject(&:empty?)
+  end
+
   def core_log
     File.read(File.join(@dir, 'core.log'))
   rescue Errno::ENOENT

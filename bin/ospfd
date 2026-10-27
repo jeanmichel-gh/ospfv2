@@ -45,7 +45,7 @@ logger = lambda do |level, msg|
   lock.synchronize { out.puts "#{Time.now.utc.strftime('%FT%TZ')} #{level.to_s.ljust(5)} #{msg}" }
 end
 
-daemon = OSPFv2::Daemon.new(config_path: opts[:config], logger: logger)
+daemon = OSPFv2::Daemon.new(config_path: opts[:config], logger: logger, fib: OSPFv2::Daemon::NETLINK_FIB)
 api = OSPFv2::Daemon::Api.new(daemon, path: opts[:socket], group: opts[:group], logger: logger)
 
 begin

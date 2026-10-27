@@ -29,6 +29,9 @@ RUN ruby -Ilib -Itest -e 'Dir["test/unit/**/*_test.rb"].sort.each { |f| require 
 # ---- runtime
 FROM base AS runtime
 # Raw IP sockets need CAP_NET_RAW, granted at run time (--cap-add NET_RAW).
+# ospfd installing routes also needs NET_ADMIN. The name makes iproute2
+# print our routes as "proto ospfv2".
+RUN mkdir -p /etc/iproute2/rt_protos.d && echo '89 ospfv2' > /etc/iproute2/rt_protos.d/ospfv2.conf
 EXPOSE 8080
 WORKDIR /work
 ENTRYPOINT ["ospfv2"]

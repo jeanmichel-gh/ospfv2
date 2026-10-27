@@ -3,6 +3,7 @@
 require 'fileutils'
 require_relative 'core'
 require_relative 'config/model'
+require_relative 'fib'
 require_relative 'daemon/system'
 require_relative 'daemon/views'
 
@@ -24,16 +25,31 @@ module OSPFv2
     RECHECK = 5          # seconds between checks of the host interfaces
     APPLY_TIMEOUT = 120  # seconds a commit waits for the router to take it
 
-    attr_reader :loop, :running, :candidate, :instance, :started_at, :broken_file
+    attr_reader :loop, :running, :candidate, :instance, :started_at, :broken_file, :fib, :fib_error
+
+    # In-memory kernel table: what a Daemon installs into unless told
+    # otherwise, so tests and embedding never touch the host. bin/ospfd
+    # passes NETLINK.
+    MEMORY_FIB = ->(protocol:, table:) { Fib::Memory.new }
+    NETLINK_FIB = lambda do |protocol:, table:|
+      require_relative 'fib/netlink'
+      Fib::Netlink.new(protocol: protocol, table: table)
+    end
 
     # transport: ->(ifname, ip) { a Transport } for each non-passive interface
+    # fib:       ->(protocol:, table:) { a Fib backend }
     def initialize(config_path:, loop: nil, system: System.new, logger: nil,
-                   transport: ->(ifname, ip) { Transport::RawSocket.new(ip, interface: ifname) })
+                   transport: ->(ifname, ip) { Transport::RawSocket.new(ip, interface: ifname) },
+                   fib: MEMORY_FIB)
       @config_path = config_path
       @loop = loop || EventLoop.new
       @system = system
       @logger = logger
       @transport = transport
+      @fib_factory = fib
+      @fib = nil
+      @fib_error = nil
+      @kernel = nil
       @running = Config::Tree.new
       @candidate = Config::Tree.new
       @model = nil
@@ -70,7 +86,8 @@ module OSPFv2
     def stop
       @loop.call do
         @recheck&.cancel
-        @instance&.stop
+        @instance&.stop # its routes leave the kernel with it
+        stop_fib
       end
       @loop.stop if @loop.running?
       self
@@ -202,6 +219,7 @@ module OSPFv2
     # Logs to the logger and to the router's event list (show ospf log).
     def log(level, message)
       @logger&.call(level, message)
+      return if level == :debug # logger only, as Instance#log
       record = -> { @instance&.record(level, message) }
       @loop.on_loop_thread? || !@loop.running? ? record.call : @loop.post(&record)
     end
@@ -240,9 +258,92 @@ module OSPFv2
         @instance.start
         @applied = {}
         @pending = {}
+        @fib&.attach(@instance)
       end
+      apply_kernel(model.kernel)
       sync_interfaces
     end
+
+    # routing-options kernel: a new metric applies in place; a new table
+    # or protocol id withdraws our routes and installs them again there.
+    def apply_kernel(k)
+      unless k[:install]
+        log(:info, 'kernel route install off: routes withdrawn') if @fib
+        stop_fib
+        sweep_old_kernel_routes(nil)
+        @fib_error = nil
+        @kernel = k
+        return
+      end
+      if @fib && @kernel&.values_at(:protocol, :table) == k.values_at(:protocol, :table)
+        @fib.metric = k[:metric]
+      else
+        stop_fib
+        begin
+          backend = @fib_factory.call(protocol: k[:protocol], table: k[:table])
+        rescue StandardError => e
+          @fib_error = "cannot open the kernel routing table: #{e.message}"
+          log(:error, "#{@fib_error}; routes are computed, not installed")
+          @kernel = k
+          return
+        end
+        @fib_error = nil
+        sweep_old_kernel_routes(k)
+        @fib = Fib::Manager.new(loop: @loop, backend: backend, metric: k[:metric], logger: ->(l, m) { log(l, m) },
+                                settled: -> { @pending.empty? })
+        save_kernel_state(k)
+        @fib.attach(@instance)
+      end
+      @kernel = k
+    end
+
+    # Where the protocol id and table we last installed with are kept, so
+    # routes left by a crash are found even after they change.
+    def kernel_state_path = "#{@config_path}.kernel"
+
+    def save_kernel_state(k)
+      File.write(kernel_state_path, "#{k[:protocol]} #{k[:table]}\n")
+    rescue SystemCallError => e
+      log(:warn, "cannot save #{kernel_state_path}: #{e.message}")
+    end
+
+    # Routes left in the kernel under settings we no longer use (a crash,
+    # then a restart with another protocol id or table, or no-install)
+    # are removed. +k+ is what we use now, nil for nothing.
+    def sweep_old_kernel_routes(k)
+      return unless File.exist?(kernel_state_path)
+      protocol, table = File.read(kernel_state_path).split.map(&:to_i)
+      return if k && [protocol, table] == k.values_at(:protocol, :table)
+      unless protocol&.positive? && table&.positive?
+        File.delete(kernel_state_path)
+        return
+      end
+      backend = @fib_factory.call(protocol: protocol, table: table)
+      begin
+        old = backend.dump
+        old.each { |r| backend.delete(r) }
+        log(:info, "removed #{old.size} routes left under protocol #{protocol} table #{table}") unless old.empty?
+      ensure
+        backend.close
+      end
+      File.delete(kernel_state_path)
+    rescue StandardError => e
+      log(:warn, "cannot clean routes left under protocol #{protocol} table #{table}: #{e.message}")
+    end
+
+    def stop_fib
+      return unless @fib
+      @fib.detach
+      @fib.backend.close
+      @fib = nil
+    end
+
+    public
+
+    # Kernel route install settings and state, read on the loop.
+    def kernel_settings = @kernel
+
+    private
 
     # Brings the running interfaces in line with @desired and the host.
     def sync_interfaces
