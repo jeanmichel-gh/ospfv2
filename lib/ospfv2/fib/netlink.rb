@@ -8,14 +8,17 @@ module OSPFv2
     # The Linux kernel routing table over rtnetlink, in plain Ruby.
     #
     #   nl = Fib::Netlink.new(protocol: 89, table: 254)
-    #   nl.replace(Fib::Route.new(prefix, 24, [['eth1', gateway]], 20))
+    #   nl.add(Fib::Route.new(prefix, 24, [['eth1', gateway]], 20))
     #   nl.dump     # our routes: this protocol id, this table
     #   nl.delete(route)
     #
     # Our routes carry their own protocol id (rtm_protocol), 89 by default
     # (OSPF's IP protocol number, unused by other daemons: FRR's ospfd is
-    # 188), so we only ever see and touch our own. Equal-cost next hops go
-    # in as one multipath route. IPv4 only. Needs CAP_NET_ADMIN.
+    # 188), so we only ever see and touch our own. A new route goes in with
+    # NLM_F_EXCL, so it never overwrites someone else's route to the same
+    # prefix at the same metric; only a route already ours is replaced.
+    # Equal-cost next hops go in as one multipath route. IPv4 only. Needs
+    # CAP_NET_ADMIN.
     class Netlink
       AF_NETLINK = 16
       NETLINK_ROUTE = 0
@@ -30,6 +33,7 @@ module OSPFv2
       NLM_F_MULTI = 0x2
       NLM_F_ACK = 0x4
       NLM_F_REPLACE = 0x100
+      NLM_F_EXCL = 0x200
       NLM_F_CREATE = 0x400
       NLM_F_DUMP = 0x300
 
@@ -44,6 +48,7 @@ module OSPFv2
       RT_SCOPE_UNIVERSE = 0
 
       RECV = 1 << 16
+      LINKS_TTL = 30 # seconds the interface index map is trusted
 
       attr_reader :protocol, :table
 
@@ -55,16 +60,36 @@ module OSPFv2
         raise ArgumentError, "table #{table} out of range" unless table.between?(1, 0xffff_ffff)
         @protocol = protocol
         @table = table
-        @links = links || method(:host_links)
+        @links_source = links || method(:host_links)
+        @links_map = nil
+        @links_at = nil
         @seq = 0
         @lock = Mutex.new
         @sock = Socket.new(AF_NETLINK, Socket::SOCK_RAW, NETLINK_ROUTE)
-        @sock.setsockopt(Socket::SOL_SOCKET, Socket::SO_RCVBUF, 1 << 21)
-        @sock.bind([AF_NETLINK, 0, 0, 0].pack('SSLL'))
+        begin
+          @sock.setsockopt(Socket::SOL_SOCKET, Socket::SO_RCVBUF, 1 << 21)
+          @sock.bind([AF_NETLINK, 0, 0, 0].pack('SSLL'))
+        rescue StandardError
+          @sock.close
+          raise
+        end
       end
 
+      # A route new to us. Refused (Fib::Error) if the kernel already has a
+      # route to the prefix at this metric, whoever it belongs to.
+      def add(route)
+        request(RTM_NEWROUTE, NLM_F_CREATE | NLM_F_EXCL, encode(route, hops: true))
+      rescue Error => e
+        raise unless e.message.start_with?('File exists')
+        raise Error, "another route to #{route.dest_s} with metric #{route.metric} is in the kernel"
+      end
+
+      # A route that is ours already. If it has gone, it is added again.
       def replace(route)
-        request(RTM_NEWROUTE, NLM_F_CREATE | NLM_F_REPLACE, encode(route, hops: true))
+        request(RTM_NEWROUTE, NLM_F_REPLACE, encode(route, hops: true))
+      rescue Error => e
+        raise unless e.message.start_with?('No such file or directory')
+        add(route)
       end
 
       def delete(route)
@@ -75,7 +100,7 @@ module OSPFv2
 
       # Our routes in our table, as Fib::Routes.
       def dump
-        names = @links.call.invert
+        names = links(fresh: true).invert
         msgs = @lock.synchronize do
           seq = send_msg(RTM_GETROUTE, NLM_F_DUMP, rtmsg(0, 0, 0))
           collect(seq)
@@ -108,9 +133,8 @@ module OSPFv2
         body << attr(RTA_DST, [route.prefix].pack('N'))
         body << attr(RTA_PRIORITY, [route.metric].pack('L'))
         return body unless hops
-        links = @links.call
         index = lambda do |name|
-          links[name] || (links = @links.call)[name] || raise(Error, "no interface #{name}")
+          links[name] || links(fresh: true)[name] || raise(Error, "no interface #{name}")
         end
         if route.next_hops.size == 1
           ifname, gw = route.next_hops.first
@@ -218,8 +242,24 @@ module OSPFv2
         hops
       end
 
+      # Interface name => index, cached: one getifaddrs per route would be
+      # two netlink dumps per route.
+      def links(fresh: false)
+        now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        if fresh || @links_map.nil? || now - @links_at > LINKS_TTL
+          @links_map = @links_source.call
+          @links_at = now
+        end
+        @links_map
+      end
+
+      # Device names only: an address label such as eth1:vip shares its
+      # device's index and is not a device.
       def host_links
-        Socket.getifaddrs.each_with_object({}) { |ifa, h| h[ifa.name] = ifa.ifindex }
+        Socket.getifaddrs.each_with_object({}) do |ifa, h|
+          next if ifa.name.include?(':')
+          h[ifa.name] = ifa.ifindex
+        end
       end
     end
   end

@@ -17,20 +17,25 @@ module OSPFv2
     # a hole), deletes last.
     #
     # Startup: routes of ours already in the kernel (a restart) are kept
-    # until the router has converged, or +hold+ seconds at most, then the
-    # ones OSPF no longer wants go. A route the kernel refuses is retried
+    # until the router has converged (+settled+ says the host side is
+    # ready too), or +hold+ seconds at most, then the ones OSPF no longer
+    # wants go. A database exchange still running at that point extends
+    # the hold, up to twice +hold+. A route the kernel refuses is retried
     # every +retry+ seconds. Every +reconcile+ seconds the kernel is read
     # back and any drift repaired, with a log line per repair.
     class Manager
       DEFAULTS = { metric: 20, hold: 60, retry: 5, reconcile: 60 }.freeze
+      EXCHANGING = %i[exstart exchange loading].freeze
 
       # One row of #status.
       Entry = Struct.new(:key, :want, :have, :state, :error, keyword_init: true)
 
       attr_reader :backend, :metric, :failed, :repairs, :last_reconcile
 
-      def initialize(loop:, backend:, logger: nil, **opts)
+      # settled: ->() { true when nothing configured is still waiting to start }
+      def initialize(loop:, backend:, logger: nil, settled: -> { true }, **opts)
         o = DEFAULTS.merge(opts)
+        @settled = settled
         @loop = loop
         @backend = backend
         @logger = logger
@@ -51,14 +56,17 @@ module OSPFv2
       def attach(instance)
         detach if @instance
         @instance = instance
+        @detached = false
         @installed = read_kernel || {}
         unless @installed.empty?
           @holding = true
+          @hold_until = @loop.now + 2 * @hold_for
           log(:info, "kernel holds #{@installed.size} OSPF routes from before; keeping them until converged")
-          @hold_timer = @loop.after(@hold_for, :fib_hold) { end_hold('hold time is up') }
+          @hold_timer = @loop.after(@hold_for, :fib_hold) { hold_time_up }
           @hold_check = @loop.every(1, :fib_hold_check) { end_hold('converged') if converged? }
         end
-        instance.on_route_change { sync if @instance.equal?(instance) }
+        @listener = ->(_diff) { sync }
+        instance.on_route_change(&@listener)
         @retry_timer = @loop.timer(@retry_every, :fib_retry) { sync }
         @reconcile_timer = @loop.every(@reconcile_every, :fib_reconcile) { reconcile }
         sync
@@ -68,10 +76,17 @@ module OSPFv2
       # Withdraws every route we installed and stops following the router.
       def detach(withdraw: true)
         [@hold_timer, @hold_check, @retry_timer, @reconcile_timer].each { |t| t&.cancel }
+        @instance&.off_route_change(@listener)
         @instance = nil
+        @detached = true
         @holding = false
         @want = {}
-        sync(force: true) if withdraw
+        if withdraw
+          sync(force: true)
+          unless @installed.empty?
+            log(:warn, "FIB: #{@installed.size} routes could not be withdrawn and stay in the kernel")
+          end
+        end
         self
       end
 
@@ -88,15 +103,18 @@ module OSPFv2
       def sync(force: false)
         @want = wanted unless force
         @want.each_value do |r|
-          next if @installed[r.kernel_key] == r
-          apply(r) { @backend.replace(r) }
+          have = @installed[r.kernel_key]
+          next if have == r
+          # Only a route known to be ours is replaced: a new one must not
+          # overwrite another protocol's route to the same prefix.
+          apply(r) { have ? @backend.replace(r) : @backend.add(r) }
         end
         @installed.values.each do |r|
           next if @want.key?(r.kernel_key) || (@holding && !force)
           apply(r, delete: true) { @backend.delete(r) }
         end
         @failed.select! { |k, _| @want.key?(k) || @installed.key?(k) }
-        if @failed.empty?
+        if @failed.empty? || @detached
           @retry_timer&.cancel
         elsif @retry_timer && !@retry_timer.active?
           @retry_timer.restart
@@ -169,14 +187,34 @@ module OSPFv2
         nil
       end
 
-      # Adjacencies settled and the database quiet for a while: SPF back in
-      # its RFC 8405 quiet state, so no route has changed for its holddown
-      # (10 s). What OSPF wants now is what it will want.
+      # Converged when:
+      # * every configured interface is running (+settled+) and none is
+      #   still in Waiting, choosing its DR;
+      # * every neighbor we should be adjacent with is Full, and none is
+      #   still one-way (Init);
+      # * the database has been quiet a while: SPF back in its RFC 8405
+      #   quiet state, so no route changed for its holddown (10 s).
+      # What OSPF wants then is what it will want.
       def converged?
-        return false unless @instance
+        return false unless @instance && @settled.call
+        ifaces = @instance.interfaces.values
+        return false if ifaces.any? { |i| i.state == :waiting }
         nbrs = @instance.neighbors
-        nbrs.any?(&:full?) && nbrs.none? { |n| %i[exstart exchange loading].include?(n.state) } &&
-          @instance.spf.state == :quiet && @instance.spf.runs.positive?
+        return false if nbrs.none?(&:full?)
+        return false if nbrs.any? { |n| n.state == :init || (!n.full? && n.iface.adjacency_ok?(n)) }
+        @instance.spf.state == :quiet && @instance.spf.runs.positive?
+      end
+
+      # The hold time is up. A database exchange still running is given
+      # more time, up to twice the hold: cutting it short would delete
+      # routes the next SPF puts back.
+      def hold_time_up
+        exchanging = @instance&.neighbors&.any? { |n| EXCHANGING.include?(n.state) }
+        if exchanging && @loop.now < @hold_until
+          @hold_timer = @loop.after(5, :fib_hold) { hold_time_up }
+        else
+          end_hold('hold time is up')
+        end
       end
 
       def end_hold(why)

@@ -136,7 +136,7 @@ class TestFibManager < Test::Unit::TestCase
     @kernel.calls.clear
     @fib.metric = 100
     assert_equal WANT.map { |w| w.sub('metric 20', 'metric 100') }, kernel_s
-    assert_equal [:replace] * 3 + [:delete] * 3, @kernel.calls.map(&:first)
+    assert_equal [:add] * 3 + [:delete] * 3, @kernel.calls.map(&:first)
   end
 
   def test_detach_withdraws_everything
@@ -154,5 +154,78 @@ class TestFibManager < Test::Unit::TestCase
     converge
     @r1.stop
     assert_empty @kernel.dump
+  end
+
+  # ---- review fixes ----
+
+  def test_another_protocols_route_is_never_overwritten
+    @kernel.foreign << [A['3.3.3.3'], 32, 20]  # a static route, same prefix, same metric
+    @fib.attach(@r1)
+    converge
+    e = @fib.status.find { |x| x.key[0] == A['3.3.3.3'] }
+    assert_equal :failed, e.state
+    assert_match(/another route to 3\.3\.3\.3\/32 with metric 20 is in the kernel/, e.error)
+    assert_equal WANT - [WANT[2]], kernel_s
+    assert_equal [:add], @kernel.calls.select { |_, r| r.start_with?('3.3.3.3') }.map(&:first).uniq,
+                 'added, never replaced'
+  end
+
+  def test_a_route_already_ours_is_replaced
+    @fib.attach(@r1)
+    converge
+    @kernel.calls.clear
+    @r2.interfaces['eth1'].cost = 50
+    assert @lab.run_until(30) { @r1.routes[[A['3.3.3.3'], 32]].cost == 70 }
+    assert_equal [], @kernel.calls, 'same next hop: nothing to change in the kernel'
+  end
+
+  def test_detach_does_not_leave_a_retry_behind
+    @fib.attach(@r1)
+    converge
+    @kernel.fail[[A['2.2.2.2'], 32]] = 'Operation not permitted'
+    @fib.detach
+    @kernel.calls.clear
+    @lab.advance(30)
+    assert_empty @kernel.calls, 'no retry once detached'
+    assert(@log.any? { |_, m| m.include?('1 routes could not be withdrawn') })
+    assert_equal ['2.2.2.2/32 via 10.0.12.2 eth0 metric 20'], kernel_s
+  end
+
+  # R1 restarts with a held route through a LAN whose DR election takes
+  # the 40 s wait, and a point-to-point neighbor that is Full in seconds.
+  # The hold must outlast the LAN.
+  def test_the_hold_waits_for_every_adjacency
+    lab = CoreLab.new(seed: 3)
+    lan = lab.segment
+    p2p = lab.segment
+    r1 = lab.router('1.1.1.1', [lan, '10.0.12.1/24'], [p2p, '10.0.13.1/30', { type: :p2p }])
+    lab.router('2.2.2.2', [lan, '10.0.12.2/24', { priority: 0 }], [:passive, '2.2.2.2/32'])
+    lab.router('3.3.3.3', [p2p, '10.0.13.2/30', { type: :p2p }], [:passive, '3.3.3.3/32'])
+    kernel = Fib::Memory.new
+    held = kroute('2.2.2.2/32', [['eth0', '10.0.12.2']])
+    kernel.replace(held)
+    fib = Fib::Manager.new(loop: lab.loop, backend: kernel)
+    fib.attach(r1)
+    lab.start
+    assert lab.run_until(30) { r1.routes.key?([A['3.3.3.3'], 32]) && r1.spf.state == :quiet }
+    assert_equal :waiting, r1.interfaces['eth0'].state, 'the LAN is still electing'
+    assert fib.holding?
+    assert lab.run_until(120) { !fib.holding? }
+    assert_include kernel.dump.map(&:to_s), held.to_s
+    assert(kernel.calls.none? { |op, r| op == :delete && r == held.to_s }, 'the LAN route never left the kernel')
+  end
+
+  def test_the_hold_waits_for_the_host_to_be_ready
+    ready = false
+    fib = Fib::Manager.new(loop: @lab.loop, backend: @kernel, settled: -> { ready }, hold: 300)
+    @kernel.replace(kroute('8.8.8.0/24', [['eth0', '10.0.12.2']]))
+    fib.attach(@r1)
+    @lab.start
+    assert @lab.run_until(120) { @lab.full?(@r1, @r2) && @r1.spf.state == :quiet }
+    @lab.advance(5)
+    assert fib.holding?, 'an interface still pending on the host'
+    ready = true
+    @lab.advance(2)
+    refute fib.holding?
   end
 end

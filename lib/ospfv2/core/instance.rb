@@ -162,6 +162,11 @@ module OSPFv2
         self
       end
 
+      def off_route_change(block)
+        @route_listeners.delete(block)
+        self
+      end
+
       # Routes as { [prefix, len] => Spf::Route }.
       def routes = @route_table.routes
 
@@ -376,8 +381,10 @@ module OSPFv2
 
       # ---- log ----
 
+      # Debug lines go to the logger only: kept in the event list they
+      # would push out the events people look for.
       def log(level, iface, message)
-        record(level, message, iface)
+        record(level, message, iface) unless level == :debug
         @logger&.call(level, iface ? "#{iface.name} #{message}" : message)
       end
 

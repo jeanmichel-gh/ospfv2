@@ -74,4 +74,20 @@ class TestCommandLineFormat < Test::Unit::TestCase
     assert_match(%r{^% 3\.3\.3\.3/32 not installed: Network is unreachable$}, out)
     assert_match(/^% OSPF routes are not installed: cannot open/, F.render(:fib, :ios, fib.merge('error' => 'cannot open the kernel routing table: x')))
   end
+
+  def test_kernel_metric_destinations_and_an_old_route_still_active
+    f = fib.merge('routes' => [
+                    { 'prefix' => '2.2.2.2/32', 'state' => 'installed', 'metric' => 20, 'want' => [gw('10.0.0.2')],
+                      'have' => [gw('10.0.0.2')], 'path_type' => 'intra', 'cost' => 10 },
+                    { 'prefix' => '2.2.2.2/32', 'state' => 'held', 'metric' => 100, 'want' => nil, 'have' => [gw('10.0.0.2')] },
+                    { 'prefix' => '3.3.3.3/32', 'state' => 'failed', 'error' => 'x', 'metric' => 20,
+                      'want' => [gw('10.0.0.3')], 'have' => [gw('10.0.0.9')], 'path_type' => 'intra', 'cost' => 20 }
+                  ])
+    out = F.render(:fib, :junos, f)
+    assert_match(/\Ainet\.0: 2 destinations, 3 routes \(3 active/, out)
+    assert_match(%r{^2\.2\.2\.2/32\s+\*\[OSPF/10\], kernel metric 100$}, out)
+    assert_match(%r{^3\.3\.3\.3/32\s+\*\[OSPF/10\] metric 20\n\s+>  to 10\.0\.0\.9 via eth0}, out,
+                 'refused change, old route still forwarding')
+    assert_match(%r{^O        2\.2\.2\.2/32 \[110/-\] via 10\.0\.0\.2, eth0, kernel metric 100$}, F.render(:fib, :ios, f))
+  end
 end

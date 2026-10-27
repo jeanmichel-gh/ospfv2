@@ -100,4 +100,28 @@ class TestFibNetlink < Test::Unit::TestCase
     assert_match(/unreachable|invalid/i, r[0]['error'])
     assert_equal 'no interface nosuch', r[1]['error']
   end
+
+  # ---- review fixes ----
+
+  def test_a_new_route_never_overwrites_another_protocols_route
+    sh "ip -n #{@ns} route add 10.4.0.0/16 via 10.9.0.2 proto static metric 20"
+    r = probe([['add', '10.4.0.0/16', [%w[eth2 10.9.1.2]], 20], ['add', '10.4.0.0/16', [%w[eth2 10.9.1.2]], 30]])
+    assert_equal 'another route to 10.4.0.0/16 with metric 20 is in the kernel', r[0]['error']
+    assert_equal({ 'ok' => true }, r[1], 'another metric is another route')
+    assert_match(/10\.4\.0\.0\/16 via 10\.9\.0\.2 dev eth1 proto static metric 20/, `ip -n #{@ns} route show 10.4.0.0/16`)
+  end
+
+  def test_replace_re_adds_a_route_of_ours_that_went_away
+    probe([['add', '10.8.0.0/16', [%w[eth1 10.9.0.2]], 20]])
+    sh "ip -n #{@ns} route del 10.8.0.0/16 proto 89 metric 20"
+    r = probe([['replace', '10.8.0.0/16', [%w[eth1 10.9.0.3]], 20], ['dump']])
+    assert_equal({ 'ok' => true }, r[0])
+    assert_equal ['10.8.0.0/16 via 10.9.0.3 eth1 metric 20'], r[1]['routes']
+  end
+
+  def test_an_address_label_does_not_rename_the_device
+    sh "ip -n #{@ns} addr add 10.9.0.100/32 dev eth1 label eth1:vip"
+    r = probe([['add', '10.10.0.0/16', [%w[eth1 10.9.0.2]], 20], ['dump']])
+    assert_equal ['10.10.0.0/16 via 10.9.0.2 eth1 metric 20'], r[1]['routes']
+  end
 end

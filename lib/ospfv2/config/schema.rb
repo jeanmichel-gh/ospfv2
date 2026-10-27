@@ -134,7 +134,7 @@ module OSPFv2
           container 'routing-options', help: 'Protocol-independent routing options' do
             leaf 'router-id', IPV4, help: 'Router identifier'
             container 'kernel', help: 'Installing OSPF routes in the Linux routing table' do
-              leaf 'metric', Schema.hint(T.range(0, 4_294_967_295), '<0..4294967295>'),
+              leaf 'metric', Schema.hint(T.range(1, 4_294_967_295), '<1..4294967295>'),
                    help: 'Kernel route metric (default 20; lower wins against other routes to the same prefix)'
               leaf 'protocol', Schema.hint(T.range(5, 255), '<5..255>'), help: 'Protocol id our routes carry (default 89)'
               leaf 'table', Schema.hint(T.range(1, 4_294_967_295), '<table-id>'), help: 'Kernel table (default 254, main)'

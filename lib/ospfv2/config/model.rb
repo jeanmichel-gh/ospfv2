@@ -24,6 +24,15 @@ module OSPFv2
       # Kernel route install defaults (routing-options kernel).
       KERNEL = { install: true, metric: 20, protocol: 89, table: 254 }.freeze
       KERNEL_TABLES = { 253 => 'default', 255 => 'local' }.freeze
+      # Protocol ids others use (Linux rtnetlink.h and FRR). Routes under
+      # our id are ours to delete, so these are refused.
+      TAKEN_PROTOCOLS = {
+        8 => 'gated', 9 => 'router advertisements', 10 => 'mrt', 11 => 'zebra', 12 => 'bird',
+        13 => 'dnrouted', 14 => 'xorp', 15 => 'ntk', 16 => 'dhcp', 17 => 'mrouted', 18 => 'keepalived',
+        42 => 'babel', 99 => 'openr', 186 => 'bgp', 187 => 'isis', 188 => 'ospf (FRR)', 189 => 'rip',
+        192 => 'eigrp', 193 => 'ldp (FRR)', 194 => 'sharp (FRR)', 195 => 'pbr (FRR)', 196 => 'static (FRR)',
+        197 => 'openfabric (FRR)', 198 => 'srte (FRR)'
+      }.freeze
 
       attr_reader :router_id, :interfaces, :warnings, :kernel
 
@@ -75,8 +84,8 @@ module OSPFv2
         if (name = KERNEL_TABLES[out[:table]])
           @errors << "routing-options kernel table #{out[:table]} is the kernel's #{name} table; pick another"
         end
-        if [186, 187, 188, 189, 192].include?(out[:protocol])
-          @warnings << "routing-options kernel protocol #{out[:protocol]} is the id another routing daemon uses"
+        if (who = TAKEN_PROTOCOLS[out[:protocol]])
+          @errors << "routing-options kernel protocol #{out[:protocol]} is #{who}'s; pick an unused id"
         end
         out.freeze
       end

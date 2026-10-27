@@ -321,22 +321,22 @@ module OSPFv2
 
       def fib_metric(r) = r['path_type'] == 'ext2' ? r['type2_cost'] : r['cost']
 
-      IN_KERNEL = %w[installed different held extra].freeze
-
       # Junos "show route protocol ospf": what is in the kernel.
       def junos_fib(f)
         off = fib_off(f)
         return off if off
         rows = f['routes']
-        active = rows.count { |r| IN_KERNEL.include?(r['state']) }
+        active = rows.count { |r| r['have'] }
         name = f['table'] == 254 ? 'inet.0' : "table #{f['table']}"
-        out = ["#{name}: #{rows.size} destinations, #{rows.size} routes (#{active} active, 0 holddown, 0 hidden)",
+        dests = rows.map { |r| r['prefix'] }.uniq.size
+        out = ["#{name}: #{dests} destinations, #{rows.size} routes (#{active} active, 0 holddown, 0 hidden)",
                '+ = Active Route, - = Last Active, * = Both', '']
         rows.each do |r|
-          inkernel = IN_KERNEL.include?(r['state'])
+          inkernel = !r['have'].nil?
           pref = %w[ext1 ext2].include?(r['path_type']) ? 150 : 10
           metric = fib_metric(r)
-          out << format('%-18s %s[OSPF/%d]%s', r['prefix'], inkernel ? '*' : ' ', pref, metric ? " metric #{metric}" : '')
+          out << format('%-18s %s[OSPF/%d]%s%s', r['prefix'], inkernel ? '*' : ' ', pref, metric ? " metric #{metric}" : '',
+                        kernel_metric_note(f, r))
           (r['have'] || r['want'] || []).each_with_index do |h, i|
             out << format('%20s%s  to %s via %s', '', i.zero? && inkernel ? '>' : ' ', h['gateway'], h['interface'])
           end
@@ -361,11 +361,18 @@ module OSPFv2
           lead = format('%-8s %s ', code, r['prefix'])
           metric = fib_metric(r) || '-'
           hops.each_with_index do |h, i|
-            out << "#{i.zero? ? lead : ' ' * lead.size}[110/#{metric}] via #{h['gateway']}, #{h['interface']}"
+            out << "#{i.zero? ? lead : ' ' * lead.size}[110/#{metric}] via #{h['gateway']}, #{h['interface']}" \
+                   "#{i.zero? ? kernel_metric_note(f, r) : ''}"
           end
         end
         out << '' unless notes.empty?
         (out + notes).join("\n")
+      end
+
+      # The kernel metric, when it is not the configured one (a metric
+      # change under way, routes held from before a restart).
+      def kernel_metric_note(f, r)
+        r['metric'] && r['metric'] != f['metric'] ? ", kernel metric #{r['metric']}" : ''
       end
 
       def fib_summary(k)

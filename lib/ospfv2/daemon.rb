@@ -219,6 +219,7 @@ module OSPFv2
     # Logs to the logger and to the router's event list (show ospf log).
     def log(level, message)
       @logger&.call(level, message)
+      return if level == :debug # logger only, as Instance#log
       record = -> { @instance&.record(level, message) }
       @loop.on_loop_thread? || !@loop.running? ? record.call : @loop.post(&record)
     end
@@ -269,6 +270,7 @@ module OSPFv2
       unless k[:install]
         log(:info, 'kernel route install off: routes withdrawn') if @fib
         stop_fib
+        sweep_old_kernel_routes(nil)
         @fib_error = nil
         @kernel = k
         return
@@ -286,10 +288,47 @@ module OSPFv2
           return
         end
         @fib_error = nil
-        @fib = Fib::Manager.new(loop: @loop, backend: backend, metric: k[:metric], logger: ->(l, m) { log(l, m) })
+        sweep_old_kernel_routes(k)
+        @fib = Fib::Manager.new(loop: @loop, backend: backend, metric: k[:metric], logger: ->(l, m) { log(l, m) },
+                                settled: -> { @pending.empty? })
+        save_kernel_state(k)
         @fib.attach(@instance)
       end
       @kernel = k
+    end
+
+    # Where the protocol id and table we last installed with are kept, so
+    # routes left by a crash are found even after they change.
+    def kernel_state_path = "#{@config_path}.kernel"
+
+    def save_kernel_state(k)
+      File.write(kernel_state_path, "#{k[:protocol]} #{k[:table]}\n")
+    rescue SystemCallError => e
+      log(:warn, "cannot save #{kernel_state_path}: #{e.message}")
+    end
+
+    # Routes left in the kernel under settings we no longer use (a crash,
+    # then a restart with another protocol id or table, or no-install)
+    # are removed. +k+ is what we use now, nil for nothing.
+    def sweep_old_kernel_routes(k)
+      return unless File.exist?(kernel_state_path)
+      protocol, table = File.read(kernel_state_path).split.map(&:to_i)
+      return if k && [protocol, table] == k.values_at(:protocol, :table)
+      unless protocol&.positive? && table&.positive?
+        File.delete(kernel_state_path)
+        return
+      end
+      backend = @fib_factory.call(protocol: protocol, table: table)
+      begin
+        old = backend.dump
+        old.each { |r| backend.delete(r) }
+        log(:info, "removed #{old.size} routes left under protocol #{protocol} table #{table}") unless old.empty?
+      ensure
+        backend.close
+      end
+      File.delete(kernel_state_path)
+    rescue StandardError => e
+      log(:warn, "cannot clean routes left under protocol #{protocol} table #{table}: #{e.message}")
     end
 
     def stop_fib

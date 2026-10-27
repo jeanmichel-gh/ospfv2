@@ -208,19 +208,24 @@ multipath route.
 
 | Statement under `routing-options kernel` | Default |
 | --- | --- |
-| `metric N` | 20: the kernel route metric, lower wins between routes to one prefix |
-| `protocol 5..255` | 89: the protocol id on our routes (`ip route show proto 89`) |
+| `metric 1..4294967295` | 20: the kernel route metric, lower wins between routes to one prefix |
+| `protocol 5..255` | 89: the protocol id on our routes (`ip route show proto 89`); ids other daemons use are refused |
 | `table ID` | 254, the main table |
 | `no-install` | off: compute routes, install none |
 
 Only routes carrying our protocol id are ever read, changed or deleted, so routes from
-FRR (188), static routes and DHCP are safe. Changes go in as replace, so a route never
-disappears while it changes; deletes go last. A route the kernel refuses is retried
+FRR (188), static routes and DHCP are safe. A new route never overwrites another route
+to the same prefix at the same metric: it is refused and reported instead. Changes to
+our own routes go in as replace, so a route never disappears while it changes; deletes
+go last. If the protocol id or table changes, or install is turned off, routes left
+under the old settings (after a crash, say) are removed. A route the kernel refuses is retried
 every 5 seconds and shown in `show route protocol ospf`. Every 60 seconds the kernel
 is read back and any drift repaired, with a log line per repair.
 
 On a clean stop the routes are withdrawn. After a crash they stay in the kernel; the
-restarted ospfd keeps them until OSPF has converged (or 60 seconds), then removes the
+restarted ospfd keeps them until OSPF has converged (every interface up and past its
+DR election, every adjacency Full, no route change for 10 seconds; 60 seconds at most,
+longer while a database exchange is still running), then removes the
 ones it no longer has, so traffic it forwards has no gap. Traffic back to the router
 still drops while the neighbors rebuild their adjacencies: avoiding that needs graceful
 restart, which is not implemented yet.

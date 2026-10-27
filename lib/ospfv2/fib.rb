@@ -11,7 +11,9 @@ module OSPFv2
   # line with it. A backend does the installing: Fib::Netlink on Linux,
   # Fib::Memory in tests. A backend knows three things:
   #
-  #   replace(route)   add or overwrite the route for route.key
+  #   add(route)       a route new to us; refused if the kernel has a route
+  #                    to that prefix at that metric already, anyone's
+  #   replace(route)   change a route that is ours
   #   delete(route)    remove it (gone already is fine)
   #   dump             our routes as the kernel holds them now
   #

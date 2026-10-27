@@ -31,10 +31,17 @@ class TestDaemonKernel < Test::Unit::TestCase
       @tables[[protocol, table]] ||= Fib::Memory.new
     end
     @log = []
-    @d = Daemon.new(config_path: File.join(@dir, 'ospfd.conf'), loop: @loop, system: system, fib: factory,
-                    transport: ->(_n, ip) { Transport::Loopback.new(hub, ip) },
-                    logger: ->(l, m) { @log << "#{l} #{m}" })
+    @system = system
+    @hub = hub
+    @factory = factory
+    @d = new_daemon
     @d.start
+  end
+
+  def new_daemon
+    Daemon.new(config_path: File.join(@dir, 'ospfd.conf'), loop: @loop, system: @system, fib: @factory,
+               transport: ->(_n, ip) { Transport::Loopback.new(@hub, ip) },
+               logger: ->(l, m) { @log << "#{l} #{m}" })
   end
 
   def teardown
@@ -75,9 +82,9 @@ class TestDaemonKernel < Test::Unit::TestCase
 
   def test_a_new_table_or_protocol_moves_the_routes
     converge
-    commit!('set routing-options kernel table 100', 'set routing-options kernel protocol 99')
+    commit!('set routing-options kernel table 100', 'set routing-options kernel protocol 77')
     assert_empty kernel
-    assert_equal [ROUTE], kernel(99, 100)
+    assert_equal [ROUTE], kernel(77, 100)
   end
 
   def test_no_install_withdraws_and_install_again_restores
@@ -114,5 +121,54 @@ class TestDaemonKernel < Test::Unit::TestCase
     assert @loop.run_until(120) { kernel.include?(ROUTE) }, 'the new router installs again'
     @d.stop
     assert_empty kernel
+  end
+
+  # ---- review fixes ----
+
+  def old_route(protocol, table)
+    r = Fib::Route.new(Core::Addr.to_i('8.8.8.0'), 24, [['eth1', Core::Addr.to_i('10.0.0.2')]], 20)
+    (@tables[[protocol, table]] ||= Fib::Memory.new).table[r.kernel_key] = r
+  end
+
+  def test_routes_left_under_old_settings_are_swept
+    converge
+    commit!('set routing-options kernel protocol 77')
+    assert_equal "77 254\n", File.read(File.join(@dir, 'ospfd.conf.kernel'))
+    old_route(77, 254)            # a crash left this behind
+    @d.stop
+    old_route(77, 254)
+    File.write(File.join(@dir, 'ospfd.conf'), BASE.join("\n"))   # restart with the default id
+    @d = new_daemon
+    @d.start
+    assert_empty kernel(77, 254), 'swept'
+    assert(@log.any? { |l| l.include?('removed 1 routes left under protocol 77 table 254') })
+    assert_equal "89 254\n", File.read(File.join(@dir, 'ospfd.conf.kernel'))
+  end
+
+  def test_no_install_sweeps_what_a_crash_left
+    converge
+    old_route(89, 254)
+    commit!('set routing-options kernel no-install')
+    assert_empty kernel
+    refute File.exist?(File.join(@dir, 'ospfd.conf.kernel'))
+  end
+
+  def test_ids_and_metrics_others_use_are_refused
+    { 'protocol 16' => /protocol 16 is dhcp's/, 'protocol 196' => /static \(FRR\)/, 'metric 0' => /not within range/ }.each do |stmt, why|
+      errs = @d.configure(["set routing-options kernel #{stmt}"])
+      if errs.empty?
+        r = @d.commit
+        refute r[:ok], stmt
+        assert_match(why, r[:errors].join, stmt)
+      else
+        assert_match(why, errs.join, stmt)
+      end
+      @d.discard
+    end
+  end
+
+  def test_debug_lines_stay_out_of_the_event_list
+    converge
+    assert(@d.instance.events.none? { |e| e.level == :debug })
   end
 end
