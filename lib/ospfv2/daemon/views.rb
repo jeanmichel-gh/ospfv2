@@ -26,7 +26,7 @@ module OSPFv2
                 lsas: a.lsdb.size, checksum_sum: format('0x%x', a.lsdb.sum(&:checksum)) }
             end,
             neighbors: { total: r.neighbors.size, full: states.fetch(:full, 0) },
-            external_lsas: r.as_lsdb.size,
+            external_lsas: r.as_lsdb.size, abr: r.abr?, asbr: r.asbr?, exported: r.externals.size,
             spf: { runs: r.spf.runs, last_ago: r.spf_log.last && ago(r.spf_log.last.time), routes: r.routes.size },
             fib: fib_summary,
             lsa_originated: r.stats[:lsa_originated], lsa_installed: r.stats[:lsa_installed]

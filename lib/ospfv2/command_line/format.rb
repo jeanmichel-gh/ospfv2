@@ -200,6 +200,8 @@ module OSPFv2
       def junos_overview(o)
         return 'OSPF is not configured (set routing-options router-id and an interface)' unless o['configured']
         out = ['Instance: master', "  Router ID: #{o['router_id']}", "  Up: #{duration(o['uptime'])}"]
+        out << '  Area border router' if o['abr']
+        out << "  AS boundary router, exporting #{o['exported']} routes" if o['asbr']
         o['areas'].each do |a|
           out << "  Area: #{a['area']}"
           out << "    Interfaces: #{a['interfaces']}, LSAs: #{a['lsas']}, checksum sum #{a['checksum_sum']}"
@@ -219,6 +221,8 @@ module OSPFv2
         return '%OSPF: not configured' unless o['configured']
         out = [" Routing Process \"ospf 1\" with ID #{o['router_id']}",
                " Time elapsed: #{clock(o['uptime'])}",
+               *(o['abr'] ? [' It is an area border router'] : []),
+               *(o['asbr'] ? [" It is an autonomous system boundary router, redistributing #{o['exported']} routes"] : []),
                " Number of external LSA #{o['external_lsas']}",
                " Number of areas in this router is #{o['areas'].size}"]
         out << " Kernel routes: #{fib_summary(o['fib'])}"

@@ -98,7 +98,8 @@ module OSPFv2
       def network = @address & mask
 
       # E bit: we take AS-external LSAs. Stub areas come in Phase 3.
-      def options = 0x02
+      # E bit unless the area is a stub (RFC 2328 A.2).
+      def options = @area.options
 
       def dr? = @state == :dr
       def backup? = @state == :backup
@@ -312,6 +313,7 @@ module OSPFv2
         return drop(:hello, "hello interval #{h.hello_interval} from #{Addr.to_s(from)}, ours is #{@hello_interval}") if h.hello_interval != @hello_interval
         return drop(:hello, "dead interval #{h.dead_interval} from #{Addr.to_s(from)}, ours is #{@dead_interval}") if h.dead_interval != @dead_interval
         return drop(:hello, "E bit mismatch from #{Addr.to_s(from)}") if (h.options & 0x02) != (options & 0x02)
+        return drop(:hello, "N bit mismatch from #{Addr.to_s(from)}") if (h.options & 0x08) != (options & 0x08)
 
         key = neighbor_key(rid, from)
         nbr = @neighbors[key]

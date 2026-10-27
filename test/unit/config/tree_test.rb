@@ -46,7 +46,7 @@ class TestConfigTree < Test::Unit::TestCase
       'set protocols ospf area 0 interface eth1 p 5' => /'p' is ambiguous .*: priority, passive/,
       'set protocols ospf area 0 interface eth1 metric 0' => /within range \(1\.\.65535\)/,
       'set protocols ospf area 0 interface eth1 metric' => /missing <1\.\.65535>/,
-      'set protocols ospf area 0 interface eth1 passive yes' => /unexpected 'yes'/,
+      'set protocols ospf area 0 interface eth1 passive yes' => /unknown 'yes'/,
       'set protocols ospf area 300.0.0.0' => /invalid area/,
       'set routing-options router-id 1.2.3' => /invalid IPv4 address/,
       'set protocols ospf area 0 interface eth1 authentication md5 1' => /missing 'key'/,
@@ -145,5 +145,19 @@ class TestConfigTree < Test::Unit::TestCase
     assert_match(/\Aline 4: /, errors[0])
     assert_match(/\Aline 5: /, errors[1])
     assert_equal ['set routing-options router-id 1.1.1.1'], t.to_set
+  end
+
+  def test_siblings_on_one_line
+    t = Tree.new
+    assert_empty t.load("set protocols ospf area 2 stub default-metric 10 no-summaries\n" \
+                        'set protocols ospf area 0 interface eth1 metric 5 passive priority 0')
+    assert_equal ['set protocols ospf area 0.0.0.2 stub default-metric 10',
+                  'set protocols ospf area 0.0.0.2 stub no-summaries',
+                  'set protocols ospf area 0.0.0.0 interface eth1 metric 5',
+                  'set protocols ospf area 0.0.0.0 interface eth1 priority 0',
+                  'set protocols ospf area 0.0.0.0 interface eth1 passive'], t.to_set
+    before = t.to_set
+    assert_match(/unknown 'bogus'/, t.load('set protocols ospf area 2 stub default-metric 20 bogus').join)
+    assert_equal before, t.to_set, 'all or nothing'
   end
 end

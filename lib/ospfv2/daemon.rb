@@ -258,10 +258,51 @@ module OSPFv2
         @instance.start
         @applied = {}
         @pending = {}
+        @exported = nil
         @fib&.attach(@instance)
       end
       apply_kernel(model.kernel)
+      apply_areas(model.areas)
       sync_interfaces
+      @export = model.export
+      export_routes
+    end
+
+    # Area options (stub). A change restarts the area's interfaces: the
+    # options in hellos change, so neighbors must start over.
+    def apply_areas(areas)
+      want = areas.to_h { |id, o| [Core::Addr.to_i(id), o] }
+      changed = (want.keys | @instance.area_options.keys).reject { |id| want[id] == @instance.area_options[id] }
+      @instance.area_options = want
+      changed.each do |id|
+        log(:info, "area #{Core::Addr.to_s(id)}: options changed, restarting its interfaces")
+        (@instance.areas[id]&.interfaces || []).map(&:name).each { |name| remove(name) }
+      end
+    end
+
+    # protocols ospf export: the host's networks and static routes the
+    # policy accepts become AS-external-LSAs. Rechecked with the links.
+    def export_routes
+      want = @export ? export_candidates.filter_map { |c| (a = @export.evaluate(c)) && c.merge(a) } : []
+      return if want == @exported
+      @exported = want
+      log(:info, "exporting #{want.size} external routes") if want.size != @instance.externals.size
+      @instance.externals = want
+    end
+
+    def export_candidates
+      out = []
+      @system.links.each_value do |l|
+        next unless l.up
+        [l.address, *l.others].compact.each do |a|
+          next if a.start_with?('127.')
+          ip, len = a.split('/')
+          len = len.to_i
+          out << { protocol: :direct, prefix: Core::Addr.to_i(ip) & Core::Addr.mask(len), prefix_len: len }
+        end
+      end
+      @system.static_routes.each { |p, len| out << { protocol: :static, prefix: p, prefix_len: len } }
+      out.uniq.sort_by { |c| [c[:prefix], c[:prefix_len], c[:protocol]] }
     end
 
     # routing-options kernel: a new metric applies in place; a new table
@@ -417,7 +458,9 @@ module OSPFv2
     end
 
     def recheck_links
-      sync_interfaces if @instance && @desired
+      return unless @instance && @desired
+      sync_interfaces
+      export_routes
     end
 
     def clean_comment(comment)

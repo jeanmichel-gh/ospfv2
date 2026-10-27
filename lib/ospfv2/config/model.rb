@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require_relative 'tree'
+require_relative 'policy'
 
 module OSPFv2
   module Config
@@ -34,7 +35,7 @@ module OSPFv2
         197 => 'openfabric (FRR)', 198 => 'srte (FRR)'
       }.freeze
 
-      attr_reader :router_id, :interfaces, :warnings, :kernel
+      attr_reader :router_id, :interfaces, :warnings, :kernel, :export, :areas
 
       def initialize(tree)
         @errors = []
@@ -43,11 +44,14 @@ module OSPFv2
         @router_id = data.dig('routing-options', 'router-id')
         @errors << 'routing-options router-id is required' unless @router_id
         @interfaces = {}
+        @areas = {}
         areas = data.dig('protocols', 'ospf', 'area') || {}
         areas.each do |area, a|
           (a['interface'] || {}).each { |name, i| interface(area, name, i) }
+          area_options(area, a)
         end
         @kernel = kernel_options(data.dig('routing-options', 'kernel') || {})
+        @export = export_policy(data)
         @warnings << 'no OSPF interfaces configured' if @interfaces.empty? && @errors.empty?
         raise Error, @errors.join("\n") unless @errors.empty?
         freeze
@@ -76,6 +80,37 @@ module OSPFv2
         auth = authentication(name, i['authentication'])
         opts[:auth] = auth if auth
         @interfaces[name] = opts.freeze
+      end
+
+      # area => { stub: { default_metric:, no_summaries: } }, areas with
+      # options only.
+      def area_options(area, a)
+        stub = a['stub']
+        nssa = a['nssa']
+        return unless stub || nssa
+        if area == '0.0.0.0'
+          @errors << "area 0.0.0.0 is the backbone and cannot be #{stub ? 'a stub area' : 'an NSSA'}"
+        elsif stub && nssa
+          @errors << "area #{area} cannot be both stub and nssa"
+        elsif stub
+          @areas[area] = { stub: { default_metric: stub['default-metric'], no_summaries: stub['no-summaries'] == true } }
+        else
+          dl = nssa['default-lsa']
+          @areas[area] = { nssa: { default_lsa: dl && { metric: dl['default-metric'] || 1, type: dl['metric-type'] || 2 },
+                                   no_summaries: nssa['no-summaries'] == true } }
+        end
+      end
+
+      def export_policy(data)
+        name = data.dig('protocols', 'ospf', 'export') or return nil
+        policy = data.dig('policy-options', 'policy-statement', name)
+        unless policy
+          @errors << "protocols ospf export: policy-statement #{name} is not defined under policy-options"
+          return nil
+        end
+        p = Policy.from_config(name, policy)
+        @warnings << "policy-statement #{name} accepts nothing" if p.terms.none? { |t| t.action == :accept }
+        p
       end
 
       def kernel_options(k)

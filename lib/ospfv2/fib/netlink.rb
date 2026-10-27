@@ -98,14 +98,15 @@ module OSPFv2
         raise unless e.message.start_with?('No such process') # ESRCH: gone already
       end
 
-      # Our routes in our table, as Fib::Routes.
-      def dump
+      # Our routes in our table, as Fib::Routes. +protocols+ reads other
+      # protocols' routes instead (read only: we change only our own).
+      def dump(protocols: [@protocol])
         names = links(fresh: true).invert
         msgs = @lock.synchronize do
           seq = send_msg(RTM_GETROUTE, NLM_F_DUMP, rtmsg(0, 0, 0))
           collect(seq)
         end
-        msgs.filter_map { |type, body| decode(body, names) if type == RTM_NEWROUTE }
+        msgs.filter_map { |type, body| decode(body, names, protocols) if type == RTM_NEWROUTE }
       end
 
       def close
@@ -200,9 +201,9 @@ module OSPFv2
 
       # ---- decoding a route ----
 
-      def decode(body, names)
+      def decode(body, names, protocols)
         family, dst_len, _, _, table, protocol, _, type, = body.unpack('CCCCCCCCL')
-        return nil unless family == Socket::AF_INET && protocol == @protocol && type == RTN_UNICAST
+        return nil unless family == Socket::AF_INET && protocols.include?(protocol) && type == RTN_UNICAST
         attrs = attrs(body.byteslice(12..))
         table = attrs[RTA_TABLE].unpack1('L') if attrs[RTA_TABLE]
         return nil unless table == @table

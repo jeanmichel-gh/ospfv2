@@ -240,9 +240,10 @@ module OSPFv2
             node = child
             i += 2
           when :leaf
-            return i + 1 == words.size ? [[hint(child.type), child.help]] : [['<cr>', '']]
+            return [[hint(child.type), child.help]] if i + 1 == words.size
+            i += 2 # its siblings may follow on the same line
           when :flag
-            return [['<cr>', '']]
+            i += 1
           when :keyed_leaf
             rest = words.size - i - 1
             return [[hint(child.type), 'Key id']] if rest.zero?

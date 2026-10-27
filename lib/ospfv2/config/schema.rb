@@ -88,6 +88,26 @@ module OSPFv2
           end
         end
 
+        # "10.1.0.0/16", returned with the host bits cleared.
+        def prefix(v)
+          ip, len = v.split('/', 2)
+          raise Error, "invalid prefix '#{v}': use a.b.c.d/len" unless len&.match?(/\A\d{1,2}\z/) && len.to_i <= 32
+          n = ipv4(ip).split('.').map(&:to_i).inject(0) { |a, o| (a << 8) | o }
+          mask = len.to_i.zero? ? 0 : (0xffff_ffff << (32 - len.to_i)) & 0xffff_ffff
+          "#{[n & mask].pack('N').unpack('C4').join('.')}/#{len.to_i}"
+        end
+
+        # "/24" or "24", a prefix length.
+        def prefix_length(v)
+          raise Error, "invalid prefix length '#{v}'" unless v.match?(%r{\A/?\d{1,2}\z}) && v.delete('/').to_i <= 32
+          v.delete('/').to_i
+        end
+
+        def name(v)
+          raise Error, "invalid name '#{v}'" unless v.match?(/\A[A-Za-z0-9_][A-Za-z0-9_.-]{0,63}\z/)
+          v
+        end
+
         def interface_name(v)
           raise Error, "invalid interface name '#{v}'" unless v.match?(/\A[A-Za-z0-9][A-Za-z0-9_.:@-]{0,14}\z/)
           v
@@ -123,6 +143,8 @@ module OSPFv2
       IPV4 = hint(T.method(:ipv4), '<a.b.c.d>')
       AREA = hint(T.method(:area), '<area-id>')
       IFNAME = hint(T.method(:interface_name), '<interface>')
+      PREFIX = hint(T.method(:prefix), '<a.b.c.d/len>')
+      NAME = hint(T.method(:name), '<name>')
 
       AUTH_ALGORITHMS = {
         'md5' => :md5, 'hmac-sha-1' => :hmac_sha1, 'hmac-sha-256' => :hmac_sha256,
@@ -141,9 +163,47 @@ module OSPFv2
               flag 'no-install', help: 'Compute routes, do not install them'
             end
           end
+          container 'policy-options', help: 'Routing policy' do
+            list 'policy-statement', key: NAME, help: 'A named policy' do
+              list 'term', key: NAME, help: 'A term, tried in order' do
+                container 'from', help: 'Conditions; all must match' do
+                  leaf 'protocol', Schema.hint(T.one_of('direct', 'static'), '<direct|static>'),
+                       help: 'direct: the host\'s own networks; static: static routes in the kernel'
+                  list 'route-filter', key: PREFIX, help: 'Prefix to match' do
+                    flag 'exact', help: 'This prefix only (the default)'
+                    flag 'orlonger', help: 'This prefix and any longer one inside it'
+                    flag 'longer', help: 'Longer prefixes inside it, not this one'
+                    leaf 'upto', Schema.hint(T.method(:prefix_length), '</len>'), help: 'Inside it, up to this length'
+                  end
+                end
+                container 'then', help: 'Actions' do
+                  leaf 'metric', Schema.hint(T.range(0, 16_777_214), '<0..16777214>'), help: 'External metric (default 20)'
+                  container 'external', help: 'External route options' do
+                    leaf 'type', Schema.hint(T.range(1, 2), '<1|2>'), help: 'External type (default 2)'
+                  end
+                  leaf 'tag', Schema.hint(T.range(0, 4_294_967_295), '<tag>'), help: 'Route tag'
+                  flag 'accept', help: 'Export the route'
+                  flag 'reject', help: 'Do not export it'
+                end
+              end
+            end
+          end
           container 'protocols', help: 'Routing protocols' do
             container 'ospf', help: 'OSPF version 2' do
+              leaf 'export', NAME, help: 'Policy choosing routes to advertise as AS externals'
               list 'area', key: AREA, help: 'OSPF area' do
+                container 'stub', help: 'No external routes here; area border routers send a default instead' do
+                  leaf 'default-metric', Schema.hint(T.range(1, 16_777_214), '<1..16777214>'),
+                       help: 'Cost of the default route the ABR sends (default 1)'
+                  flag 'no-summaries', help: 'Totally stubby: only the default route, no summaries'
+                end
+                container 'nssa', help: 'Not-so-stubby area (RFC 3101): no AS externals, but routers here may bring routes in' do
+                  container 'default-lsa', help: 'The ABR sends a type 7 default route into the area' do
+                    leaf 'default-metric', Schema.hint(T.range(1, 16_777_214), '<1..16777214>'), help: 'Its metric (default 1)'
+                    leaf 'metric-type', Schema.hint(T.range(1, 2), '<1|2>'), help: 'Its external type (default 2)'
+                  end
+                  flag 'no-summaries', help: 'Only a default route from the ABR, no summaries'
+                end
                 list 'interface', key: IFNAME, help: 'Interface in this area' do
                   leaf 'interface-type', Schema.hint(T.one_of('broadcast', 'p2p'), '<broadcast|p2p>'), help: 'Network type'
                   leaf 'metric', Schema.hint(T.range(1, 65_535), '<1..65535>'), help: 'Interface cost'

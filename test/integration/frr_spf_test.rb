@@ -2,6 +2,7 @@
 
 require 'test/unit'
 require 'support/frr_topology'
+require 'support/frr_tables'
 require 'ospfv2/core/spf'
 
 # Our routing table against FRR's, on one database. Opt in with
@@ -28,8 +29,6 @@ class TestFrrSpf < Test::Unit::TestCase
   EXT = ['route-map EXT permit 10', ' match interface ext1', ' set metric 20', ' set metric-type type-2',
          'route-map EXT permit 20', ' match interface ext2', ' set metric 5', ' set metric-type type-1'].freeze
 
-  FRR_TYPES = { 'N' => 'intra', 'N IA' => 'inter', 'N E1' => 'ext1', 'N E2' => 'ext2' }.freeze
-
   def setup
     ok, why = FrrLab.available?
     omit(why) unless ok
@@ -50,49 +49,10 @@ class TestFrrSpf < Test::Unit::TestCase
     @t&.stop
   end
 
-  # ---- FRR's table, and ours, in one shape ----
-  # { "prefix" => [type, cost, type2, [[interface, gateway], ...]] } and
-  # { "router id" => [type, cost, [[interface, gateway], ...]] }
-
-  def frr_table
-    json = @t.frr_json('r2', 'show ip ospf route')
-    nets = {}
-    routers = {}
-    json.each do |dest, r|
-      hops = r['nexthops'].map { |h| h['directlyAttachedTo'] ? [h['directlyAttachedTo'], nil] : [h['via'], h['ip']] }.sort
-      if dest.include?('/')
-        nets[dest] = [FRR_TYPES.fetch(r['routeType']), r['cost'], r['type2cost'], hops]
-      else
-        routers[dest] = [r['ia'] ? 'inter' : 'intra', r['cost'], hops]
-      end
-    end
-    [nets, routers]
-  end
-
-  def ours(table)
-    hops = ->(r) { r.next_hops.map { |h| [h.interface, h.gateway && Addr.to_s(h.gateway)] }.sort }
-    nets = table.routes.values.to_h { |r| [r.dest_s, [r.path_type.to_s, r.cost, r.type2_cost, hops[r]]] }
-    routers = table.routers.values.to_h { |r| [Addr.to_s(r.prefix), [r.path_type.to_s, r.cost, hops[r]]] }
-    [nets, routers]
-  end
-
-  # SPF from r2's seat, on what r1 holds.
-  def rerooted
-    state = @t.core_state('r1')
-    lsas = ->(hexes) { hexes.map { |h| Lsa.new([h].pack('H*')) } }
-    r2 = @t.routers['r2']
-    links = r2.links.select { |l| l.area.zero? }.map { |l| Spf::Link.new(name: l.ifname, address: l.address, prefix_len: l.prefix_len) }
-    links << Spf::Link.new(name: 'lo', address: r2.router_id, prefix_len: 32)
-    area0 = Spf::Area.new(id: 0, lsas: lsas[state.dig('lsas', '0.0.0.0') || []], interfaces: links)
-    Spf.run(router_id: r2.router_id, areas: [area0], externals: lsas[state['externals'] || []])
-  end
-
-  # r1's table as JSON from its state file, in the shape above.
-  def core_routes
-    (@t.core_state('r1')['routes'] || {}).transform_values do |r|
-      [r['path_type'], r['cost'], r['type2_cost'], r['next_hops'].sort]
-    end
-  end
+  def frr_table = FrrTables.frr_table(@t, 'r2')
+  def ours(table) = FrrTables.ours(table)
+  def rerooted = FrrTables.rerooted(@t, 'r1', 'r2')
+  def core_routes = FrrTables.core_routes(@t, 'r1')
 
   # r2's routes seen from r1: one LAN hop (cost 10) further, through r2.
   def expected_core_routes(frr_nets)
@@ -120,9 +80,7 @@ class TestFrrSpf < Test::Unit::TestCase
                "#{@t.core_log('r1').lines.last(15).join}"
   end
 
-  def pp_table((nets, routers))
-    (nets.sort + routers.sort).map { |k, v| "  #{k} #{v.inspect}" }.join("\n")
-  end
+  def pp_table(t) = FrrTables.pp_table(t)
 
   def test_routes_match_frr_as_the_network_changes
     all = %w[3.3.3.3/32 4.4.4.4/32 10.0.34.0/24 192.0.2.0/24 198.51.100.0/24]

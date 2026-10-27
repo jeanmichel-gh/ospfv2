@@ -33,6 +33,10 @@ jobs:
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq frr iproute2
       - run: sudo -E env "PATH=$PATH" OSPFV2_FRR=1 bundle exec ruby -Ilib -Itest test/integration/frr_interop_test.rb
       - run: sudo -E env "PATH=$PATH" OSPFV2_FRR=1 bundle exec ruby -Ilib -Itest test/integration/frr_spf_test.rb
+      - run: sudo -E env "PATH=$PATH" OSPFV2_FRR=1 bundle exec ruby -Ilib -Itest test/integration/frr_abr_test.rb
+      - run: sudo -E env "PATH=$PATH" OSPFV2_FRR=1 bundle exec ruby -Ilib -Itest test/integration/frr_stub_test.rb
+      - run: sudo -E env "PATH=$PATH" OSPFV2_FRR=1 bundle exec ruby -Ilib -Itest test/integration/frr_nssa_test.rb
+      - run: sudo -E env "PATH=$PATH" OSPFV2_FRR=1 bundle exec ruby -Ilib -Itest test/integration/frr_ecmp_test.rb
       - run: sudo -E env "PATH=$PATH" bundle exec ruby -Ilib -Itest test/integration/netlink_test.rb
 
   docker:

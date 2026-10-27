@@ -92,15 +92,17 @@ module OSPFv2
             node = child
             i += 2
             return self if i == words.size
+          # A leaf or flag may be followed by its siblings, as on Junos:
+          # "stub default-metric 10 no-summaries".
           when :leaf
             v = value(child, child.type, words[i + 1], path)
-            extra!(words, i + 2)
             data[child.name] = v
-            return self
+            i += 2
+            return self if i == words.size
           when :flag
-            extra!(words, i + 1)
             data[child.name] = true
-            return self
+            i += 1
+            return self if i == words.size
           when :keyed_leaf
             key = value(child, child.type, words[i + 1], path)
             sub, sub_type = child.sub

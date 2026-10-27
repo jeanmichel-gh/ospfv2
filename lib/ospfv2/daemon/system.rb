@@ -26,13 +26,33 @@ module OSPFv2
           [name, Link.new(name: name, address: addrs.first, up: e[:up], others: addrs.drop(1))]
         end
       end
+
+      STATIC_PROTOCOLS = [3, 4].freeze # RTPROT_BOOT (ip route add), RTPROT_STATIC
+
+      # Static routes in the main table, as [prefix, prefix_len] Integers.
+      def static_routes
+        require_relative '../fib/netlink'
+        nl = Fib::Netlink.new
+        begin
+          nl.dump(protocols: STATIC_PROTOCOLS).map { |r| [r.prefix, r.prefix_len] }
+        ensure
+          nl.close
+        end
+      rescue StandardError
+        []
+      end
     end
 
     # A fixed set of links, for tests and the offline demo.
     class FakeSystem
+      attr_accessor :statics
+
       def initialize(links = {})
         @links = links
+        @statics = []
       end
+
+      def static_routes = @statics.dup
 
       # set('eth1', '10.0.0.1/24'), set('eth1', nil) to remove the address
       def set(name, address, up: true)

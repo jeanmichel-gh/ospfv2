@@ -71,6 +71,31 @@
 * Interop: on the FRR topology our routes reach the kernel, carry pings
   across it, survive a crash and restart, and leave on a clean stop.
   Netlink tests in a network namespace (run as root)
+* Area border router: B bit, type 3 summaries for other areas' routes and
+  type 4 summaries for AS boundary routers (RFC 2328 12.4.3), Appendix E
+  link state ids, withdrawn when no longer wanted
+* AS boundary router: AS-external-LSAs (12.4.4) and the E bit, from a
+  Junos-style export policy (policy-options policy-statement with
+  protocol direct|static, route-filter exact|orlonger|longer|upto, then
+  metric, external type, tag, accept, reject; protocols ospf export)
+* Stub and totally stubby areas (area N stub [default-metric M]
+  [no-summaries]): no E bit, no AS-external LSAs or type 4 summaries,
+  a default summary from the ABR; neighbors that disagree are refused
+* NSSA (RFC 3101; area N nssa [default-lsa default-metric M metric-type
+  1|2] [no-summaries]): N bit in hellos, type 7 LSAs with the P bit and a
+  forwarding address from an NSSA ASBR (P clear from an NSSA ABR, which
+  originates the type 5 itself), type 7 routes in SPF with the 2.5
+  preference rules, translation into type 5 by the NSSA ABR with the
+  highest router id, the optional type 7 default and the no-summaries
+  type 3 default
+* Interop: stub, totally stubby and NSSA areas behind our ABR, with FRR
+  inside; equal-cost failover in the kernel within the dead interval
+* Configuration: a leaf or flag may be followed by its siblings on one
+  line, as on Junos (set ... stub default-metric 10 no-summaries)
+* Fix: a router in two areas tracked its own LSAs by LSA key alone, so
+  its router-LSA in the second area could stay stale
+* Interop: our router as ABR and ASBR between two FRR routers; FRR's
+  tables match our SPF from their seats and traffic crosses our router
 * Interop test: on a four-router FRR topology (ECMP, an ABR, type 1 and
   type 2 externals), SPF over our database gives FRR's own table
   exactly, before and after a metric change and a withdrawn external

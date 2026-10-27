@@ -12,6 +12,12 @@
 #                          "auth": {"type": "md5", "keys": {"1": "secret"}}},
 #                         {"name": "lo", "address": "1.1.1.1/32", "passive": true}]}
 #
+# "areas": {"0.0.0.1": {"stub": {"no_summaries": true}}} sets area options;
+# {"nssa": {"default_lsa": {"metric": 5, "type": 2}, "no_summaries": false}}.
+#
+# "externals": [{"prefix": "203.0.113.0/24", "metric": 7, "type": 1, "tag": 9}]
+# are advertised as AS-external-LSAs.
+#
 # With "fib": true the routes go into the namespace's kernel table over
 # netlink (protocol 89, main table), and SIGTERM withdraws them.
 #
@@ -42,6 +48,16 @@ router = OSPFv2::Core::Instance.new(
   router_id: config.fetch(:router_id), loop: loop_,
   logger: ->(level, msg) { warn "#{level} #{msg}" unless level == :debug }
 )
+router.area_options = (config[:areas] || {}).to_h do |id, o|
+  opts = {}
+  opts[:stub] = { default_metric: o[:stub][:default_metric], no_summaries: o[:stub][:no_summaries] == true } if o[:stub]
+  if o[:nssa]
+    dl = o[:nssa][:default_lsa]
+    opts[:nssa] = { default_lsa: dl && { metric: dl[:metric] || 1, type: dl[:type] || 2 },
+                    no_summaries: o[:nssa][:no_summaries] == true }
+  end
+  [OSPFv2::Core::Addr.to_i(id.to_s), opts]
+end
 config.fetch(:interfaces).each do |i|
   ip = i.fetch(:address).split('/').first
   opts = { name: i.fetch(:name), address: i.fetch(:address), area: i[:area] || 0 }
@@ -57,6 +73,14 @@ config.fetch(:interfaces).each do |i|
   end
 end
 loop_.call { router.start }
+if config[:externals]
+  ext = config[:externals].map do |e|
+    ip, len = e.fetch(:prefix).split('/')
+    { prefix: OSPFv2::Core::Addr.to_i(ip), prefix_len: len.to_i, metric: e[:metric] || 20, type: e[:type] || 2,
+      tag: e[:tag] || 0 }
+  end
+  loop_.call { router.externals = ext }
+end
 fib = nil
 if config[:fib]
   log = ->(level, msg) { warn "#{level} #{msg}" unless level == :debug }
