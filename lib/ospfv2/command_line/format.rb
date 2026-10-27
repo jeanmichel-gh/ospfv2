@@ -17,6 +17,13 @@ module OSPFv2
         when :overview then style == :ios ? ios_overview(data) : junos_overview(data)
         when :log then log(data)
         when :statistics then statistics(data)
+        when :routes
+          case style
+          when :ios then ios_routes(data)
+          when :ios_rib then ios_rib(data)
+          else junos_routes(data, detail)
+          end
+        when :spf then style == :ios ? ios_spf(data, router_id) : junos_spf(data)
         else data.to_s
         end
       end
@@ -203,7 +210,9 @@ module OSPFv2
           out << "      Up (in full state): #{a['full_neighbors']}"
         end
         out << "  External LSAs: #{o['external_lsas']}"
-        out << '  SPF: not available yet'
+        spf = o['spf'] || {}
+        out << "  SPF: #{spf['runs'].to_i} runs#{spf['last_ago'] ? ", last #{duration(spf['last_ago'])} ago" : ''}, " \
+               "#{spf['routes'].to_i} routes"
         o['pending'].each { |name, why| out << "  Interface #{name} not running: #{why}" }
         out.join("\n")
       end
@@ -219,9 +228,128 @@ module OSPFv2
           out << "    Area #{name}"
           out << "        Number of interfaces in this area is #{a['interfaces']}"
           out << "        Number of fully adjacent neighbors in this area is #{a['full_neighbors']}"
+          out << "        SPF algorithm executed #{o.dig('spf', 'runs').to_i} times"
           out << "        Number of LSA #{a['lsas']}. Checksum Sum #{a['checksum_sum']}"
         end
         o['pending'].each { |name, why| out << " Interface #{name} not running: #{why}" }
+        out.join("\n")
+      end
+
+      # ---- routes ----
+
+      PATH_TYPES = { 'intra' => 'Intra', 'inter' => 'Inter', 'ext1' => 'Ext1', 'ext2' => 'Ext2' }.freeze
+
+      # Junos "show ospf route": routers first, then networks.
+      def junos_routes(data, detail)
+        widths = [18, 5, 11, 4, -6, 13]
+        out = ['Topology default Route Table:', '',
+               row(['Prefix', 'Path', 'Route', 'NH', 'Metric', 'NextHop', 'Nexthop'], widths),
+               row(['', 'Type', 'Type', 'Type', '', 'Interface', 'Address/LSP'], widths)]
+        rows = data['routers'].map { |r| [r, r['router_id'], router_kind(r)] } +
+               data['routes'].map { |r| [r, r['prefix'], 'Network'] }
+        rows.each do |r, dest, kind|
+          metric = r['path_type'] == 'ext2' ? r['type2_cost'] : r['cost']
+          hops = r['next_hops'].empty? ? [{ 'interface' => '', 'gateway' => nil }] : r['next_hops']
+          hops.each_with_index do |h, i|
+            cells = i.zero? ? [dest, PATH_TYPES.fetch(r['path_type'], r['path_type']), kind, 'IP', metric] : ['', '', '', '', '']
+            out << row(cells + [h['interface'], h['gateway']], widths)
+          end
+          next unless detail
+          d = [r['area'] && "area #{r['area']}", "origin #{r['advr']}"].compact
+          d << "type 2 metric #{r['type2_cost']}, internal #{r['cost']}" if r['path_type'] == 'ext2'
+          d << "fwd addr #{r['forwarding']}" if r['forwarding']
+          d << "tag #{r['tag']}" if r['tag'].to_i.positive?
+          out << "  #{d.join(', ')}"
+        end
+        out.join("\n")
+      end
+
+      def router_kind(r)
+        "#{[('Area' if r['abr']), ('AS' if r['asbr'])].compact.join('/')} BR"
+      end
+
+      # "show ip ospf route", as FRR prints it.
+      def ios_routes(data)
+        nets, ext = data['routes'].partition { |r| %w[intra inter].include?(r['path_type']) }
+        out = ['============ OSPF network routing table ============']
+        nets.each do |r|
+          out << format('%-4s %-18s    [%d] area: %s', r['path_type'] == 'inter' ? 'N IA' : 'N', r['prefix'], r['cost'], r['area'])
+          out.concat(ios_hops(r))
+        end
+        out << '' << '============ OSPF router routing table ============='
+        data['routers'].each do |r|
+          kinds = [('ABR' if r['abr']), ('ASBR' if r['asbr'])].compact.join(', ')
+          out << format('%-4s %-18s    [%d] area: %s, %s', r['path_type'] == 'inter' ? 'R IA' : 'R', r['router_id'],
+                        r['cost'], r['area'], kinds)
+          out.concat(ios_hops(r))
+        end
+        out << '' << '============ OSPF external routing table ==========='
+        ext.each do |r|
+          cost = r['path_type'] == 'ext2' ? "#{r['cost']}/#{r['type2_cost']}" : r['cost'].to_s
+          out << format('%-4s %-18s    [%s] tag: %d', r['path_type'] == 'ext2' ? 'N E2' : 'N E1', r['prefix'], cost, r['tag'].to_i)
+          out.concat(ios_hops(r))
+        end
+        out.join("\n")
+      end
+
+      def ios_hops(r)
+        r['next_hops'].map do |h|
+          (' ' * 27) + (h['gateway'] ? "via #{h['gateway']}, #{h['interface']}" : "directly attached to #{h['interface']}")
+        end
+      end
+
+      IOS_CODES = { 'intra' => 'O', 'inter' => 'O IA', 'ext1' => 'O E1', 'ext2' => 'O E2' }.freeze
+
+      # "show ip route ospf": what OSPF puts in the routing table.
+      # Networks we are on stay connected routes and are left out.
+      def ios_rib(data)
+        out = ['Codes: O - OSPF, IA - OSPF inter area, E1 - OSPF external type 1, E2 - OSPF external type 2', '']
+        data['routes'].each do |r|
+          hops = r['next_hops']
+          next if hops.empty? || hops.any? { |h| h['gateway'].nil? }
+          metric = r['path_type'] == 'ext2' ? r['type2_cost'] : r['cost']
+          lead = format('%-8s %s ', IOS_CODES.fetch(r['path_type'], 'O'), r['prefix'])
+          hops.each_with_index do |h, i|
+            out << "#{i.zero? ? lead : ' ' * lead.size}[110/#{metric}] via #{h['gateway']}, #{h['interface']}"
+          end
+        end
+        out.join("\n")
+      end
+
+      # ---- SPF ----
+
+      def junos_spf(s)
+        return 'OSPF is not configured' unless s['configured']
+        st = s['settings']
+        out = ["SPF runs: #{s['runs']}, state: #{s['state'].tr('_', ' ')}, routes: #{s['routes']}, " \
+               "next run: #{s['next_run_in'] ? "in #{(s['next_run_in'] * 1000).round} ms" : 'none'}",
+               "Back-off (RFC 8405): initial #{st['initial']} ms, short #{st['short']} ms, long #{st['long']} ms, " \
+               "learn #{st['learn']} ms, holddown #{st['holddown']} ms", '',
+               format('%-20s %-10s %6s  %-11s %s', 'When', 'Elapsed', 'Routes', 'Changes', 'Trigger')]
+        s['log'].each do |x|
+          out << format('%-20s %-10.6f %6d  %-11s %s', x['time'].sub('T', ' ').sub('Z', ''), x['duration_ms'] / 1000.0,
+                        x['routes'], "+#{x['added']} ~#{x['changed']} -#{x['removed']}",
+                        x['reasons'].map { |y| [y['kind'], y['detail']].compact.join(' ') }.join(', '))
+        end
+        out.join("\n")
+      end
+
+      SPF_CODES = { 'router' => 'R', 'network' => 'N', 'summary' => 'SN', 'asbr_summary' => 'SA', 'external' => 'X',
+                    'nssa' => 'X7', 'maxage' => 'MAXAGE', 'interface' => 'IF', 'neighbor' => 'NBR', 'area' => 'AREA',
+                    'stop' => 'STOP', 'manual' => 'CLEAR', 'more' => '+' }.freeze
+
+      # "show ip ospf statistics"
+      def ios_spf(s, router_id)
+        return '%OSPF: not configured' unless s['configured']
+        out = ['', "            OSPF Router with ID (#{router_id}) (Process ID 1)", '',
+               "  SPF algorithm executed #{s['runs']} times", '',
+               '  SPF calculation time',
+               format('%-10s %-8s %-7s %-10s %s', 'Delta T', 'Total', 'Routes', 'Changes', 'Reason')]
+        s['log'].reverse_each do |x|
+          codes = x['reasons'].map { |y| SPF_CODES.fetch(y['kind'], y['kind']) }.uniq
+          out << format('%-10s %-8s %-7d %-10s %s', duration(x['ago']), x['duration_ms'].round, x['routes'],
+                        "+#{x['added']} ~#{x['changed']} -#{x['removed']}", codes.join(', '))
+        end
         out.join("\n")
       end
 

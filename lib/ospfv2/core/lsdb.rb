@@ -17,6 +17,10 @@ module OSPFv2
 
       include Enumerable
 
+      # Called with (new, old) when an install changes the contents
+      # (RFC 2328 13.2): what makes SPF run.
+      attr_accessor :on_change
+
       def initialize(clock)
         @clock = clock
         @entries = {}
@@ -65,6 +69,7 @@ module OSPFv2
       def install(lsa)
         old = self[lsa.key]
         @entries[lsa.key] = Entry.new(lsa, @clock.now, false)
+        @on_change&.call(lsa, old) if Lsdb.contents_changed?(old, lsa)
         if lsa.max_age?
           @expired[lsa.key] = true
         else
@@ -88,6 +93,12 @@ module OSPFv2
 
       def entries
         @entries.values
+      end
+
+      # The LSAs not yet at MaxAge, as stored (their ages are stale, but
+      # under MaxAge). What SPF reads: no copies.
+      def live
+        @entries.each_value.filter_map { |e| e.lsa if age(e) < OSPFv2::MaxAge }
       end
 
       def keys

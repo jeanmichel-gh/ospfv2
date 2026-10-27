@@ -8,11 +8,14 @@ require_relative 'wire'
 require_relative 'neighbor'
 require_relative 'interface'
 require_relative 'area'
+require_relative 'spf'
+require_relative 'spf_scheduler'
 
 module OSPFv2
   module Core
     # One OSPFv2 router: areas, interfaces, flooding (RFC 2328 section 13),
-    # LSA origination and aging (sections 12 and 14).
+    # LSA origination and aging (sections 12 and 14), and the routing
+    # table (section 16), recomputed with RFC 8405 back-off.
     #
     #   loop = EventLoop.new.start
     #   r = Instance.new(router_id: '1.1.1.1', loop: loop)
@@ -28,16 +31,23 @@ module OSPFv2
       end
 
       MAX_EVENTS = 2000
+      MAX_SPF_LOG = 100
+
+      # One SPF run, for show ospf log and show ip ospf statistics.
+      SpfRun = Struct.new(:time, :reasons, :duration, :routes, :diff, keyword_init: true)
       AS_SCOPE = [5].freeze
       AREA_SCOPE = [1, 2, 3, 4].freeze
 
-      attr_reader :router_id, :loop, :areas, :interfaces, :as_lsdb, :random, :events, :stats
+      attr_reader :router_id, :loop, :areas, :interfaces, :as_lsdb, :random, :events, :stats,
+                  :route_table, :spf, :spf_log
 
       # router_id: dotted quad or Integer
       # loop:      the EventLoop that owns this router
       # logger:    optional ->(level, message) for every event
       # tracer:    optional ->(direction, interface, packet, peer) per packet
-      def initialize(router_id:, loop:, random: Random.new, logger: nil, tracer: nil)
+      # spf:       RFC 8405 timers in seconds, see SpfScheduler::DEFAULTS
+      # max_paths: equal-cost next hops kept per route
+      def initialize(router_id:, loop:, random: Random.new, logger: nil, tracer: nil, spf: {}, max_paths: 16)
         @router_id = Addr.to_i(router_id)
         @loop = loop
         @random = random
@@ -46,6 +56,13 @@ module OSPFv2
         @areas = {}
         @interfaces = {}
         @as_lsdb = Lsdb.new(loop.clock)
+        @as_lsdb.on_change = method(:lsdb_changed)
+        @max_paths = max_paths
+        @route_table = Spf::Table.empty
+        @spf_log = []
+        @spf_skipped = []
+        @route_listeners = []
+        @spf = SpfScheduler.new(loop, **spf) { |reasons| compute_routes(reasons) }
         @own = {}              # key => { area:, refresh:, wrap: } for LSAs we originate
         @last_origination = {} # key => loop time, for MinLSInterval (kept across flushes)
         @deferred = {}         # key => timer for an origination held by MinLSInterval
@@ -60,7 +77,7 @@ module OSPFv2
 
       def area(id)
         id = Addr.to_i(id.is_a?(Integer) ? id : id.to_s)
-        @areas[id] ||= Area.new(self, id)
+        @areas[id] ||= Area.new(self, id).tap { |a| a.lsdb.on_change = method(:lsdb_changed) }
       end
 
       def add_interface(name:, address:, area: 0, transport: nil, **opts)
@@ -95,6 +112,7 @@ module OSPFv2
         elsif @running
           area.schedule_origination
         end
+        @spf.trigger(:interface, name) if @running
         log(:info, iface, "interface #{name} removed")
         iface
       end
@@ -122,6 +140,9 @@ module OSPFv2
         @own.each_value { |o| o[:refresh]&.cancel }
         @deferred.each_value(&:cancel)
         @deferred.clear
+        @spf.stop
+        # Nothing routes through a stopped router.
+        replace_routes(Spf::Table.empty, [SpfScheduler::Reason.new(:stop, nil)], 0.0) unless @route_table.routes.empty?
         log(:info, nil, "router #{router_id_s} stopped")
         self
       end
@@ -133,6 +154,16 @@ module OSPFv2
         @listeners << block
         self
       end
+
+      # Called with an Spf::Diff each time the routing table changes.
+      # The FIB hangs off this.
+      def on_route_change(&block)
+        @route_listeners << block
+        self
+      end
+
+      # Routes as { [prefix, len] => Spf::Route }.
+      def routes = @route_table.routes
 
       # ---- scopes ----
 
@@ -154,12 +185,16 @@ module OSPFv2
 
       def neighbor_changed(nbr, old, new)
         nbr.iface.forget(nbr) if new == :down
-        nbr.iface.area.schedule_origination if old == :full || new == :full
+        if old == :full || new == :full
+          nbr.iface.area.schedule_origination
+          @spf.trigger(:neighbor, Addr.to_s(nbr.router_id))
+        end
         @listeners.each { |l| l.call(nbr, old, new) }
       end
 
-      def interface_changed(iface, _old, _new)
+      def interface_changed(iface, old, new)
         iface.area.schedule_origination
+        @spf.trigger(:interface, iface.name) if old == :down || new == :down
       end
 
       def dr_changed(iface)
@@ -323,6 +358,22 @@ module OSPFv2
         rows + @as_lsdb.map { |l| [nil, l] }
       end
 
+      # ---- routing table (RFC 2328 16) ----
+
+      # Runs the calculation over every database and swaps the new table
+      # in. Called by the SPF scheduler.
+      def compute_routes(reasons = [])
+        return unless @running
+        t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        table = Spf.run(router_id: @router_id, areas: spf_areas, externals: @as_lsdb.live, max_paths: @max_paths)
+        @stats[:spf_runs] += 1
+        replace_routes(table, reasons, Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0)
+        # Warn once per bad LSA, not on every run.
+        (table.stats[:skipped] - @spf_skipped).each { |why| log(:warn, nil, "SPF skipped #{why}") }
+        @spf_skipped = table.stats[:skipped]
+        table
+      end
+
       # ---- log ----
 
       def log(level, iface, message)
@@ -344,6 +395,32 @@ module OSPFv2
 
       private
 
+      def lsdb_changed(lsa, _old)
+        return unless @running
+        @spf.trigger(lsa.type_name, lsa.type == 1 ? Addr.to_s(lsa.advr) : "#{Addr.to_s(lsa.ls_id)} from #{Addr.to_s(lsa.advr)}")
+      end
+
+      def spf_areas
+        @areas.values.map do |a|
+          links = a.interfaces.select(&:up?).map do |i|
+            Spf::Link.new(name: i.name, address: i.address, prefix_len: i.prefix_len,
+                          neighbors: i.full_neighbors.to_h { |n| [n.router_id, n.address] })
+          end
+          Spf::Area.new(id: a.id, lsas: a.lsdb.live, interfaces: links)
+        end
+      end
+
+      def replace_routes(table, reasons, duration)
+        diff = Spf.diff(@route_table.routes, table.routes)
+        @route_table = table
+        @spf_log << SpfRun.new(time: @loop.clock.wall, reasons: reasons, duration: duration,
+                               routes: table.routes.size, diff: diff)
+        @spf_log.shift(@spf_log.size - MAX_SPF_LOG) if @spf_log.size > MAX_SPF_LOG
+        return if diff.empty?
+        log(:info, nil, "routes #{diff} after SPF (#{reasons.first(3).join(', ')}#{reasons.size > 3 ? ', ...' : ''})")
+        @route_listeners.each { |l| l.call(diff) }
+      end
+
       # An area with no interfaces left: stop refreshing our LSAs in it and
       # forget it.
       def drop_area(area)
@@ -352,6 +429,7 @@ module OSPFv2
           @deferred.delete(key)&.cancel
         end
         @areas.delete(area.id)
+        @spf.trigger(:area, area.id_s) if @running
       end
 
       def install_own(area, lsa)
@@ -431,6 +509,7 @@ module OSPFv2
           if e.lsa.age < OSPFv2::MaxAge && !e.aged_out
             e.aged_out = true
             log(:info, nil, "#{e.lsa.id_string} reached MaxAge")
+            @spf.trigger(:maxage, e.lsa.id_string)
             flood(db.current(e), area)
           end
           next if exchanging?(key[0], area)
