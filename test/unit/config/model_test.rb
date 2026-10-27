@@ -68,6 +68,13 @@ class TestConfigModel < Test::Unit::TestCase
     assert_match(/eth5: send-key 9 is not a configured key/, errs.join)
   end
 
+  def test_dead_interval_is_checked_against_the_default_hello
+    errs = errors('set routing-options router-id 1.1.1.1', 'set protocols ospf area 0 interface eth1 dead-interval 5')
+    assert_equal ['interface eth1: dead-interval 5 must be above hello-interval 10'], errs
+    require 'ospfv2/core'
+    assert_equal OSPFv2::Core::Interface::DEFAULTS[:hello_interval], Model::DEFAULT_HELLO
+  end
+
   def test_disabled_interfaces_and_warnings
     m = model('set protocols ospf area 0 interface eth1 disable')
     assert_empty m.interfaces

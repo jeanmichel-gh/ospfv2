@@ -187,6 +187,130 @@ class TestDaemon < Test::Unit::TestCase
     @loop.run_until(120) { peer_full? }
   end
 
+  # ---- review findings ----
+
+  def test_a_broken_file_is_kept_aside_not_lost
+    text = "set routing-options router-id 1.1.1.1\n" \
+           "set protocols ospf area 0 interface eth1 authentication md5 1 key TOPSECRETTOPSECRETXX\n"
+    daemon(text)
+    assert_nil @d.instance
+    assert_equal "#{@path}.broken", @d.broken_file
+    assert_equal text, File.read(@d.broken_file)
+    assert_equal 0o600, File.stat(@d.broken_file).mode & 0o777
+    assert(@log.none? { |l| l.include?('TOPSECRET') }, 'the secret stays out of the log')
+    commit!(*BASE)
+    assert_equal text, File.read("#{@path}.broken"), 'a commit does not touch the kept copy'
+    assert_nil @d.broken_file
+  end
+
+  # A transport factory whose interface +bad+ fails to start until fixed.
+  def flaky_transport(bad)
+    state = { broken: true }
+    factory = lambda do |name, ip|
+      t = Transport::Loopback.new(@hub, ip)
+      t.define_singleton_method(:start) { |&b| raise PermissionError, 'raw sockets need root' } if name == bad && state[:broken]
+      t
+    end
+    [factory, state]
+  end
+
+  def daemon_with(transport, text = nil)
+    File.write(@path, text) if text
+    @d = Daemon.new(config_path: @path, loop: @loop, system: @system, transport: transport,
+                    logger: ->(level, msg) { @log << "#{level} #{msg}" })
+    @d.start
+  end
+
+  def test_a_transport_that_fails_leaves_no_stuck_interface
+    @system.set('eth2', '10.0.2.1/24')
+    factory, state = flaky_transport('eth2')
+    daemon_with(factory, (BASE + ['set protocols ospf area 0 interface eth2']).join("\n"))
+    assert_equal %w[eth1 lo], @d.instance.interfaces.keys.sort, 'startup survives one bad interface'
+    assert_equal({ 'eth2' => 'raw sockets need root' }, @d.pending)
+    @loop.advance(Daemon::RECHECK * 3)
+    assert_equal 1, @log.count { |l| l.include?('eth2: raw sockets need root') }, 'logged once, not on every retry'
+    state[:broken] = false
+    @loop.advance(Daemon::RECHECK)
+    assert @d.instance.interfaces.key?('eth2'), 'retried and started'
+    assert_empty @d.pending
+  end
+
+  def test_a_failing_interface_can_be_deleted
+    @system.set('eth2', '10.0.2.1/24')
+    factory, = flaky_transport('eth2')
+    daemon_with(factory, (BASE + ['set protocols ospf area 0 interface eth2']).join("\n"))
+    commit!('delete protocols ospf area 0 interface eth2')
+    assert_empty @d.pending
+    assert !@d.instance.interfaces.key?('eth2')
+  end
+
+  def test_router_id_change_with_a_failing_interface_keeps_router_and_config_in_step
+    @system.set('eth2', '10.0.2.1/24')
+    factory, = flaky_transport('eth2')
+    daemon_with(factory, BASE.join("\n"))
+    r = commit!('set routing-options router-id 9.9.9.9', 'set protocols ospf area 0 interface eth2')
+    assert_equal '9.9.9.9', @d.instance.router_id_s
+    assert_match(/9\.9\.9\.9/, File.read(@path))
+    assert_includes r[:warnings], 'interface eth2: raw sockets need root'
+  end
+
+  def test_router_id_change_flushes_the_old_lsas
+    daemon(BASE.join("\n"))
+    @loop.run_until(120) { peer_full? }
+    @loop.advance(10)
+    old_key = [1, Core::Addr.to_i('1.1.1.1'), Core::Addr.to_i('1.1.1.1')]
+    assert @peer.area(0).lsdb[old_key]
+    commit!('set routing-options router-id 9.9.9.9')
+    @loop.run_until(30) { (l = @peer.area(0).lsdb[old_key]).nil? || l.max_age? }
+  end
+
+  def test_a_save_failure_changes_nothing
+    daemon(BASE.join("\n"))
+    Dir.mkdir("#{@path}.tmp") # cannot be written as a file
+    @d.configure(['set protocols ospf area 0 interface eth1 metric 50'])
+    r = @d.commit
+    assert !r[:ok]
+    assert_match(/cannot save .*nothing changed/, r[:errors].first)
+    assert_equal 10, @d.instance.interfaces['eth1'].cost, 'the router did not change'
+    assert @d.candidate_changed?
+    assert_empty @d.commit_history
+  end
+
+  def test_history_lists_saved_commits_so_numbers_match_rollbacks
+    daemon(BASE.join("\n")) # the startup commit is not saved
+    commit!('set protocols ospf area 0 interface eth1 metric 20')
+    commit!('set protocols ospf area 0 interface eth1 metric 30')
+    assert_equal 2, @d.commit_history.size
+    @d.rollback(1)
+    assert_equal ['- set protocols ospf area 0.0.0.0 interface eth1 metric 30',
+                  '+ set protocols ospf area 0.0.0.0 interface eth1 metric 20'], @d.compare
+  end
+
+  def test_comments_are_cleaned
+    daemon
+    @d.configure(BASE)
+    @d.commit(comment: "first\n2026-10-27T00:00:00Z error FORGED#{'x' * 300}")
+    c = @d.commit_history.first[:comment]
+    assert_no_match(/\n/, c)
+    assert_operator c.size, :<=, 200
+  end
+
+  def test_an_area_left_empty_goes_away
+    daemon((BASE + ['set protocols ospf area 1 interface eth2']).join("\n"))
+    @system.set('eth2', '10.0.2.1/24')
+    @loop.advance(Daemon::RECHECK)
+    assert_equal %w[0.0.0.0 0.0.0.1], @d.instance.areas.values.map(&:id_s).sort
+    commit!('delete protocols ospf area 1')
+    @loop.advance(5)
+    assert_equal %w[0.0.0.0], @d.instance.areas.values.map(&:id_s)
+  end
+
+  def test_a_loopback_only_address_runs_passive_only
+    @system.set('lo', '127.0.0.1/8')
+    daemon((BASE.take(2) + ['set protocols ospf area 0 interface lo']).join("\n"))
+    assert_equal 'only a 127/8 address', @d.pending['lo']
+  end
+
   def test_views
     daemon(BASE.join("\n"))
     @loop.run_until(120) { peer_full? }

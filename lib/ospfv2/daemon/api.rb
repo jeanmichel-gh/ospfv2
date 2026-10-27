@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'etc'
+require 'io/wait'
 require 'json'
 require 'socket'
 require 'fileutils'
@@ -16,7 +17,9 @@ module OSPFv2
     # The socket is created mode 0660, so access is by file permission:
     # root, and the socket's group if one is given.
     class Api
-      MAX_LINE = 1 << 20
+      MAX_LINE = 1 << 20   # bytes in one request
+      MAX_CLIENTS = 32     # connections served at once
+      IDLE = 900           # seconds a connection may sit silent
 
       # name => ->(daemon, params) { result }
       METHODS = {
@@ -50,12 +53,24 @@ module OSPFv2
         @clients_lock = Mutex.new
       end
 
+      # Raised when another ospfd already answers on the socket path.
+      class InUse < StandardError; end
+
       def start
         FileUtils.mkdir_p(File.dirname(@path))
-        File.delete(@path) if File.socket?(@path)
-        @server = UNIXServer.new(@path)
-        File.chmod(0o660, @path)
-        File.chown(nil, Etc.getgrnam(@group).gid, @path) if @group
+        if File.socket?(@path)
+          raise InUse, "another ospfd is running on #{@path}" if live?(@path)
+          File.delete(@path) # left by a daemon that died
+        end
+        gid = @group && Etc.getgrnam(@group).gid
+        # The socket is born 0660: no window where umask leaves it open.
+        old = File.umask(0o117)
+        begin
+          @server = UNIXServer.new(@path)
+        ensure
+          File.umask(old)
+        end
+        File.chown(nil, gid, @path) if gid
         @thread = Thread.new do
           Thread.current.name = 'ospfd-api'
           accept_loop
@@ -90,10 +105,30 @@ module OSPFv2
 
       private
 
+      def live?(path)
+        UNIXSocket.new(path).close
+        true
+      rescue SystemCallError
+        false
+      end
+
       def accept_loop
         loop do
-          client = @server.accept
-          @clients_lock.synchronize { @clients << client }
+          begin
+            client = @server.accept
+          rescue Errno::EMFILE, Errno::ENFILE, Errno::ENOBUFS, Errno::ENOMEM => e
+            # Out of file descriptors: wait for some to free up, keep serving.
+            @logger&.call(:warn, "api: #{e.message}")
+            sleep 0.5
+            next
+          end
+          busy = @clients_lock.synchronize do
+            @clients.size >= MAX_CLIENTS || (@clients << client && false)
+          end
+          if busy
+            reject(client, "too many connections (#{MAX_CLIENTS})")
+            next
+          end
           Thread.new(client) do |c|
             Thread.current.name = 'ospfd-api-client'
             serve(c)
@@ -106,8 +141,19 @@ module OSPFv2
         # server closed by #stop
       end
 
+      def reject(client, why)
+        client.write_nonblock("#{JSON.generate(error: why)}\n", exception: false)
+        client.close
+      rescue SystemCallError, IOError
+        nil
+      end
+
       def serve(sock)
-        while (line = sock.gets(MAX_LINE))
+        while sock.wait_readable(IDLE) && (line = sock.gets(MAX_LINE))
+          unless line.end_with?("\n") || line.bytesize < MAX_LINE
+            sock.write("#{JSON.generate(error: "request longer than #{MAX_LINE} bytes")}\n")
+            return
+          end
           resp = begin
             req = JSON.parse(line)
             req.is_a?(Hash) ? handle(req) : { error: 'request must be a JSON object' }

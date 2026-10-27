@@ -19,6 +19,8 @@ module OSPFv2
         'mtu' => :mtu
       }.freeze
 
+      DEFAULT_HELLO = 10 # as Core::Interface; checked by a test
+
       attr_reader :router_id, :interfaces, :warnings
 
       def initialize(tree)
@@ -53,8 +55,9 @@ module OSPFv2
         opts[:type] = opts[:type]&.to_sym || :broadcast
         opts[:mtu_ignore] = true if i['mtu-ignore']
         opts[:passive] = true if i['passive']
-        if opts[:dead_interval] && opts[:hello_interval] && opts[:dead_interval] <= opts[:hello_interval]
-          @errors << "interface #{name}: dead-interval #{opts[:dead_interval]} must be above hello-interval #{opts[:hello_interval]}"
+        hello = opts[:hello_interval] || DEFAULT_HELLO
+        if opts[:dead_interval] && opts[:dead_interval] <= hello
+          @errors << "interface #{name}: dead-interval #{opts[:dead_interval]} must be above hello-interval #{hello}"
         end
         auth = authentication(name, i['authentication'])
         opts[:auth] = auth if auth

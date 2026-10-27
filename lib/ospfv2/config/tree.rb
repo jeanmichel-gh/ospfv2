@@ -45,7 +45,7 @@ module OSPFv2
           begin
             apply(line)
           rescue Error => e
-            errors << "line #{n}: #{e.message}: #{line}"
+            errors << "line #{n}: #{e.message}: #{Tree.hide_secrets(line)}"
           end
         end
         errors
@@ -153,13 +153,25 @@ module OSPFv2
             data = entries[key]
             node = child
             i += 2
-          when :leaf, :flag
+          when :flag
+            extra!(words, i + 1)
+            data.delete(child.name)
+            break
+          when :leaf
+            # "delete ... metric" removes it; "delete ... metric 6" only
+            # when the metric is 6.
+            if i + 1 < words.size
+              extra!(words, i + 2)
+              raise Error, 'statement not found' unless data[child.name] == child.type.call(words[i + 1])
+            end
             data.delete(child.name)
             break
           when :keyed_leaf
             if i + 1 == words.size
               data.delete(child.name)
             else
+              # "delete ... md5 1" or "delete ... md5 1 key <secret>".
+              extra!(words, i + 4)
               key = child.type.call(words[i + 1])
               raise Error, 'statement not found' unless data[child.name].key?(key)
               data[child.name].delete(key)
@@ -225,6 +237,14 @@ module OSPFv2
         v = value.to_s
         return v if v.match?(/\A[A-Za-z0-9_.:\/@-]+\z/)
         "\"#{v.gsub(/["\\]/) { "\\#{_1}" }}\""
+      end
+
+      SECRET_WORDS = /\b(key|simple-password)(\s+)("(?:[^"\\]|\\.)*"?|\S+)/
+
+      # Masks anything after "key" or "simple-password" in a line of
+      # text, even one that does not parse. For error messages and logs.
+      def self.hide_secrets(line)
+        line.gsub(SECRET_WORDS) { "#{Regexp.last_match(1)}#{Regexp.last_match(2)}#{quote(HIDDEN)}" }
       end
 
       # Masks the secret in one set line.

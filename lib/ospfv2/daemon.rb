@@ -21,9 +21,10 @@ module OSPFv2
   # versions as rollback 1..9.
   class Daemon
     ROLLBACKS = 9
-    RECHECK = 5 # seconds between checks of the host interfaces
+    RECHECK = 5          # seconds between checks of the host interfaces
+    APPLY_TIMEOUT = 120  # seconds a commit waits for the router to take it
 
-    attr_reader :loop, :running, :candidate, :instance, :pending, :started_at
+    attr_reader :loop, :running, :candidate, :instance, :started_at, :broken_file
 
     # transport: ->(ifname, ip) { a Transport } for each non-passive interface
     def initialize(config_path:, loop: nil, system: System.new, logger: nil,
@@ -44,7 +45,9 @@ module OSPFv2
     end
 
     # Loads the saved configuration and commits it. A missing file starts
-    # an empty router; a broken one is reported and nothing runs.
+    # an empty router. A broken one runs nothing: it is copied to
+    # <file>.broken first, so the next commit cannot lose it, and the
+    # errors are logged with secrets hidden.
     def start
       @loop.start unless @loop.running? || @loop.clock.fake?
       @started_at = @loop.clock.wall
@@ -52,7 +55,9 @@ module OSPFv2
       @lock.synchronize do
         errors = @candidate.load(text)
         unless errors.empty?
-          log(:error, "#{@config_path}: #{errors.join('; ')}")
+          @broken_file = "#{@config_path}.broken"
+          File.open(@broken_file, 'w', 0o600) { |f| f.write(text) }
+          log(:error, "#{@config_path} not loaded, kept as #{@broken_file}: #{errors.join('; ')}")
           @candidate = Config::Tree.new
         end
       end
@@ -108,27 +113,48 @@ module OSPFv2
 
     # Checks the candidate and makes it the running configuration.
     # Returns { ok:, errors:, warnings:, changes: }.
+    #
+    # Order matters. The new file is written aside first, so a disk
+    # problem stops the commit before the router changes. Then the router
+    # takes the model; anything an interface cannot do yet (missing,
+    # down, transport refused) becomes a warning and is retried every
+    # RECHECK seconds. Then the file replaces the old one and the old one
+    # becomes rollback 1. Saved commits are the ones history lists, so
+    # history numbers match rollback numbers.
     def commit(check: false, save: true, comment: nil)
+      comment = clean_comment(comment)
       @lock.synchronize do
         model = Config::Model.new(@candidate)
         changes = @running.compare(@candidate)
         return { ok: true, errors: [], warnings: model.warnings, changes: changes } if check
 
-        @loop.call { apply(model) }
+        staged = save ? stage_config(@candidate) : nil
+        warnings = model.warnings + apply_on_loop(model)
         previous = @running
         @running = @candidate.dup
         @model = model
-        if save
-          save_rollback(previous)
-          write_config(@running)
+        if staged
+          begin
+            save_rollback(previous)
+          rescue SystemCallError => e
+            warnings << "rollback 1 not saved: #{e.message}"
+          end
+          begin
+            File.rename(staged, @config_path)
+          rescue SystemCallError => e
+            warnings << "applied, but #{@config_path} not saved: #{e.message}"
+          end
+          @commits.unshift({ time: @loop.clock.wall, comment: comment, changes: changes.size })
+          @commits.pop while @commits.size > ROLLBACKS
         end
-        @commits.unshift({ time: @loop.clock.wall, comment: comment, changes: changes.size })
-        @commits.pop while @commits.size > ROLLBACKS + 1
+        @broken_file = nil if save
         log(:info, "commit#{comment ? " (#{comment})" : ''}: #{changes.size} change(s)")
-        { ok: true, errors: [], warnings: model.warnings + pending_warnings, changes: changes }
+        { ok: true, errors: [], warnings: warnings, changes: changes }
       end
     rescue Config::Error => e
       { ok: false, errors: e.message.lines.map(&:chomp), warnings: [], changes: [] }
+    rescue SystemCallError => e
+      { ok: false, errors: ["cannot save #{@config_path}: #{e.message}; nothing changed"], warnings: [], changes: [] }
     end
 
     # Loads rollback +n+ (0 is the running configuration) into the
@@ -150,6 +176,11 @@ module OSPFv2
 
     def commit_history
       @lock.synchronize { @commits.map(&:dup) }
+    end
+
+    # Interfaces configured but not running, and why. Read on the loop.
+    def pending
+      @loop.call { @pending.dup }
     end
 
     # ---- operational state, for Daemon::Views ----
@@ -179,22 +210,38 @@ module OSPFv2
 
     # ---- applying a model, on the loop thread ----
 
+    # Runs apply on the loop and returns the warnings. If the loop is too
+    # busy to answer in time, the apply is still queued and will run; the
+    # caller is told so rather than given a false error.
+    def apply_on_loop(model)
+      @loop.call(timeout: APPLY_TIMEOUT) do
+        apply(model)
+        @pending.map { |name, why| "interface #{name}: #{why}" }
+      rescue StandardError => e
+        # Not expected: every interface failure is caught in add. What was
+        # applied stays, and the link recheck keeps converging on @desired.
+        log(:error, "commit applied with an error: #{e.class}: #{e.message}")
+        ["commit applied with an error (#{e.class}: #{e.message}); see show ospf interface"]
+      end
+    rescue EventLoop::Stalled
+      ['the router is busy; the change is queued and applies when it catches up']
+    end
+
     def apply(model)
+      @desired = model.interfaces
       if @instance.nil? || @instance.router_id_s != model.router_id
         if @instance
           log(:info, "router id #{@instance.router_id_s} -> #{model.router_id}: restarting OSPF")
-          @instance.stop
+          @instance.stop(flush: true)
         end
+        # Start first, then add: every interface then goes through add,
+        # whose failures are contained.
         @instance = Core::Instance.new(router_id: model.router_id, loop: @loop, logger: @logger)
+        @instance.start
         @applied = {}
         @pending = {}
-        @desired = model.interfaces
-        sync_interfaces
-        @instance.start
-      else
-        @desired = model.interfaces
-        sync_interfaces
       end
+      sync_interfaces
     end
 
     # Brings the running interfaces in line with @desired and the host.
@@ -215,6 +262,7 @@ module OSPFv2
         why = if link.nil? then 'no such interface on this host'
               elsif !link.up then 'interface is down'
               elsif link.address.nil? then 'no IPv4 address'
+              elsif link.address.start_with?('127.') && !want[:passive] then 'only a 127/8 address'
               end
         if why
           log(:warn, "interface #{name}: #{why}, will retry") unless @pending[name] == why
@@ -255,9 +303,11 @@ module OSPFv2
       @applied[name] = want.merge(address: link.address)
       @pending.delete(name)
       log(:info, "interface #{name}: running OSPF on #{link.address} in area #{want[:area]}")
-    rescue ArgumentError, PermissionError => e
+    rescue StandardError => e
+      # add_interface undoes itself; make sure, then retry later.
+      @instance.remove_interface(name) if @instance.interfaces.key?(name)
+      log(:error, "interface #{name}: #{e.message}, will retry") unless @pending[name] == e.message
       @pending[name] = e.message
-      log(:error, "interface #{name}: #{e.message}")
     end
 
     def remove(name)
@@ -269,19 +319,24 @@ module OSPFv2
       sync_interfaces if @instance && @desired
     end
 
-    def pending_warnings
-      @pending.map { |name, why| "interface #{name}: #{why}" }
+    def clean_comment(comment)
+      return nil if comment.nil?
+      c = comment.to_s.gsub(/[[:cntrl:]]/, ' ').strip[0, 200]
+      c.empty? ? nil : c
     end
 
     # ---- files ----
 
-    def write_config(tree)
+    # Writes +tree+ next to the configuration file and returns that path.
+    # Commit renames it over the file once the router has the change.
+    def stage_config(tree)
       FileUtils.mkdir_p(File.dirname(@config_path))
       tmp = "#{@config_path}.tmp"
+      File.delete(tmp) if File.file?(tmp)
       body = "# ospfd configuration, saved by commit #{@loop.clock.wall.utc.strftime('%F %T')} UTC\n" \
              "#{tree.to_set(hide: false).join("\n")}\n"
-      File.open(tmp, 'w', 0o600) { |f| f.write(body) }
-      File.rename(tmp, @config_path)
+      File.open(tmp, File::WRONLY | File::CREAT | File::EXCL, 0o600) { |f| f.write(body) }
+      tmp
     end
 
     def rollback_path(n) = "#{@config_path}.rollback.#{n}"

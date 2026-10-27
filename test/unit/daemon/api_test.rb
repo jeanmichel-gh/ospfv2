@@ -73,6 +73,54 @@ class TestDaemonApi < Test::Unit::TestCase
     client.close
   end
 
+  def test_socket_rules
+    old = File.umask(0)
+    begin
+      @api.start
+    ensure
+      File.umask(old)
+    end
+    assert_equal 0o660, File.stat(@api.path).mode & 0o777, 'mode set at creation, whatever the umask'
+
+    second = Daemon::Api.new(@daemon, path: @api.path)
+    e = assert_raise(Daemon::Api::InUse) { second.start }
+    assert_match(/another ospfd is running/, e.message)
+    assert File.socket?(@api.path), 'the live socket is not stolen'
+
+    @api.stop
+    stale = UNIXServer.new(@api.path) # a socket nobody answers on once closed
+    stale.close
+    assert File.socket?(@api.path)
+    third = Daemon::Api.new(@daemon, path: @api.path)
+    assert_nothing_raised { third.start }
+    third.stop
+  end
+
+  def test_oversized_request_is_refused
+    @api.start
+    s = UNIXSocket.new(@api.path)
+    Thread.new { s.write('x' * (Daemon::Api::MAX_LINE + 10)) rescue nil }
+    resp = JSON.parse(s.gets)
+    assert_match(/longer than/, resp['error'])
+    assert_nil s.gets, 'and the connection is closed'
+    s.close
+  end
+
+  def test_too_many_clients_are_turned_away
+    @api.start
+    held = Array.new(Daemon::Api::MAX_CLIENTS) { UNIXSocket.new(@api.path) }
+    sleep 0.2
+    extra = UNIXSocket.new(@api.path)
+    assert_match(/too many connections/, JSON.parse(extra.gets)['error'])
+    extra.close
+    held.first.close
+    sleep 0.2
+    again = CommandLine::Client.new(@api.path)
+    assert_equal false, again.call('config.changed')
+    again.close
+    held.drop(1).each(&:close)
+  end
+
   def test_client_reports_a_missing_daemon
     e = assert_raise(CommandLine::Error) { CommandLine::Client.new(File.join(@dir, 'none.sock')).call('show.overview') }
     assert_match(/cannot reach ospfd/, e.message)

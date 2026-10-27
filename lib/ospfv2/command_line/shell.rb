@@ -61,6 +61,9 @@ module OSPFv2
         out.is_a?(String) ? out : out.to_s
       rescue Error, Config::Error => e
         "error: #{e.message}"
+      rescue StandardError => e
+        # Whatever went wrong, the shell stays up.
+        "error: #{e.class}: #{e.message}"
       end
 
       # Words that can complete +partial+ given the +before+ text (Tab).
@@ -177,9 +180,15 @@ module OSPFv2
           return errors.map { |e| "error: #{e.sub(/\Aline 1: /, '').sub(/: (set|delete) .*\z/, '')}" }.join("\n")
         end
 
-        m = Grammar::CONFIGURE.parse(words.empty? ? [] : [words.first])
-        a = m.action
+        a = Grammar::CONFIGURE.parse(words.empty? ? [] : [words.first]).action
         rest = words.drop(1)
+        if a[:config] == :commit && rest.size >= 2 && 'comment'.start_with?(rest.first)
+          return commit(check: false, comment: rest.drop(1).join(' '))
+        end
+        # Everything but set, delete and run is checked word by word, so
+        # "commit chekc" is an error rather than a commit.
+        m = Grammar::CONFIGURE.parse(words) unless %i[set delete run].include?(a[:config])
+        a = m.action if m
         if a[:mode] == :operational
           note = @client.call('config.changed') ? "\nThe configuration has been changed but not committed" : ''
           @mode = :operational
@@ -195,9 +204,9 @@ module OSPFv2
           text = @client.call('show.configuration', candidate: true, format: set ? 'set' : 'curly')
           pipe(text, pipes.reject { |p| p == %w[display set] }, nil)
         when :compare then compare_text
-        when :commit then commit(rest)
+        when :commit then commit(check: a[:check] == true)
         when :rollback
-          n = rest.first || '0'
+          n = m.args.first || '0'
           raise Error, "rollback takes a number 0..9, got '#{n}'" unless n.match?(/\A\d\z/)
           @client.call('config.rollback', number: n.to_i)
           "load complete#{n == '0' ? '' : ", rollback #{n} loaded into the candidate; commit to apply"}"
@@ -210,14 +219,14 @@ module OSPFv2
           end.join("\n")
         when :run
           raise Error, 'run what? e.g. run show ospf neighbor' if rest.empty?
+          op = Grammar::OPERATIONAL.parse(rest).action
+          raise Error, 'run takes show and clear commands' if op[:exit] || op[:mode] || op[:help]
           operational(rest, pipes)
         end
       end
 
-      def commit(rest)
-        check = rest.first && 'check'.start_with?(rest.first)
-        comment = rest.first && 'comment'.start_with?(rest.first) && !check ? rest.drop(1).join(' ') : nil
-        r = @client.call('config.commit', check: check ? true : false, comment: comment)
+      def commit(check:, comment: nil)
+        r = @client.call('config.commit', check: check, comment: comment)
         return (["error: commit failed"] + r['errors'].map { |e| "  #{e}" }).join("\n") unless r['ok']
         out = r['warnings'].map { |w| "warning: #{w}" }
         out << (check ? 'configuration check succeeds' : 'commit complete')
@@ -237,9 +246,28 @@ module OSPFv2
 
       # ---- pipes ----
 
+      # Splits at | outside double quotes: the command, then each pipe as
+      # words.
       def split_pipes(line)
-        parts = line.split(/\s+\|\s*/)
-        [parts.first, *parts.drop(1).map { |p| Config::Tree.split(p) }]
+        parts = [+'']
+        quoted = false
+        escaped = false
+        line.each_char do |ch|
+          if escaped
+            escaped = false
+          elsif ch == '\\' && quoted
+            escaped = true
+          elsif ch == '"'
+            quoted = !quoted
+          elsif ch == '|' && !quoted
+            parts << +''
+            next
+          end
+          parts.last << ch
+        end
+        cmd, *pipes = parts.map(&:strip)
+        raise Error, "empty pipe in '#{line}'" if pipes.any?(&:empty?)
+        [cmd, *pipes.map { |p| Config::Tree.split(p) }]
       end
 
       def pipe(text, pipes, data)
@@ -252,7 +280,10 @@ module OSPFv2
           when :match then text = grep(text, args, true)
           when :except then text = grep(text, args, false)
           when :count then text = "Count: #{text.lines.size} lines"
-          when :last then text = text.lines.last((args.first || '10').to_i).join.chomp
+          when :last
+            n = args.first || '10'
+            raise Error, "| last takes a number 1..10000, got '#{n}'" unless n.match?(/\A\d{1,5}\z/) && n.to_i.between?(1, 10_000)
+            text = text.lines.last(n.to_i).join.chomp
           when :json then text = json(data)
           when :display
             raise Error, "display what? (json, set)" if args.empty?

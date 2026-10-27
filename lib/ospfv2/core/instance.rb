@@ -69,7 +69,15 @@ module OSPFv2
         iface = Interface.new(self, name: name, address: address, area: a, transport: transport, **opts)
         a.interfaces << iface
         @interfaces[name] = iface
-        iface.up if @running
+        begin
+          iface.up if @running
+        rescue StandardError
+          # The transport would not start: leave no trace of the interface.
+          @interfaces.delete(name)
+          a.interfaces.delete(iface)
+          drop_area(a) if a.interfaces.empty?
+          raise
+        end
         iface
       end
 
@@ -82,7 +90,11 @@ module OSPFv2
         area = iface.area
         area.interfaces.delete(iface)
         flush_own(area, [2, iface.address, @router_id]) if was_dr
-        area.schedule_origination if @running
+        if area.interfaces.empty?
+          drop_area(area)
+        elsif @running
+          area.schedule_origination
+        end
         log(:info, iface, "interface #{name} removed")
         iface
       end
@@ -96,8 +108,14 @@ module OSPFv2
         self
       end
 
-      def stop
+      # Stops the router. With +flush+, our LSAs are first flooded at
+      # MaxAge (RFC 2328 14.1), so neighbors drop them now rather than an
+      # hour later. Used when the router id changes.
+      def stop(flush: false)
         return self unless @running
+        if flush
+          @own.to_a.each { |key, o| flush_own(o[:area], key) if @areas[o[:area].id].equal?(o[:area]) }
+        end
         @running = false
         @interfaces.each_value(&:down)
         @sweep&.cancel
@@ -325,6 +343,16 @@ module OSPFv2
       end
 
       private
+
+      # An area with no interfaces left: stop refreshing our LSAs in it and
+      # forget it.
+      def drop_area(area)
+        @own.select { |_, o| o[:area].equal?(area) }.each_key do |key|
+          @own.delete(key)[:refresh]&.cancel
+          @deferred.delete(key)&.cancel
+        end
+        @areas.delete(area.id)
+      end
 
       def install_own(area, lsa)
         db = lsdb_for(lsa.type, area)

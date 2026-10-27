@@ -77,7 +77,40 @@ class TestCommandLineShell < Test::Unit::TestCase
     run_lines('configure', 'set protocols ospf area 0 interface eth1 metric 9', 'commit')
     assert_match(/rollback 1 loaded/, @sh.execute('rollback 1'))
     assert_equal '- set protocols ospf area 0.0.0.0 interface eth1 metric 9', @sh.execute('compare')
-    assert_match(/error: rollback takes a number/, @sh.execute('rollback x'))
+    assert_match(/error: syntax error, unknown 'x' after 'rollback'/, @sh.execute('rollback x'))
+  end
+
+  def test_commit_takes_only_check_or_a_comment
+    run_lines('configure', 'set routing-options router-id 1.1.1.1')
+    assert_match(/error: syntax error, unknown 'chekc' after 'commit'/, @sh.execute('commit chekc'))
+    assert_match(/error: syntax error, unknown 'extra'/, @sh.execute('commit check extra'))
+    assert @daemon.candidate_changed?, 'nothing was committed'
+    assert_match(/commit complete\z/, @sh.execute('commit comment two words | here'))
+    assert_equal 'two words', @daemon.commit_history.first[:comment], 'a pipe after a comment is cut off'
+  end
+
+  def test_bad_input_never_crashes_the_shell
+    configured
+    ['show ospf log | last -1', 'show ospf log | last 99999999999999999999', 'show ospf log | last x',
+     'show ospf neighbor |', 'show ospf neighbor | | count', '"', 'show "ospf', '| count'].each do |line|
+      out = @sh.execute(line)
+      assert_match(/\Aerror: /, out, line)
+    end
+    assert_equal 3, @sh.execute('show ospf log | last 3').lines.size
+  end
+
+  def test_pipes_inside_quotes_are_text
+    @sh.execute('configure')
+    assert_equal '', @sh.execute('set protocols ospf area 0 interface eth1 authentication simple-password "a|b"')
+    assert_match(/simple-password "<hidden>"/, @sh.execute('show | display set'))
+  end
+
+  def test_run_takes_operational_commands_only
+    @sh.execute('configure')
+    assert_match(/error: run takes show and clear commands/, @sh.execute('run exit'))
+    assert_match(/error: run takes show and clear commands/, @sh.execute('run configure'))
+    assert_equal :configure, @sh.mode
+    assert_match(/not configured/, @sh.execute('run show ospf overview'))
   end
 
   def test_junos_and_ios_show_commands

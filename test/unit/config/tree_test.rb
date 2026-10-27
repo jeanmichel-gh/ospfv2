@@ -91,6 +91,23 @@ class TestConfigTree < Test::Unit::TestCase
     assert_match(/statement not found/, e.message)
   end
 
+  def test_delete_with_a_value_must_match_it
+    t = tree('set protocols ospf area 0 interface eth1 metric 5', 'set protocols ospf area 0 interface eth1 passive')
+    assert_raise(Error) { t.delete('protocols ospf area 0 interface eth1 metric 6') }
+    assert_raise(Error) { t.delete('protocols ospf area 0 interface eth1 passive now') }
+    assert_raise(Error) { t.delete('protocols ospf area 0 interface eth1 metric 5 extra') }
+    t.delete('protocols ospf area 0 interface eth1 metric 5')
+    assert_equal ['set protocols ospf area 0.0.0.0 interface eth1 passive'], t.to_set
+  end
+
+  def test_errors_never_show_secrets
+    errors = Tree.new.load(%(set protocols ospf area 0 interface e authentication md5 1 key TOPSECRETTOPSECRETXX\n) +
+                           %(set protocols ospf area 0 interface e authentication simple-password "a b c d e f"\n))
+    assert_equal 2, errors.size
+    assert_no_match(/TOPSECRET|a b c/, errors.join)
+    assert_equal 'x key "<hidden>" y', Tree.hide_secrets('x key "sec ret" y')
+  end
+
   def test_secrets_are_hidden_and_hidden_is_refused
     t = tree('set protocols ospf area 0 interface eth1 authentication hmac-sha-256 1 key "two words"')
     assert_match(/key "<hidden>"; ## SECRET-DATA/, t.to_curly)
