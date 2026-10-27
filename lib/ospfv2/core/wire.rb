@@ -100,6 +100,9 @@ module OSPFv2
         def self.decode(b)
           raise Error, "LS update too short (#{b.bytesize})" if b.bytesize < 4
           count = b.unpack1('N')
+          # The count comes off the wire: never let it size an allocation.
+          max = (b.bytesize - 4) / LsaHeader::SIZE
+          raise Error, "LS update claims #{count} LSAs, room for at most #{max}" if count > max
           off = 4
           lsas = Array.new(count) do
             lsa = Lsa.parse(b.byteslice(off..))

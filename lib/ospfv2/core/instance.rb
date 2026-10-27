@@ -46,7 +46,10 @@ module OSPFv2
         @areas = {}
         @interfaces = {}
         @as_lsdb = Lsdb.new(loop.clock)
-        @own = {}
+        @own = {}              # key => { area:, refresh:, wrap: } for LSAs we originate
+        @last_origination = {} # key => loop time, for MinLSInterval (kept across flushes)
+        @deferred = {}         # key => timer for an origination held by MinLSInterval
+        @sent_back = {}        # key => loop time we last answered a stale copy
         @events = []
         @stats = Hash.new(0)
         @listeners = []
@@ -84,7 +87,9 @@ module OSPFv2
         @running = false
         @interfaces.each_value(&:down)
         @sweep&.cancel
-        @own.each_value { |o| o[:refresh]&.cancel; o[:deferred]&.cancel }
+        @own.each_value { |o| o[:refresh]&.cancel }
+        @deferred.each_value(&:cancel)
+        @deferred.clear
         log(:info, nil, "router #{router_id_s} stopped")
         self
       end
@@ -176,9 +181,13 @@ module OSPFv2
               iface.direct_ack(lsa, nbr)
             end
           else
-            # (8) Ours is newer: send it back, but never a MaxSequenceNumber flush.
+            # (8) Ours is newer: send it back, at most once per MinLSArrival,
+            # and never a MaxSequenceNumber flush.
             next if cur.max_age? && cur.seq == LsaFields::MAX_SEQ
-            iface.send_update([cur], nbr.address)
+            last = @sent_back[lsa.key]
+            next if last && @loop.now - last < OSPFv2::MinLSArrival
+            @sent_back[lsa.key] = @loop.now
+            iface.send_update([cur], nbr.unicast_destination)
           end
         end
       end
@@ -221,16 +230,17 @@ module OSPFv2
       # Originates the LSA described by +spec+ ({type:, ls_id:, body:}) if
       # it differs from what we have. Honors MinLSInterval.
       def originate(area, spec, force: false)
+        return unless @running
         key = [spec[:type], spec[:ls_id], @router_id]
         db = lsdb_for(spec[:type], area)
         cur = db[key]
-        own = @own[key]
-        unchanged = own && cur && !cur.max_age? && cur.body == spec[:body]
+        unchanged = @own[key] && cur && !cur.max_age? && cur.body == spec[:body]
         return if unchanged && !force
 
-        if own && (wait = own[:last_at] + OSPFv2::MinLSInterval - @loop.now).positive?
-          own[:deferred] ||= @loop.after(wait, :min_ls_interval) do
-            own[:deferred] = nil
+        last = @last_origination[key]
+        if last && (wait = last + OSPFv2::MinLSInterval - @loop.now).positive?
+          @deferred[key] ||= @loop.after(wait, :min_ls_interval) do
+            @deferred.delete(key)
             s = area.spec_for(key)
             s ? originate(area, s, force: true) : flush_own(area, key)
           end
@@ -240,7 +250,7 @@ module OSPFv2
         if cur && cur.seq == LsaFields::MAX_SEQ
           # Sequence space exhausted: flush, start over once it is gone.
           flush_own(area, key)
-          @own[key] = { area: area, last_at: @loop.now, wrap: true }
+          @own[key] = { area: area, wrap: true }
           return
         end
 
@@ -252,9 +262,9 @@ module OSPFv2
 
       # Flushes our LSA +key+ from +area+ (premature aging, RFC 2328 14.1).
       def flush_own(area, key)
-        o = @own.delete(key)
-        o&.[](:refresh)&.cancel
-        o&.[](:deferred)&.cancel
+        return unless @running
+        @own.delete(key)&.[](:refresh)&.cancel
+        @deferred.delete(key)&.cancel
         db = lsdb_for(key[0], area)
         cur = db[key]
         return unless cur && !cur.max_age?
@@ -301,7 +311,7 @@ module OSPFv2
         db.install(lsa)
         @stats[:lsa_originated] += 1
         o = (@own[lsa.key] ||= { area: area })
-        o[:last_at] = @loop.now
+        @last_origination[lsa.key] = @loop.now
         o.delete(:wrap)
         o[:refresh] ||= @loop.every(OSPFv2::LSRefreshTime, :ls_refresh, start: false) do
           s = area.spec_for(lsa.key)
@@ -316,6 +326,9 @@ module OSPFv2
       def flush(cur, area)
         lsa = cur.with_age(OSPFv2::MaxAge)
         lsdb_for(lsa.type, area).install(lsa)
+        # A flush is a new instance too: the next origination waits
+        # MinLSInterval, or routers two hops away drop it (13 step 5a).
+        @last_origination[lsa.key] = @loop.now if lsa.advr == @router_id
         log(:info, nil, "flushing #{lsa.id_string}")
         drop_old_retransmits(lsa, area)
         flood(lsa, area)
@@ -327,10 +340,9 @@ module OSPFv2
         if lsa.advr == @router_id && area.wants?(key) && !@own.dig(key, :wrap)
           # Jump past the sequence number that came back, now rather than
           # after MinLSInterval.
-          o = (@own[key] ||= { area: area })
-          o[:deferred]&.cancel
-          o[:deferred] = nil
-          o[:last_at] = -Float::INFINITY
+          @own[key] ||= { area: area }
+          @deferred.delete(key)&.cancel
+          @last_origination.delete(key)
           originate(area, area.spec_for(key), force: true)
         elsif !lsa.max_age?
           flush(lsa, area)

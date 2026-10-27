@@ -33,7 +33,15 @@ module OSPFv2
 
     MAX_EVENTS_PER_DRAIN = 1_000_000
 
-    attr_reader :clock, :scheduler, :errors
+    # Events the loop thread handles before it checks timers again, so a
+    # packet flood cannot starve hellos and dead timers.
+    BATCH = 100
+
+    # Most events #offer will queue. Past this, packets are dropped as a
+    # full socket buffer would drop them.
+    MAX_QUEUE = 10_000
+
+    attr_reader :clock, :scheduler, :errors, :dropped
 
     # clock:    Clock::Real (default) or Clock::Fake
     # on_error: called with the exception when a handler raises. The
@@ -50,6 +58,7 @@ module OSPFv2
       @thread = nil
       @stop = false
       @errors = 0
+      @dropped = 0
     end
 
     def now
@@ -66,6 +75,21 @@ module OSPFv2
         @wakeup.signal
       end
       self
+    end
+
+    # Like #post, but drops the event and returns false when MAX_QUEUE
+    # events are already waiting. Socket readers use this.
+    def offer(&block)
+      raise ArgumentError, 'block required' unless block
+      @lock.synchronize do
+        if @queue.size >= MAX_QUEUE
+          @dropped += 1
+          return false
+        end
+        @queue << block
+        @wakeup.signal
+      end
+      true
     end
 
     # Runs +block+ on the loop thread and returns its value. Exceptions are
@@ -141,20 +165,26 @@ module OSPFv2
     # The body of the loop thread. Blocks until #stop.
     def run
       until @stop
-        drain
-        break if @stop
-        fired = @scheduler.run_next(@clock.now)
-        next if fired # drain what it posted before the next timer
+        begin
+          ran = run_events(BATCH)
+          break if @stop
+          # One due timer per turn, then events again: timers and packets
+          # take turns however busy the queue is.
+          next if @scheduler.run_next(@clock.now)
+          next if ran == BATCH
 
-        deadline = @scheduler.next_deadline
-        @lock.synchronize do
-          next unless @queue.empty? && !@stop
-          if deadline.nil?
-            @wakeup.wait(@lock)
-          else
-            wait = deadline - @clock.now
-            @wakeup.wait(@lock, wait) if wait.positive?
+          deadline = @scheduler.next_deadline
+          @lock.synchronize do
+            next unless @queue.empty? && !@stop
+            if deadline.nil?
+              @wakeup.wait(@lock)
+            else
+              wait = deadline - @clock.now
+              @wakeup.wait(@lock, wait) if wait.positive?
+            end
           end
+        rescue StandardError => e
+          report(e) # the loop thread never dies of a handler bug
         end
       end
     end
@@ -207,6 +237,16 @@ module OSPFv2
 
     def next_event
       @lock.synchronize { @queue.shift }
+    end
+
+    # Runs at most +max+ queued events. Returns how many ran.
+    def run_events(max)
+      n = 0
+      while n < max && !@stop && (block = next_event)
+        dispatch(block)
+        n += 1
+      end
+      n
     end
 
     def dispatch(block)

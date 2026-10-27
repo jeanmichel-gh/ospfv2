@@ -50,7 +50,7 @@ module OSPFv2
       def wants?(key)
         type, ls_id, = key
         case type
-        when 1 then true
+        when 1 then ls_id == @instance.router_id
         when 2 then @interfaces.any? { |i| i.address == ls_id && network_lsa_spec(i) }
         else false
         end
@@ -58,7 +58,7 @@ module OSPFv2
 
       def spec_for(key)
         case key[0]
-        when 1 then router_lsa_spec
+        when 1 then key[1] == @instance.router_id ? router_lsa_spec : nil
         when 2 then network_lsa_spec(@interfaces.find { |i| i.address == key[1] })
         end
       end

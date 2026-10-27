@@ -35,6 +35,7 @@ module OSPFv2
         @ls_request = {}
         @lsr_outstanding = []
         @retransmit = {}
+        @rxmt_sent = {} # key => loop time the LSA last went out to this neighbor
         @last_rcvd_dd = nil
         @last_sent_dd = nil
         @last_sent_more = true
@@ -76,6 +77,13 @@ module OSPFv2
 
       def to_s
         "#{Addr.to_s(@router_id)}@#{Addr.to_s(@address)}"
+      end
+
+      # Where packets for this neighbor alone go. On a point-to-point
+      # network every packet goes to AllSPFRouters (RFC 2328 8.1), which
+      # also works for /31 and unnumbered peers.
+      def unicast_destination
+        @iface.p2p? ? AllSPFRouters : @address
       end
 
       # ---- events (RFC 2328 10.2) ----
@@ -169,7 +177,7 @@ module OSPFv2
           end
           lsas << lsa
         end
-        @iface.send_update(lsas, @address) unless lsas.empty?
+        @iface.send_update(lsas, unicast_destination) unless lsas.empty?
       end
 
       # An LSA we asked for arrived, or a newer one. Called from flooding.
@@ -186,14 +194,19 @@ module OSPFv2
 
       # ---- retransmission list and acks (RFC 2328 13.6, 13.7) ----
 
+      # +lsa+ was just sent to this neighbor (flooding sends it right after)
+      # and waits for an ack. Each entry is retransmitted RxmtInterval after
+      # it last went out (RFC 2328 13.6).
       def add_retransmit(lsa)
         @retransmit[lsa.key] = lsa
-        @rxmt_timer ||= loop.every(@iface.rxmt_interval, :lsu_rxmt, start: false) { retransmit_lsas }
+        @rxmt_sent[lsa.key] = now
+        @rxmt_timer ||= loop.every(1, :lsu_rxmt, start: false) { retransmit_lsas }
         @rxmt_timer.restart unless @rxmt_timer.active?
       end
 
       def remove_retransmit(key)
         lsa = @retransmit.delete(key)
+        @rxmt_sent.delete(key)
         @rxmt_timer&.cancel if @retransmit.empty?
         lsa
       end
@@ -362,11 +375,11 @@ module OSPFv2
         @last_sent_dd = dd
         # The initial DD carries no summary, so more is still to come.
         @last_sent_more = (flags & (Wire::DD_INIT | Wire::DD_MORE)).positive?
-        @iface.send_packet(dd, @address)
+        @iface.send_packet(dd, unicast_destination)
       end
 
       def resend_last_dd
-        @iface.send_packet(@last_sent_dd, @address) if @last_sent_dd
+        @iface.send_packet(@last_sent_dd, unicast_destination) if @last_sent_dd
       end
 
       def send_ls_request
@@ -378,7 +391,7 @@ module OSPFv2
         end
         return if batch.empty?
         @lsr_outstanding = batch
-        @iface.send_packet(Wire::LinkStateRequest.new(requests: batch), @address)
+        @iface.send_packet(Wire::LinkStateRequest.new(requests: batch), unicast_destination)
         @lsr_timer ||= loop.every(@iface.rxmt_interval, :lsr_rxmt, start: false) { resend_ls_request }
         @lsr_timer.restart
       end
@@ -389,17 +402,27 @@ module OSPFv2
           @lsr_timer&.cancel
           send_ls_request unless @ls_request.empty?
         else
-          @iface.send_packet(Wire::LinkStateRequest.new(requests: @lsr_outstanding), @address)
+          @iface.send_packet(Wire::LinkStateRequest.new(requests: @lsr_outstanding), unicast_destination)
         end
       end
 
+      # Resends the entries whose RxmtInterval is up, one update's worth
+      # per run, oldest first. The rest wait for the next run.
       def retransmit_lsas
-        lsas = @retransmit.map do |key, lsa|
+        due_by = now - @iface.rxmt_interval
+        room = Wire.max_body(@iface.mtu) - 4
+        lsas = []
+        @rxmt_sent.sort_by { |_, t| t }.each do |key, sent|
+          break if sent > due_by
+          lsa = @retransmit[key]
           # Send the database copy so the age is current.
           cur = instance.lsdb_for(key[0], @iface.area)&.[](key)
-          cur&.same_instance?(lsa) ? cur : lsa
+          lsa = cur if cur&.same_instance?(lsa)
+          break if !lsas.empty? && lsas.sum(&:length) + lsa.length > room
+          lsas << lsa
+          @rxmt_sent[key] = now
         end
-        @iface.send_update(lsas, @address) unless lsas.empty?
+        @iface.send_update(lsas, unicast_destination) unless lsas.empty?
       end
 
       def clear_lists
@@ -407,6 +430,7 @@ module OSPFv2
         @ls_request = {}
         @lsr_outstanding = []
         @retransmit.clear
+        @rxmt_sent.clear
         @last_rcvd_dd = nil
         @last_sent_dd = nil
         [@dd_timer, @lsr_timer, @rxmt_timer].each { |t| t&.cancel }

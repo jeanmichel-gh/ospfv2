@@ -232,15 +232,18 @@ module OSPFv2
       # Router-LSA: [flags, links]. flags bit 0 B, bit 1 E, bit 2 V.
       def router_body
         raise Error, 'not a router-LSA' unless type == 1
-        flags, _, count = body.unpack('CCn')
+        b = body
+        raise Error, "router-LSA body too short (#{b.bytesize} bytes)" if b.bytesize < 4
+        flags, _, count = b.unpack('CCn')
         links = []
         off = 4
         count.times do
-          id, data, ltype, ntos, metric = body.byteslice(off, 12).unpack('NNCCn')
-          raise Error, 'router-LSA truncated' if metric.nil?
+          raise Error, "router-LSA says #{count} links, truncated at #{links.size}" if off + 12 > b.bytesize
+          id, data, ltype, ntos, metric = b.byteslice(off, 12).unpack('NNCCn')
           links << RouterLink.new(ltype, id, data, metric)
           off += 12 + ntos * 4
         end
+        raise Error, 'router-LSA TOS metrics run past the end' if off > b.bytesize
         [flags, links]
       end
 
@@ -251,7 +254,9 @@ module OSPFv2
       # Network-LSA: [mask, attached router ids].
       def network_body
         raise Error, 'not a network-LSA' unless type == 2
-        mask, *routers = body.unpack('N*')
+        b = body
+        raise Error, "network-LSA body of #{b.bytesize} bytes" if b.bytesize < 8 || (b.bytesize % 4).nonzero?
+        mask, *routers = b.unpack('N*')
         [mask, routers]
       end
 

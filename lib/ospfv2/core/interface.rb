@@ -81,7 +81,7 @@ module OSPFv2
 
       def up
         return if up?
-        @transport&.start { |bytes, from| loop.post { receive(bytes, from) } }
+        @transport&.start { |bytes, from| loop.offer { receive(bytes, from) } }
         if @passive
           change(:point_to_point, 'InterfaceUp (passive)') if p2p?
           change(:dr_other, 'InterfaceUp (passive)') if broadcast?
@@ -103,7 +103,10 @@ module OSPFv2
       def down
         return unless up?
         [@hello_timer, @wait_timer, @ack_timer].each { |t| t&.cancel }
+        # No elections or packets while the interface goes away (RFC 2328 9.3).
+        @going_down = true
         @neighbors.values.each { |n| n.kill('InterfaceDown') }
+        @going_down = false
         @neighbors.clear
         @delayed_acks.clear
         @dr = @bdr = 0
@@ -113,6 +116,7 @@ module OSPFv2
 
       # NeighborChange (RFC 2328 9.2).
       def neighbor_change
+        return if @going_down
         elect('NeighborChange') if %i[dr_other backup dr].include?(@state)
       end
 
@@ -169,7 +173,7 @@ module OSPFv2
       # ---- send ----
 
       def send_packet(body, dest)
-        return unless @transport && up?
+        return unless @transport && up? && !@going_down
         bytes = Wire.encode(body, router_id: @instance.router_id, area_id: @area.id)
         @stats[:"tx_#{Wire::NAMES[body.class.type]}"] += 1
         trace(:tx, body, Addr.to_s(dest.is_a?(Integer) ? dest : Addr.to_i(dest)))
@@ -199,7 +203,7 @@ module OSPFv2
       end
 
       def direct_ack(header, nbr)
-        send_acks([header], nbr.address)
+        send_acks([header], nbr.unicast_destination)
       end
 
       def summary
