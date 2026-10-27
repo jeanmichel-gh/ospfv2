@@ -1,4 +1,11 @@
-=== Unreleased
+=== 1.0.0 2026-10-27
+
+ospfd, a real OSPFv2 router next to the simulator. It forms adjacencies,
+floods, authenticates, runs SPF across areas and virtual links, and
+installs routes in the Linux kernel. Configure it with Junos-style set
+commands and query it with ospf-cli in Junos or IOS terms. Its routing
+tables match FRRouting's in the interop labs.
+
 
 * Event loop for the router core: one thread owns protocol state, other
   threads use #post and #call (OSPFv2::EventLoop)
