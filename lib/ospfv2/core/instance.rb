@@ -63,10 +63,12 @@ module OSPFv2
         @spf_skipped = []
         @route_listeners = []
         @spf = SpfScheduler.new(loop, **spf) { |reasons| compute_routes(reasons) }
-        @own = {}              # key => { area:, refresh:, wrap: } for LSAs we originate
-        @last_origination = {} # key => loop time, for MinLSInterval (kept across flushes)
-        @deferred = {}         # key => timer for an origination held by MinLSInterval
-        @sent_back = {}        # key => loop time we last answered a stale copy
+        # Keyed by scope_key: our router-LSA is one LSA key in every area,
+        # but a separate LSA in each.
+        @own = {}              # scope key => { area:, key:, refresh:, wrap: } for LSAs we originate
+        @last_origination = {} # scope key => loop time, for MinLSInterval (kept across flushes)
+        @deferred = {}         # scope key => timer for an origination held by MinLSInterval
+        @sent_back = {}        # scope key => loop time we last answered a stale copy
         @events = []
         @stats = Hash.new(0)
         @listeners = []
@@ -132,7 +134,7 @@ module OSPFv2
       def stop(flush: false)
         return self unless @running
         if flush
-          @own.to_a.each { |key, o| flush_own(o[:area], key) if @areas[o[:area].id].equal?(o[:area]) }
+          @own.to_a.each { |_, o| flush_own(o[:area], o[:key]) if @areas[o[:area].id].equal?(o[:area]) }
         end
         @running = false
         @interfaces.each_value(&:down)
@@ -199,8 +201,15 @@ module OSPFv2
 
       def interface_changed(iface, old, new)
         iface.area.schedule_origination
-        @spf.trigger(:interface, iface.name) if old == :down || new == :down
+        return unless old == :down || new == :down
+        # Up or down can make us an area border router or stop it: every
+        # router-LSA carries the B bit.
+        @areas.each_value(&:schedule_origination)
+        @spf.trigger(:interface, iface.name)
       end
+
+      # Attached to more than one area (RFC 2328 3.3): an area border router.
+      def abr? = @areas.values.count(&:active?) > 1
 
       def dr_changed(iface)
         iface.area.schedule_origination
@@ -256,9 +265,10 @@ module OSPFv2
             # (8) Ours is newer: send it back, at most once per MinLSArrival,
             # and never a MaxSequenceNumber flush.
             next if cur.max_age? && cur.seq == LsaFields::MAX_SEQ
-            last = @sent_back[lsa.key]
+            sk = scope_key(area, lsa.key)
+            last = @sent_back[sk]
             next if last && @loop.now - last < OSPFv2::MinLSArrival
-            @sent_back[lsa.key] = @loop.now
+            @sent_back[sk] = @loop.now
             iface.send_update([cur], nbr.unicast_destination)
           end
         end
@@ -304,15 +314,16 @@ module OSPFv2
       def originate(area, spec, force: false)
         return unless @running
         key = [spec[:type], spec[:ls_id], @router_id]
+        sk = scope_key(area, key)
         db = lsdb_for(spec[:type], area)
         cur = db[key]
-        unchanged = @own[key] && cur && !cur.max_age? && cur.body == spec[:body]
+        unchanged = @own[sk] && cur && !cur.max_age? && cur.body == spec[:body]
         return if unchanged && !force
 
-        last = @last_origination[key]
+        last = @last_origination[sk]
         if last && (wait = last + OSPFv2::MinLSInterval - @loop.now).positive?
-          @deferred[key] ||= @loop.after(wait, :min_ls_interval) do
-            @deferred.delete(key)
+          @deferred[sk] ||= @loop.after(wait, :min_ls_interval) do
+            @deferred.delete(sk)
             s = area.spec_for(key)
             s ? originate(area, s, force: true) : flush_own(area, key)
           end
@@ -322,7 +333,7 @@ module OSPFv2
         if cur && cur.seq == LsaFields::MAX_SEQ
           # Sequence space exhausted: flush, start over once it is gone.
           flush_own(area, key)
-          @own[key] = { area: area, wrap: true }
+          @own[sk] = { area: area, key: key, wrap: true }
           return
         end
 
@@ -335,8 +346,9 @@ module OSPFv2
       # Flushes our LSA +key+ from +area+ (premature aging, RFC 2328 14.1).
       def flush_own(area, key)
         return unless @running
-        @own.delete(key)&.[](:refresh)&.cancel
-        @deferred.delete(key)&.cancel
+        sk = scope_key(area, key)
+        @own.delete(sk)&.[](:refresh)&.cancel
+        @deferred.delete(sk)&.cancel
         db = lsdb_for(key[0], area)
         cur = db[key]
         return unless cur && !cur.max_age?
@@ -373,6 +385,7 @@ module OSPFv2
         table = Spf.run(router_id: @router_id, areas: spf_areas, externals: @as_lsdb.live, max_paths: @max_paths)
         @stats[:spf_runs] += 1
         replace_routes(table, reasons, Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0)
+        originate_summaries(table)
         # Warn once per bad LSA, not on every run.
         (table.stats[:skipped] - @spf_skipped).each { |why| log(:warn, nil, "SPF skipped #{why}") }
         @spf_skipped = table.stats[:skipped]
@@ -401,6 +414,68 @@ module OSPFv2
       end
 
       private
+
+      # ---- summary-LSAs (RFC 2328 12.4.3) ----
+
+      # As an area border router, each attached area gets a summary-LSA
+      # for every route it cannot see itself: type 3 for networks, type 4
+      # for AS boundary routers. Without that role, our summaries go.
+      def originate_summaries(table)
+        abr = abr?
+        @areas.each_value do |a|
+          a.summaries = abr && a.active? ? summaries_for(a, table) : {}
+        end
+      end
+
+      def summaries_for(area, table)
+        specs = {}
+        ids = {} # ls_id => [prefix, len] already used in this area (Appendix E)
+        table.routes.values.sort_by { |r| [r.prefix_len, r.prefix] }.each do |r|
+          next unless summarize?(r, area)
+          ls_id = summary_ls_id(r, ids) or next
+          specs[[3, ls_id, @router_id]] = { type: 3, ls_id: ls_id, body: [Addr.mask(r.prefix_len), r.cost].pack('NN') }
+        end
+        best_asbrs(table).each_value do |r|
+          next unless summarize?(r, area) && r.prefix != @router_id
+          specs[[4, r.prefix, @router_id]] = { type: 4, ls_id: r.prefix, body: [0, r.cost].pack('NN') }
+        end
+        specs
+      end
+
+      # 12.4.3: intra-area routes go into every other area; inter-area
+      # routes (learned over the backbone) into the other areas but the
+      # backbone, never out of the interfaces they arrive by. Externals are
+      # not summarized, and nothing unreachable is.
+      def summarize?(r, area)
+        return false if r.area.nil? || r.area == area.id || r.cost >= Spf::LS_INFINITY
+        case r.path_type
+        when :intra then true
+        when :inter
+          return false if area.id.zero?
+          names = area.interfaces.map(&:name)
+          r.next_hops.none? { |h| names.include?(h.interface) }
+        else false
+        end
+      end
+
+      # The cheapest entry per ASBR, whatever area it is in.
+      def best_asbrs(table)
+        table.routers.values.select { |r| r.tag && r.tag[:asbr] }
+             .group_by(&:prefix).transform_values { |rs| rs.min_by { |r| [r.cost, r.path_type == :intra ? 0 : 1] } }
+      end
+
+      # The network address, or with the host bits set when a shorter
+      # prefix holds it already (RFC 2328 Appendix E).
+      def summary_ls_id(r, ids)
+        want = [r.prefix, r.prefix_len]
+        [r.prefix, r.prefix | (~Addr.mask(r.prefix_len) & 0xffff_ffff)].each do |id|
+          next if ids.key?(id) && ids[id] != want
+          ids[id] = want
+          return id
+        end
+        log(:warn, nil, "no link state id left for a summary of #{r.dest_s}")
+        nil
+      end
 
       def lsdb_changed(lsa, _old)
         return unless @running
@@ -439,12 +514,16 @@ module OSPFv2
         @spf.trigger(:area, area.id_s) if @running
       end
 
+      # An LSA key made unique across areas: [area id or nil for AS scope, *key].
+      def scope_key(area, key) = [AS_SCOPE.include?(key[0]) ? nil : area.id, *key]
+
       def install_own(area, lsa)
         db = lsdb_for(lsa.type, area)
         db.install(lsa)
         @stats[:lsa_originated] += 1
-        o = (@own[lsa.key] ||= { area: area })
-        @last_origination[lsa.key] = @loop.now
+        sk = scope_key(area, lsa.key)
+        o = (@own[sk] ||= { area: area, key: lsa.key })
+        @last_origination[sk] = @loop.now
         o.delete(:wrap)
         o[:refresh] ||= @loop.every(OSPFv2::LSRefreshTime, :ls_refresh, start: false) do
           s = area.spec_for(lsa.key)
@@ -461,7 +540,7 @@ module OSPFv2
         lsdb_for(lsa.type, area).install(lsa)
         # A flush is a new instance too: the next origination waits
         # MinLSInterval, or routers two hops away drop it (13 step 5a).
-        @last_origination[lsa.key] = @loop.now if lsa.advr == @router_id
+        @last_origination[scope_key(area, lsa.key)] = @loop.now if lsa.advr == @router_id
         log(:info, nil, "flushing #{lsa.id_string}")
         drop_old_retransmits(lsa, area)
         flood(lsa, area)
@@ -470,12 +549,13 @@ module OSPFv2
       # RFC 2328 13.4: one of our own LSAs came back newer than ours.
       def self_originated(lsa, area)
         key = lsa.key
-        if lsa.advr == @router_id && area.wants?(key) && !@own.dig(key, :wrap)
+        sk = scope_key(area, key)
+        if lsa.advr == @router_id && area.wants?(key) && !@own.dig(sk, :wrap)
           # Jump past the sequence number that came back, now rather than
           # after MinLSInterval.
-          @own[key] ||= { area: area }
-          @deferred.delete(key)&.cancel
-          @last_origination.delete(key)
+          @own[sk] ||= { area: area, key: key }
+          @deferred.delete(sk)&.cancel
+          @last_origination.delete(sk)
           originate(area, area.spec_for(key), force: true)
         elsif !lsa.max_age?
           flush(lsa, area)
@@ -522,8 +602,8 @@ module OSPFv2
           next if exchanging?(key[0], area)
           next if scope_interfaces(key[0], area).any? { |i| i.neighbors.each_value.any? { |n| n.retransmitting?(key) } }
           db.delete(key)
-          if (o = @own[key]) && o[:wrap]
-            @own.delete(key)
+          if (o = @own[scope_key(area, key)]) && o[:wrap]
+            @own.delete(scope_key(area, key))
             spec = area.spec_for(key)
             originate(area, spec) if spec
           end
