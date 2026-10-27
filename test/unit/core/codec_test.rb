@@ -228,12 +228,13 @@ class TestCoreWire < Test::Unit::TestCase
       'version' => good.dup.tap { |b| b.setbyte(0, 3) },
       'checksum' => good.dup.tap { |b| b.setbyte(30, b.getbyte(30) ^ 1) },
       'type' => good.dup.tap { |b| b.setbyte(1, 9) },
-      'length' => good.dup.tap { |b| b[2, 2] = [9999].pack('n') },
-      'auth' => good.dup.tap { |b| b[14, 2] = [1].pack('n') }
+      'length' => good.dup.tap { |b| b[2, 2] = [9999].pack('n') }
     }
     cases.each do |name, bytes|
       assert_raise(Wire::Error, name) { Wire.decode(bytes) }
     end
+    # Another AuType than the interface's is an authentication failure.
+    assert_raise(Wire::AuthError) { Wire.decode(good.dup.tap { |b| b[14, 2] = [1].pack('n') }) }
   end
 
   def test_rejects_a_truncated_lsa_inside_an_update

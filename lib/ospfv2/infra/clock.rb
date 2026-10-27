@@ -7,7 +7,8 @@ module OSPFv2
   # in a Fake clock and run minutes of protocol time in milliseconds.
   #
   # #now  is monotonic seconds as a Float. Use it for timers and ages.
-  # #wall is a Time. Use it only for logs and display.
+  # #wall is a Time. Use it only for logs, display, and values that must
+  # keep growing across a restart (the cryptographic sequence number).
   module Clock
     class Real
       def now

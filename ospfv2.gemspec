@@ -25,10 +25,12 @@ Gem::Specification.new do |spec|
 
   spec.files = Dir['lib/**/*', 'bin/*', 'examples/**/*', 'LICENSE.txt', 'COPYING', 'README.md', 'changelog.txt']
   spec.bindir        = 'bin'
-  spec.executables   = ['ospfv2']
+  spec.executables   = %w[ospfv2 ospfd ospf-cli]
   spec.require_paths = ['lib']
   spec.extra_rdoc_files = ['LICENSE.txt', 'README.md']
 
   # irb is a bundled gem from Ruby 3.5/4.0 on, so declare it for the console.
   spec.add_dependency 'irb', '>= 1.6'
+  # Line editing for ospf-cli. Default gem up to Ruby 3.4, bundled after.
+  spec.add_dependency 'reline', '>= 0.3'
 end

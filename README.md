@@ -9,6 +9,11 @@ LSAs, flap links and watch SPF, or check how a router handles summaries and exte
 It targets Ruby 3.1 and later (CI covers 3.2 to 4.0), uses the standard library only,
 and ships as a Docker image.
 
+A second mode is on its way: `ospfd`, an OSPFv2 router you configure and query with
+`ospf-cli` in Junos or IOS terms. It forms adjacencies, floods and authenticates today.
+Route computation (SPF) and installing routes in Linux come next. See
+[Router mode](#router-mode-ospfd-and-ospf-cli).
+
 ## Quick start
 
 ```sh
@@ -136,6 +141,82 @@ The dashboard listens on 127.0.0.1 unless you pass an address. The JSON API behi
 
 POST requests need an `X-OSPFv2: 1` header. It stops other web pages from driving the
 simulator through your browser.
+
+## Router mode: ospfd and ospf-cli
+
+`ospfd` runs OSPFv2 on the host's interfaces. It does not compute routes yet: SPF and
+the Linux route table come next. Today it forms adjacencies
+(broadcast with DR/BDR election, point-to-point, passive), keeps the database in sync,
+originates router and network LSAs, and authenticates packets.
+
+```sh
+sudo bin/ospfd -f /etc/ospfv2/ospfd.conf      # foreground; -l FILE to log to a file
+sudo bin/ospf-cli                             # interactive
+sudo bin/ospf-cli -c 'show ospf neighbor'     # one command
+```
+
+The management socket is `/run/ospfv2/ospfd.sock` (`-s` on both, or `OSPFV2_SOCKET`).
+It is mode 0660: root, plus the group given with `ospfd -g GROUP`.
+
+### Configuring
+
+Configuration works like Junos: `configure`, then `set` and `delete` statements, then
+`commit`. Every word can be cut to a unique prefix, Tab completes, and `?` lists what
+can come next.
+
+```
+ospf> configure
+ospf# set routing-options router-id 1.1.1.1
+ospf# set protocols ospf area 0 interface eth1 interface-type p2p
+ospf# set protocols ospf area 0 interface eth1 authentication md5 1 key "secret"
+ospf# set protocols ospf area 0 interface lo passive
+ospf# show | compare
+ospf# commit
+ospf# exit
+```
+
+| Statement under `protocols ospf area A interface IF` | Default |
+| --- | --- |
+| `interface-type broadcast\|p2p` | broadcast |
+| `metric 1..65535` | 10 |
+| `priority 0..255` | 1 |
+| `hello-interval`, `dead-interval`, `retransmit-interval`, `transit-delay` (seconds) | 10, 4 x hello, 5, 1 |
+| `mtu 576..65535`, `mtu-ignore` | 1500 |
+| `passive` | off: advertise the subnet, no hellos |
+| `disable` | off: keep the statements, do not run OSPF |
+| `authentication simple-password PW` | none |
+| `authentication md5\|hmac-sha-1\|hmac-sha-256\|hmac-sha-384\|hmac-sha-512 ID key SECRET` | none |
+| `authentication send-key ID` | highest key id |
+
+Several keys can be configured at once. Every one is accepted, the send key signs.
+That is how keys roll over without dropping adjacencies.
+
+`commit check` validates without applying, `compare` shows uncommitted changes,
+`rollback N` loads one of the last 9 committed versions, `discard` drops changes.
+Commit writes the file given with `-f` (mode 0600, as `set` lines) and keeps the
+previous versions next to it as `ospfd.conf.rollback.N`. `kill -HUP` reloads the file.
+
+A metric or authentication change applies without touching adjacencies. Other changes
+to an interface restart it. An interface that does not exist yet, is down or has no
+IPv4 address waits, and starts within 5 seconds of appearing.
+
+### Show commands
+
+Junos forms print Junos style, IOS forms print IOS style.
+
+| Junos | IOS |
+| --- | --- |
+| `show ospf neighbor [detail]` | `show ip ospf neighbor [detail]` |
+| `show ospf interface [detail]` | `show ip ospf interface [brief]` |
+| `show ospf database [router\|network\|netsummary\|asbrsummary\|external] [detail]` | `show ip ospf database [router\|network\|summary\|asbr-summary\|external]` |
+| `show ospf overview` | `show ip ospf` |
+| `show ospf log` | `show ip ospf events` |
+| `show ospf statistics` | `show ip ospf statistics` |
+| `clear ospf neighbor [ROUTER-ID]` | `clear ip ospf process` |
+| `show configuration` | |
+
+Pipes: `| match REGEX`, `| except REGEX`, `| count`, `| last N`, `| display json`,
+`| display set` (configuration). `include` and `exclude` work as on IOS.
 
 ## Docker
 

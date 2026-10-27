@@ -69,7 +69,33 @@ module OSPFv2
         iface = Interface.new(self, name: name, address: address, area: a, transport: transport, **opts)
         a.interfaces << iface
         @interfaces[name] = iface
-        iface.up if @running
+        begin
+          iface.up if @running
+        rescue StandardError
+          # The transport would not start: leave no trace of the interface.
+          @interfaces.delete(name)
+          a.interfaces.delete(iface)
+          drop_area(a) if a.interfaces.empty?
+          raise
+        end
+        iface
+      end
+
+      # Takes interface +name+ down and forgets it. Our network-LSA for it,
+      # if we were DR, is flushed, and the router-LSA no longer lists it.
+      def remove_interface(name)
+        iface = @interfaces.delete(name) or return nil
+        was_dr = iface.dr?
+        iface.down
+        area = iface.area
+        area.interfaces.delete(iface)
+        flush_own(area, [2, iface.address, @router_id]) if was_dr
+        if area.interfaces.empty?
+          drop_area(area)
+        elsif @running
+          area.schedule_origination
+        end
+        log(:info, iface, "interface #{name} removed")
         iface
       end
 
@@ -82,8 +108,14 @@ module OSPFv2
         self
       end
 
-      def stop
+      # Stops the router. With +flush+, our LSAs are first flooded at
+      # MaxAge (RFC 2328 14.1), so neighbors drop them now rather than an
+      # hour later. Used when the router id changes.
+      def stop(flush: false)
         return self unless @running
+        if flush
+          @own.to_a.each { |key, o| flush_own(o[:area], key) if @areas[o[:area].id].equal?(o[:area]) }
+        end
         @running = false
         @interfaces.each_value(&:down)
         @sweep&.cancel
@@ -294,10 +326,16 @@ module OSPFv2
       # ---- log ----
 
       def log(level, iface, message)
+        record(level, message, iface)
+        @logger&.call(level, iface ? "#{iface.name} #{message}" : message)
+      end
+
+      # Adds an event to the list without passing it to the logger.
+      def record(level, message, iface = nil)
         ev = Event.new(@loop.clock.wall, level, iface&.name, message)
         @events << ev
         @events.shift(@events.size - MAX_EVENTS) if @events.size > MAX_EVENTS
-        @logger&.call(level, ev.to_s)
+        ev
       end
 
       def trace(dir, iface, pkt, peer)
@@ -305,6 +343,16 @@ module OSPFv2
       end
 
       private
+
+      # An area with no interfaces left: stop refreshing our LSAs in it and
+      # forget it.
+      def drop_area(area)
+        @own.select { |_, o| o[:area].equal?(area) }.each_key do |key|
+          @own.delete(key)[:refresh]&.cancel
+          @deferred.delete(key)&.cancel
+        end
+        @areas.delete(area.id)
+      end
 
       def install_own(area, lsa)
         db = lsdb_for(lsa.type, area)

@@ -360,7 +360,7 @@ module OSPFv2
       end
 
       def send_dd_page(seq)
-        room = Wire.max_body(@iface.mtu) - 8
+        room = @iface.max_body - 8
         count = [room / LsaHeader::SIZE, @db_summary.size].min
         page = @db_summary.shift(count)
         more = !@db_summary.empty?
@@ -383,7 +383,7 @@ module OSPFv2
       end
 
       def send_ls_request
-        room = Wire.max_body(@iface.mtu)
+        room = @iface.max_body
         batch = []
         @ls_request.each_key do |key|
           break if (batch.size + 1) * 12 > room
@@ -410,7 +410,7 @@ module OSPFv2
       # per run, oldest first. The rest wait for the next run.
       def retransmit_lsas
         due_by = now - @iface.rxmt_interval
-        room = Wire.max_body(@iface.mtu) - 4
+        room = @iface.max_body - 4
         lsas = []
         @rxmt_sent.sort_by { |_, t| t }.each do |key, sent|
           break if sent > due_by
