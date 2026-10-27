@@ -78,6 +78,11 @@
   Junos-style export policy (policy-options policy-statement with
   protocol direct|static, route-filter exact|orlonger|longer|upto, then
   metric, external type, tag, accept, reject; protocols ospf export)
+* Stub and totally stubby areas (area N stub [default-metric M]
+  [no-summaries]): no E bit, no AS-external LSAs or type 4 summaries,
+  a default summary from the ABR; neighbors that disagree are refused
+* Configuration: a leaf or flag may be followed by its siblings on one
+  line, as on Junos (set ... stub default-metric 10 no-summaries)
 * Fix: a router in two areas tracked its own LSAs by LSA key alone, so
   its router-LSA in the second area could stay stale
 * Interop: our router as ABR and ASBR between two FRR routers; FRR's

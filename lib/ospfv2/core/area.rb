@@ -34,6 +34,14 @@ module OSPFv2
       # An interface of ours here is up: the area counts as attached.
       def active? = @interfaces.any?(&:up?)
 
+      # Stub settings, { default_metric:, no_summaries: }, or nil: kept on
+      # the instance so they outlive the Area object.
+      def stub = @instance.area_options.dig(@id, :stub)
+      def stub? = !stub.nil?
+
+      # Options in our hellos, DDs and LSAs here: E unless a stub.
+      def options = stub? ? 0x00 : 0x02
+
       def id_s = Addr.to_s(@id)
 
       # Something changed that may change our LSAs. Coalesces every change
@@ -107,7 +115,8 @@ module OSPFv2
             links << stub
           end
         end
-        flags = (@instance.abr? ? 1 : 0) | (@instance.asbr? ? 2 : 0) # B and E bits (A.4.2)
+        # B and E bits (A.4.2). No E bit in a stub area: no externals there.
+        flags = (@instance.abr? ? 1 : 0) | (@instance.asbr? && !stub? ? 2 : 0)
         { type: 1, ls_id: @instance.router_id, body: router_body(links, flags) }
       end
 

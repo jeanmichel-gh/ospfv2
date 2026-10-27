@@ -35,7 +35,7 @@ module OSPFv2
         197 => 'openfabric (FRR)', 198 => 'srte (FRR)'
       }.freeze
 
-      attr_reader :router_id, :interfaces, :warnings, :kernel, :export
+      attr_reader :router_id, :interfaces, :warnings, :kernel, :export, :areas
 
       def initialize(tree)
         @errors = []
@@ -44,9 +44,11 @@ module OSPFv2
         @router_id = data.dig('routing-options', 'router-id')
         @errors << 'routing-options router-id is required' unless @router_id
         @interfaces = {}
+        @areas = {}
         areas = data.dig('protocols', 'ospf', 'area') || {}
         areas.each do |area, a|
           (a['interface'] || {}).each { |name, i| interface(area, name, i) }
+          area_options(area, a)
         end
         @kernel = kernel_options(data.dig('routing-options', 'kernel') || {})
         @export = export_policy(data)
@@ -78,6 +80,17 @@ module OSPFv2
         auth = authentication(name, i['authentication'])
         opts[:auth] = auth if auth
         @interfaces[name] = opts.freeze
+      end
+
+      # area => { stub: { default_metric:, no_summaries: } }, areas with
+      # options only.
+      def area_options(area, a)
+        return unless (stub = a['stub'])
+        if area == '0.0.0.0'
+          @errors << 'area 0.0.0.0 is the backbone and cannot be a stub area'
+          return
+        end
+        @areas[area] = { stub: { default_metric: stub['default-metric'], no_summaries: stub['no-summaries'] == true } }
       end
 
       def export_policy(data)

@@ -40,6 +40,8 @@ module OSPFv2
 
       attr_reader :router_id, :loop, :areas, :interfaces, :as_lsdb, :random, :events, :stats,
                   :route_table, :spf, :spf_log, :externals
+      # area id => { stub: { default_metric:, no_summaries: } }
+      attr_accessor :area_options
 
       # router_id: dotted quad or Integer
       # loop:      the EventLoop that owns this router
@@ -61,6 +63,7 @@ module OSPFv2
         @route_table = Spf::Table.empty
         @spf_log = []
         @externals = {} # key => spec, the AS-external-LSAs we originate
+        @area_options = {}
         @spf_skipped = []
         @route_listeners = []
         @spf = SpfScheduler.new(loop, **spf) { |reasons| compute_routes(reasons) }
@@ -179,18 +182,20 @@ module OSPFv2
 
       # ---- scopes ----
 
+      # The database for LSA +type+ in +area+; nil if none (externals in a
+      # stub area, RFC 2328 3.6).
       def lsdb_for(type, area)
-        return @as_lsdb if AS_SCOPE.include?(type)
+        return (area&.stub? ? nil : @as_lsdb) if AS_SCOPE.include?(type)
         return area.lsdb if AREA_SCOPE.include?(type)
         nil
       end
 
       def lsdbs_for(area)
-        [area.lsdb, @as_lsdb]
+        area.stub? ? [area.lsdb] : [area.lsdb, @as_lsdb]
       end
 
       def scope_interfaces(type, area)
-        AS_SCOPE.include?(type) ? @interfaces.values : area.interfaces
+        AS_SCOPE.include?(type) ? @interfaces.values.reject { |i| i.area.stub? } : area.interfaces
       end
 
       # ---- hooks from interfaces and neighbors ----
@@ -242,7 +247,7 @@ module OSPFv2
         old = @externals
         @externals = specs
         originate_externals
-        area = @areas.values.find(&:active?) || @areas.values.first
+        area = @areas.values.find { |a| !a.stub? }
         (old.keys - specs.keys).each { |key| flush_own(area, key) } if area
         @areas.each_value(&:schedule_origination) if asbr? != was
       end
@@ -264,7 +269,8 @@ module OSPFv2
           end
           db = lsdb_for(lsa.type, area)
           unless db
-            iface.drop(:lsa, "unsupported type #{lsa.type} from #{nbr}")
+            why = AS_SCOPE.include?(lsa.type) ? 'AS-external LSA in a stub area' : "unsupported type #{lsa.type}"
+            iface.drop(:lsa, "#{why} from #{nbr}")
             next
           end
           cur = db[lsa.key]
@@ -353,7 +359,8 @@ module OSPFv2
         sk = scope_key(area, key)
         db = lsdb_for(spec[:type], area)
         cur = db[key]
-        unchanged = @own[sk] && cur && !cur.max_age? && cur.body == spec[:body]
+        options = AS_SCOPE.include?(spec[:type]) ? 0x02 : area.options
+        unchanged = @own[sk] && cur && !cur.max_age? && cur.body == spec[:body] && cur.options == options
         return if unchanged && !force
 
         last = @last_origination[sk]
@@ -375,7 +382,7 @@ module OSPFv2
 
         seq = cur ? cur.seq + 1 : LsaFields::INITIAL_SEQ
         lsa = Lsa.build(type: spec[:type], ls_id: spec[:ls_id], advr: @router_id, seq: seq,
-                        body: spec[:body], options: 0x02)
+                        body: spec[:body], options: options)
         install_own(area, lsa)
       end
 
@@ -466,12 +473,21 @@ module OSPFv2
       def summaries_for(area, table)
         specs = {}
         ids = {} # ls_id => [prefix, len] already used in this area (Appendix E)
+        if (stub = area.stub)
+          # 12.4.3.1: a default route stands in for the externals, and
+          # with no-summaries for everything else too.
+          ids[0] = [0, 0]
+          specs[[3, 0, @router_id]] = { type: 3, ls_id: 0, body: [0, stub[:default_metric] || 1].pack('NN') }
+          return specs if stub[:no_summaries]
+        end
         table.routes.values.sort_by { |r| [r.prefix_len, r.prefix] }.each do |r|
           next unless summarize?(r, area)
+          next if area.stub? && r.prefix_len.zero? # our default is the one there
           ls_id = summary_ls_id(r, ids) or next
           specs[[3, ls_id, @router_id]] = { type: 3, ls_id: ls_id, body: [Addr.mask(r.prefix_len), r.cost].pack('NN') }
         end
         best_asbrs(table).each_value do |r|
+          next if area.stub? # no externals there, so no ASBRs to reach
           next unless summarize?(r, area) && r.prefix != @router_id
           specs[[4, r.prefix, @router_id]] = { type: 4, ls_id: r.prefix, body: [0, r.cost].pack('NN') }
         end
@@ -517,7 +533,7 @@ module OSPFv2
       # them. With no area up yet, they go out when one comes up.
       def originate_externals
         return unless @running
-        area = @areas.values.find(&:active?) or return
+        area = @areas.values.find { |a| a.active? && !a.stub? } or return
         @externals.each_value { |spec| originate(area, spec) }
       end
 

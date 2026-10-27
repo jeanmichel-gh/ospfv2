@@ -98,7 +98,8 @@ module OSPFv2
       def network = @address & mask
 
       # E bit: we take AS-external LSAs. Stub areas come in Phase 3.
-      def options = 0x02
+      # E bit unless the area is a stub (RFC 2328 A.2).
+      def options = @area.options
 
       def dr? = @state == :dr
       def backup? = @state == :backup

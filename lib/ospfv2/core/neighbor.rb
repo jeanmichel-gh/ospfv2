@@ -310,6 +310,10 @@ module OSPFv2
             seq_number_mismatch("unsupported LSA type #{h.type}")
             return
           end
+          if h.type == 5 && @iface.area.stub?
+            seq_number_mismatch('AS-external LSA offered in a stub area') # RFC 2328 10.6
+            return
+          end
           ours = instance.lsdb_for(h.type, @iface.area)&.[](h.key)
           @ls_request[h.key] = h if ours.nil? || h.newer_than?(ours)
         end

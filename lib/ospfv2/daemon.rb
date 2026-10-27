@@ -262,9 +262,22 @@ module OSPFv2
         @fib&.attach(@instance)
       end
       apply_kernel(model.kernel)
+      apply_areas(model.areas)
       sync_interfaces
       @export = model.export
       export_routes
+    end
+
+    # Area options (stub). A change restarts the area's interfaces: the
+    # options in hellos change, so neighbors must start over.
+    def apply_areas(areas)
+      want = areas.to_h { |id, o| [Core::Addr.to_i(id), o] }
+      changed = (want.keys | @instance.area_options.keys).reject { |id| want[id] == @instance.area_options[id] }
+      @instance.area_options = want
+      changed.each do |id|
+        log(:info, "area #{Core::Addr.to_s(id)}: options changed, restarting its interfaces")
+        (@instance.areas[id]&.interfaces || []).map(&:name).each { |name| remove(name) }
+      end
     end
 
     # protocols ospf export: the host's networks and static routes the

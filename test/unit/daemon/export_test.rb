@@ -78,4 +78,17 @@ class TestDaemonExport < Test::Unit::TestCase
     assert @loop.run_until(30) { route('192.0.2.0/24').nil? }
     refute @d.views.overview[:asbr]
   end
+
+  def test_making_an_area_a_stub_restarts_its_interfaces
+    commit!(*BASE)
+    assert @loop.run_until(120) { @peer.neighbors.first&.full? }
+    commit!('set protocols ospf area 0.0.0.1 interface eth2', 'set protocols ospf area 0.0.0.1 stub')
+    assert_equal({ A['0.0.0.1'] => { stub: { default_metric: nil, no_summaries: false } } }, @d.instance.area_options)
+    assert_equal 0, @d.instance.interfaces['eth2'].options
+    assert_equal 2, @d.instance.interfaces['eth1'].options
+    first = @d.instance.interfaces['eth2']
+    commit!('set protocols ospf area 0.0.0.1 stub no-summaries')
+    refute_same first, @d.instance.interfaces['eth2'], 'restarted'
+    assert @peer.neighbors.first.full?, 'other areas untouched'
+  end
 end

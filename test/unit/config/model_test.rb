@@ -81,4 +81,14 @@ class TestConfigModel < Test::Unit::TestCase
     assert_equal ['interface eth1 is disabled', 'no OSPF interfaces configured'], m.warnings
     assert_equal ['no OSPF interfaces configured'], model.warnings
   end
+
+  def test_stub_areas
+    m = model('set protocols ospf area 1 interface eth1', 'set protocols ospf area 1 stub',
+              'set protocols ospf area 2 interface eth2', 'set protocols ospf area 2 stub default-metric 5',
+              'set protocols ospf area 2 stub no-summaries')
+    assert_equal({ '0.0.0.1' => { stub: { default_metric: nil, no_summaries: false } },
+                   '0.0.0.2' => { stub: { default_metric: 5, no_summaries: true } } }, m.areas)
+    assert_match(/backbone and cannot be a stub/, errors('set routing-options router-id 1.1.1.1',
+                                                         'set protocols ospf area 0 stub').join)
+  end
 end

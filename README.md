@@ -206,6 +206,17 @@ An interface in a second area makes ospfd an area border router: it sets the B b
 tells each area about the others with summary-LSAs (and about AS boundary routers
 with type 4 summaries), as RFC 2328 12.4.3 says.
 
+A stub area takes no external routes; its area border routers send a default route
+instead, and with `no-summaries` nothing else (totally stubby):
+
+```
+set protocols ospf area 1 stub
+set protocols ospf area 2 stub default-metric 10 no-summaries
+```
+
+Every router in the area must agree, or they will not become neighbors. Changing it
+restarts the area's interfaces.
+
 External routes are advertised through an export policy, as on Junos. The host's own
 networks (`direct`) and static routes in the kernel (`static`) are the sources.
 

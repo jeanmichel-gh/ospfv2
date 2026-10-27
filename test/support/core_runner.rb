@@ -12,6 +12,8 @@
 #                          "auth": {"type": "md5", "keys": {"1": "secret"}}},
 #                         {"name": "lo", "address": "1.1.1.1/32", "passive": true}]}
 #
+# "areas": {"0.0.0.1": {"stub": {"no_summaries": true}}} sets area options.
+#
 # "externals": [{"prefix": "203.0.113.0/24", "metric": 7, "type": 1, "tag": 9}]
 # are advertised as AS-external-LSAs.
 #
@@ -45,6 +47,10 @@ router = OSPFv2::Core::Instance.new(
   router_id: config.fetch(:router_id), loop: loop_,
   logger: ->(level, msg) { warn "#{level} #{msg}" unless level == :debug }
 )
+router.area_options = (config[:areas] || {}).to_h do |id, o|
+  [OSPFv2::Core::Addr.to_i(id.to_s), { stub: o[:stub] && { default_metric: o[:stub][:default_metric],
+                                                           no_summaries: o[:stub][:no_summaries] == true } }.compact]
+end
 config.fetch(:interfaces).each do |i|
   ip = i.fetch(:address).split('/').first
   opts = { name: i.fetch(:name), address: i.fetch(:address), area: i[:area] || 0 }

@@ -192,6 +192,11 @@ module OSPFv2
             container 'ospf', help: 'OSPF version 2' do
               leaf 'export', NAME, help: 'Policy choosing routes to advertise as AS externals'
               list 'area', key: AREA, help: 'OSPF area' do
+                container 'stub', help: 'No external routes here; area border routers send a default instead' do
+                  leaf 'default-metric', Schema.hint(T.range(1, 16_777_214), '<1..16777214>'),
+                       help: 'Cost of the default route the ABR sends (default 1)'
+                  flag 'no-summaries', help: 'Totally stubby: only the default route, no summaries'
+                end
                 list 'interface', key: IFNAME, help: 'Interface in this area' do
                   leaf 'interface-type', Schema.hint(T.one_of('broadcast', 'p2p'), '<broadcast|p2p>'), help: 'Network type'
                   leaf 'metric', Schema.hint(T.range(1, 65_535), '<1..65535>'), help: 'Interface cost'
