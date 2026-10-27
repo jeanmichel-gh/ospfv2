@@ -221,8 +221,10 @@ module OSPFv2
         @spf.trigger(:interface, iface.name)
       end
 
-      # Attached to more than one area (RFC 2328 3.3): an area border router.
-      def abr? = @areas.values.count(&:active?) > 1
+      # Attached to the backbone and another area: an area border router
+      # (RFC 3509; a router in two areas but not the backbone is not one,
+      # as on most implementations).
+      def abr? = @areas.values.count(&:active?) > 1 && @areas[0]&.active? == true
 
       # Advertising external routes (ours or translated): an AS boundary router.
       def asbr? = !@externals.empty?
@@ -368,7 +370,7 @@ module OSPFv2
         return unless @running
         key = [spec[:type], spec[:ls_id], @router_id]
         sk = scope_key(area, key)
-        db = lsdb_for(spec[:type], area)
+        db = own_db(spec[:type], area)
         cur = db[key]
         options = spec[:options] || (AS_SCOPE.include?(spec[:type]) ? 0x02 : area.lsa_options)
         unchanged = @own[sk] && cur && !cur.max_age? && cur.body == spec[:body] && cur.options == options
@@ -403,7 +405,7 @@ module OSPFv2
         sk = scope_key(area, key)
         @own.delete(sk)&.[](:refresh)&.cancel
         @deferred.delete(sk)&.cancel
-        db = lsdb_for(key[0], area)
+        db = own_db(key[0], area)
         cur = db[key]
         return unless cur && !cur.max_age?
         flush(cur, area)
@@ -438,13 +440,27 @@ module OSPFv2
         t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         table = Spf.run(router_id: @router_id, areas: spf_areas, externals: @as_lsdb.live, max_paths: @max_paths)
         @stats[:spf_runs] += 1
+        prev = @route_table
         replace_routes(table, reasons, Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0)
-        originate_summaries(table)
-        refresh_externals(table)
+        # Summaries and externals depend on the table and on how we sit in
+        # our areas. When neither changed, there is nothing to redo: with
+        # many routes that saves seconds per run.
+        sig = origination_signature(table)
+        if sig != @origination_sig || !Spf.diff(prev.routes, table.routes).empty?
+          @origination_sig = sig
+          originate_summaries(table)
+          refresh_externals(table)
+        end
         # Warn once per bad LSA, not on every run.
         (table.stats[:skipped] - @spf_skipped).each { |why| log(:warn, nil, "SPF skipped #{why}") }
         @spf_skipped = table.stats[:skipped]
         table
+      end
+
+      def origination_signature(table)
+        routers = table.routers.transform_values { |r| [r.path_type, r.cost, r.tag, r.next_hops.map(&:sort_key).sort] }
+        areas = @areas.values.map { |a| [a.id, a.active?, a.interfaces.select(&:up?).map { |i| [i.name, i.address] }] }
+        [abr?, areas, @area_options, routers]
       end
 
       # ---- log ----
@@ -526,9 +542,11 @@ module OSPFv2
         end
       end
 
-      # The cheapest entry per ASBR, whatever area it is in.
+      # The cheapest entry per ASBR, whatever area it is in. An NSSA's ASBRs
+      # are never summarized: their routes leave it as translated type 5s
+      # (RFC 3101 2.2).
       def best_asbrs(table)
-        table.routers.values.select { |r| r.tag && r.tag[:asbr] }
+        table.routers.values.select { |r| r.tag && r.tag[:asbr] && !@areas[r.area]&.nssa? }
              .group_by(&:prefix).transform_values { |rs| rs.min_by { |r| [r.cost, r.path_type == :intra ? 0 : 1] } }
       end
 
@@ -541,7 +559,9 @@ module OSPFv2
           ids[id] = want
           return id
         end
-        log(:warn, nil, "no link state id left for a summary of #{r.dest_s}")
+        @no_ls_id ||= {}
+        log(:warn, nil, "no link state id left for #{r.dest_s} (RFC 2328 Appendix E), not advertised") unless @no_ls_id[want]
+        @no_ls_id[want] = true
         nil
       end
 
@@ -610,13 +630,35 @@ module OSPFv2
         end
       end
 
+      TRANSLATOR_STABILITY = 40 # seconds a translator keeps going after losing (RFC 3101 3.1)
+
+      # Candidates: NSSA border routers reachable inside the NSSA and over
+      # the backbone. One with the Nt bit always translates; otherwise the
+      # highest router id does. A translator that loses keeps translating
+      # for TRANSLATOR_STABILITY seconds, so a flap does not drop routes.
       def translator?(area, table)
-        others = table.routers.values.select { |r| r.area == area.id && r.path_type == :intra && r.tag && r.tag[:abr] }
-        others.none? { |r| r.prefix > @router_id }
+        @translating ||= {}
+        backbone = table.routers.keys.select { |_, a| a.zero? }.map(&:first)
+        cands = table.routers.values.select do |r|
+          r.area == area.id && r.path_type == :intra && r.tag && r.tag[:abr] && backbone.include?(r.prefix)
+        end
+        elected = @areas[0]&.active? && cands.none? { |r| r.tag[:nt] || r.prefix > @router_id }
+        if elected
+          @translating[area.id] = :yes
+        elsif @translating[area.id] == :yes
+          @translating[area.id] = @loop.now
+          log(:info, nil, "area #{area.id_s}: no longer the NSSA translator, stopping in #{TRANSLATOR_STABILITY} s")
+          @loop.after(TRANSLATOR_STABILITY, :nssa_translator) { refresh_externals }
+        elsif @translating[area.id].is_a?(Numeric) && @loop.now - @translating[area.id] >= TRANSLATOR_STABILITY
+          @translating.delete(area.id)
+        end
+        @translating.key?(area.id)
       end
 
       def lsdb_changed(lsa, _old)
         return unless @running
+        # SPF never uses our own summaries and externals: no run for them.
+        return if lsa.advr == @router_id && [3, 4, 5, 7].include?(lsa.type)
         @spf.trigger(lsa.type_name, lsa.type == 1 ? Addr.to_s(lsa.advr) : "#{Addr.to_s(lsa.ls_id)} from #{Addr.to_s(lsa.advr)}")
       end
 
@@ -626,7 +668,8 @@ module OSPFv2
             Spf::Link.new(name: i.name, address: i.address, prefix_len: i.prefix_len,
                           neighbors: i.full_neighbors.to_h { |n| [n.router_id, n.address] })
           end
-          Spf::Area.new(id: a.id, lsas: a.lsdb.live, interfaces: links, nssa: a.nssa?)
+          Spf::Area.new(id: a.id, lsas: a.lsdb.live, interfaces: links, nssa: a.nssa?,
+                        no_summaries: a.nssa&.[](:no_summaries) == true)
         end
       end
 
@@ -656,15 +699,21 @@ module OSPFv2
       # An LSA key made unique across areas: [area id or nil for AS scope, *key].
       def scope_key(area, key) = [AS_SCOPE.include?(key[0]) ? nil : area.id, *key]
 
+      # Where our own LSA of +type+ lives: the AS database for externals,
+      # whatever the area (it may have become a stub or NSSA since), else
+      # the area's.
+      def own_db(type, area) = AS_SCOPE.include?(type) ? @as_lsdb : area.lsdb
+
       def install_own(area, lsa)
-        db = lsdb_for(lsa.type, area)
+        db = own_db(lsa.type, area)
         db.install(lsa)
         @stats[:lsa_originated] += 1
         sk = scope_key(area, lsa.key)
         o = (@own[sk] ||= { area: area, key: lsa.key })
         @last_origination[sk] = @loop.now
         o.delete(:wrap)
-        o[:refresh] ||= @loop.every(OSPFv2::LSRefreshTime, :ls_refresh, start: false) do
+        # Jittered, so LSAs originated together do not all refresh together.
+        o[:refresh] ||= @loop.every(OSPFv2::LSRefreshTime, :ls_refresh, start: false, jitter: 0.1) do
           s = area.spec_for(lsa.key)
           s ? originate(area, s, force: true) : flush_own(area, lsa.key)
         end
@@ -676,7 +725,7 @@ module OSPFv2
 
       def flush(cur, area)
         lsa = cur.with_age(OSPFv2::MaxAge)
-        lsdb_for(lsa.type, area).install(lsa)
+        own_db(lsa.type, area).install(lsa)
         # A flush is a new instance too: the next origination waits
         # MinLSInterval, or routers two hops away drop it (13 step 5a).
         @last_origination[scope_key(area, lsa.key)] = @loop.now if lsa.advr == @router_id

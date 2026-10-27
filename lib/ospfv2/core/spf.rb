@@ -44,9 +44,10 @@ module OSPFv2
       end
 
       # +nssa+: the area is not-so-stubby (RFC 3101); its type 7 LSAs count.
-      Area = Struct.new(:id, :lsas, :interfaces, :nssa, keyword_init: true) do
-        def initialize(id:, lsas:, interfaces: [], nssa: false)
-          super(id: Addr.to_i(id), lsas: lsas, interfaces: interfaces, nssa: nssa)
+      # +no_summaries+: its border routers send it only a default.
+      Area = Struct.new(:id, :lsas, :interfaces, :nssa, :no_summaries, keyword_init: true) do
+        def initialize(id:, lsas:, interfaces: [], nssa: false, no_summaries: false)
+          super(id: Addr.to_i(id), lsas: lsas, interfaces: interfaces, nssa: nssa, no_summaries: no_summaries)
         end
       end
 
@@ -67,10 +68,13 @@ module OSPFv2
         def dest_s = "#{Addr.to_s(prefix)}/#{prefix_len}"
         def area_s = area && Addr.to_s(area)
 
-        # Same destination, same way to get there.
+        # Same destination, same way to get there, same LSA behind it (what
+        # a translation or a summary copies).
         def same_as?(o)
           o && path_type == o.path_type && cost == o.cost && type2_cost == o.type2_cost &&
-            area == o.area && next_hops.sort_by(&:sort_key) == o.next_hops.sort_by(&:sort_key)
+            area == o.area && next_hops.sort_by(&:sort_key) == o.next_hops.sort_by(&:sort_key) &&
+            tag == o.tag && forwarding == o.forwarding && lsa_type == o.lsa_type && p_bit == o.p_bit &&
+            lsa_metric == o.lsa_metric
         end
 
         def to_s
@@ -158,6 +162,12 @@ module OSPFv2
         end
 
         def run
+          # Active attachments (16.2): an interface up in the area. An area
+          # border router is attached to the backbone and another area
+          # (RFC 3509).
+          @attached = @areas.select { |a| a.interfaces.any? && a.lsas.any? { |l| l.key == [1, @root, @root] } }
+          @abr = @attached.size > 1 && @attached.any? { |a| a.id.zero? }
+          @backbone_routers = 0
           @areas.each { |a| intra_area(a) }
           inter_area
           external
@@ -212,6 +222,7 @@ module OSPFv2
             break unless v
           end
           @stats[:vertices] += tree.size
+          @backbone_routers = tree.count { |id, _| id[0] == :router } - 1 if area.id.zero?
           stub_routes(area, tree)
         end
 
@@ -348,7 +359,9 @@ module OSPFv2
           if cur.nil? || cur.path_type != :intra || cost < cur.cost
             @routes[key] = Route.new(prefix: prefix, prefix_len: len, path_type: :intra, cost: cost,
                                      area: area.id, next_hops: hops.dup, advr: advr)
-          elsif cost == cur.cost
+          elsif cost == cur.cost && cur.area == area.id
+            # One area per entry (RFC 2328 11): an equal path through
+            # another area is not added.
             cur.next_hops |= hops
           end
         end
@@ -360,17 +373,17 @@ module OSPFv2
           return if (flags & 0x3).zero? # neither B nor E
           @routers[[v.id[1], area.id]] = Route.new(prefix: v.id[1], prefix_len: 32, path_type: :intra, cost: v.dist,
                                                     area: area.id, next_hops: v.next_hops.dup, advr: v.id[1],
-                                                    tag: { abr: (flags & 1) == 1, asbr: (flags & 2) == 2 })
+                                                    tag: { abr: (flags & 1) == 1, asbr: (flags & 2) == 2,
+                                                           nt: (flags & 0x10) == 0x10 })
         end
 
         # ---- 16.2: inter-area routes ----
 
         def inter_area
-          # Active attachments (16.2): an interface up in the area.
-          attached = @areas.select { |a| a.interfaces.any? && a.lsas.any? { |l| l.key == [1, @root, @root] } }
-          backbone = attached.find { |a| a.id.zero? }
-          # An ABR looks at backbone summaries only.
-          examined = attached.size > 1 ? [backbone].compact : attached
+          backbone = @attached.find { |a| a.id.zero? }
+          # An ABR with a live backbone (a neighbor there) looks at backbone
+          # summaries only; otherwise, every attached area's (RFC 3509).
+          examined = @abr && @backbone_routers.positive? ? [backbone] : @attached
           examined.each do |area|
             area.lsas.each do |l|
               next unless [3, 4].include?(l.type) && !l.max_age? && l.advr != @root
@@ -443,6 +456,10 @@ module OSPFv2
             body = external_body(l) or next
             mask, e_bit, metric, fwd, tag = body
             next if metric == LS_INFINITY || own[fwd]
+            # A border router ignores another border router's default (P bit
+            # clear), and every default in an NSSA it sends only a default
+            # to; otherwise two of them route to each other (2.5 step 3).
+            next if mask.zero? && @abr && (!(l.options & 0x08).positive? || area.no_summaries)
             # The originator: an ASBR, or the NSSA border router for its
             # default (2.5 step 3).
             asbr = @routers[[l.advr, area.id]]
@@ -486,9 +503,11 @@ module OSPFv2
           rank = { ext1: 0, ext2: 1 }
           return rank[a.path_type] <=> rank[b.path_type] unless a.path_type == b.path_type
           c = a.path_type == :ext1 ? a.cost <=> b.cost : [a.type2_cost, a.cost] <=> [b.type2_cost, b.cost]
-          return c unless c.zero? && a.forwarding && b.forwarding
-          # RFC 3101 2.5 (6e): equal, both with a forwarding address: a type 7
-          # with the P bit, then a type 5, then the higher router id.
+          # Different forwarding addresses, or none: equal-cost paths, kept.
+          return c unless c.zero? && a.forwarding && a.forwarding == b.forwarding
+          # RFC 3101 2.5 (6e): the same route through the same forwarding
+          # address: a type 7 with the P bit, then a type 5, then the
+          # higher router id.
           rank = ->(r) { r.lsa_type == 7 && r.p_bit ? 0 : (r.lsa_type == 5 ? 1 : 2) }
           [rank[a], -a.advr] <=> [rank[b], -b.advr]
         end
@@ -502,11 +521,13 @@ module OSPFv2
         end
 
         # Longest-prefix match among the internal routes.
-        # With +area+, an intra-area route in that area only.
+        # With +area+, the longest match must be an intra-area route in
+        # that area, or there is none (RFC 3101 2.5 step 3).
         def lookup(ip, area: nil)
           @internal_lens.each do |len|
             r = @internal[len][ip & Addr.mask(len)] or next
             return r if area.nil? || (r.path_type == :intra && r.area == area)
+            return nil
           end
           nil
         end

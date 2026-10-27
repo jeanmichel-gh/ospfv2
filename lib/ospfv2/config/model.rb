@@ -109,6 +109,13 @@ module OSPFv2
           return nil
         end
         p = Policy.from_config(name, policy)
+        p.terms.each do |t|
+          t.filters.each do |f|
+            next unless f.upto && f.upto < f.prefix_len
+            @errors << "policy-statement #{name} term #{t.name}: route-filter upto /#{f.upto} is shorter than " \
+                       "the prefix /#{f.prefix_len}"
+          end
+        end
         @warnings << "policy-statement #{name} accepts nothing" if p.terms.none? { |t| t.action == :accept }
         p
       end

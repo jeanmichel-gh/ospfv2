@@ -75,7 +75,7 @@ module OSPFv2
         words = Config::Tree.split(before)
         return [] if before.include?('|')
         if @mode == :configure && %w[set delete].any? { |w| words.first&.then { |f| w.start_with?(f) && f.size.positive? } && words.size >= 1 }
-          ConfigCompleter.completions(words.drop(1), partial)
+          ConfigCompleter.completions(words.drop(1), partial, siblings: 'set'.start_with?(words.first))
         else
           grammar.completions(words, partial)
         end
@@ -123,7 +123,7 @@ module OSPFv2
         words = Config::Tree.split(line)
         partial = after_space || words.empty? ? '' : words.pop
         opts = if @mode == :configure && words.first && %w[set delete].include?(expand_config(words.first))
-                 ConfigCompleter.options(words.drop(1), partial)
+                 ConfigCompleter.options(words.drop(1), partial, siblings: expand_config(words.first) == 'set')
                else
                  grammar.options(words, partial)
                end

@@ -90,6 +90,7 @@ class TestCoreNssa < Test::Unit::TestCase
 
   def test_the_highest_router_id_translates
     build(second_abr: true)
+    @lab.advance(45) # a translator that lost keeps going 40 s (RFC 3101 3.1)
     adv = lsas(@r1, 5).select { |l| l.ls_id == A['192.0.2.0'] }.map { |l| Addr.to_s(l.advr) }
     assert_equal ['4.4.4.4'], adv
   end
@@ -104,5 +105,39 @@ class TestCoreNssa < Test::Unit::TestCase
     @lab.advance(30)
     assert_empty r5.neighbors.select(&:full?)
     assert_match(/(E|N) bit mismatch/, @lab.log.join("\n"))
+  end
+
+  # ---- review fixes ----
+
+  def test_border_routers_ignore_each_others_default
+    build(nssa: { default_lsa: { metric: 7, type: 2 } }, second_abr: true)
+    assert_nil route(@r2, '0.0.0.0/0'), 'R2 would send default traffic to R4 and back'
+    assert_nil route(@r4, '0.0.0.0/0')
+    assert route(@r3, '0.0.0.0/0'), 'the routers inside take it'
+  end
+
+  def test_no_type_4_for_an_nssa_asbr
+    build
+    assert_empty(lsas(@r1, 4, 0).select { |l| l.ls_id == A['3.3.3.3'] })
+    assert_nil @r1.route_table.routers.values.find { |r| r.prefix == A['3.3.3.3'] }
+  end
+
+  def test_own_summaries_and_externals_trigger_no_spf
+    build
+    kinds = @r2.spf_log.flat_map { |run| run.reasons.select { |x| x.detail.to_s.end_with?('from 2.2.2.2') } }
+    assert_empty kinds
+  end
+
+  def test_an_area_turning_nssa_does_not_break_our_externals
+    build
+    @r1.externals = [{ prefix: A['198.51.100.0'], prefix_len: 24, metric: 30, type: 2, tag: 0 }]
+    lab = @lab
+    @r2.externals = [{ prefix: A['203.0.113.0'], prefix_len: 24, metric: 5, type: 2, tag: 0 }]
+    lab.advance(10)
+    # Area 0 on R1 turns into an NSSA under the type 5 it originated.
+    @r1.area_options = { 0 => { nssa: { default_lsa: nil, no_summaries: false } } }
+    lab.advance(OSPFv2::LSRefreshTime + 200)
+    @r1.stop(flush: true)
+    refute @r1.running?
   end
 end

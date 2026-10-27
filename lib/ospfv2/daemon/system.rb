@@ -29,7 +29,8 @@ module OSPFv2
 
       STATIC_PROTOCOLS = [3, 4].freeze # RTPROT_BOOT (ip route add), RTPROT_STATIC
 
-      # Static routes in the main table, as [prefix, prefix_len] Integers.
+      # Static routes in the main table, as [prefix, prefix_len] Integers;
+      # nil when the kernel cannot be read.
       def static_routes
         require_relative '../fib/netlink'
         nl = Fib::Netlink.new
@@ -39,7 +40,7 @@ module OSPFv2
           nl.close
         end
       rescue StandardError
-        []
+        nil
       end
     end
 

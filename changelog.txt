@@ -90,6 +90,21 @@
   type 3 default
 * Interop: stub, totally stubby and NSSA areas behind our ABR, with FRR
   inside; equal-cost failover in the kernel within the dead interval
+* Area border routers per RFC 3509: attached to the backbone and another
+  area; without a backbone neighbor, every area's summaries count
+* NSSA review fixes: border routers ignore each other's type 7 default,
+  no type 4 summaries for NSSA ASBRs, the translator must be on the
+  backbone, honors the Nt bit and keeps the role 40 s after losing it,
+  a type 7 forwarding address must have its longest match in the NSSA
+* Equal-cost externals through different forwarding addresses keep both
+  paths; one area per intra-area route
+* Summaries and externals are recomputed only when routes or area state
+  change, our own summaries and externals no longer trigger SPF, and LSA
+  refreshes are jittered
+* Export policy route filters match as on Junos (longest filter prefix
+  decides); a kernel read error keeps the static routes advertised
+* Changing an area's default metric, no-summaries or default-lsa no longer
+  restarts its interfaces; only a change of area type does
 * Configuration: a leaf or flag may be followed by its siblings on one
   line, as on Junos (set ... stub default-metric 10 no-summaries)
 * Fix: a router in two areas tracked its own LSAs by LSA key alone, so

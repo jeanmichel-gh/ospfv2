@@ -3,7 +3,9 @@
 module OSPFv2
   module Config
     # A Junos-style export policy: terms tried in order. A term matches when
-    # all its "from" conditions do; its "then" sets metric, type and tag,
+    # all its "from" conditions do. Route filters match as on Junos: the
+    # longest filter prefix containing the route is chosen, then its match
+    # types decide; its "then" sets metric, type and tag,
     # and accept or reject ends the evaluation. A term with neither lets
     # evaluation go on to the next with what it set. A route no term
     # accepts is not exported.
@@ -14,16 +16,22 @@ module OSPFv2
     class Policy
       DEFAULTS = { metric: 20, type: 2, tag: 0 }.freeze
 
-      Filter = Struct.new(:prefix, :prefix_len, :match, :upto) do
-        def match?(prefix, len)
+      # One route-filter prefix and its match types (several may be set).
+      Filter = Struct.new(:prefix, :prefix_len, :matches, :upto) do
+        def contains?(prefix, len)
           return false if len < prefix_len
           mask = prefix_len.zero? ? 0 : (0xffff_ffff << (32 - prefix_len)) & 0xffff_ffff
-          return false unless (prefix & mask) == self.prefix
-          case match
-          when :exact then len == prefix_len
-          when :orlonger then true
-          when :longer then len > prefix_len
-          when :upto then len <= upto
+          (prefix & mask) == self.prefix
+        end
+
+        def match?(len)
+          matches.any? do |m|
+            case m
+            when :exact then len == prefix_len
+            when :orlonger then true
+            when :longer then len > prefix_len
+            when :upto then len <= upto
+            end
           end
         end
       end
@@ -31,7 +39,9 @@ module OSPFv2
       Term = Struct.new(:name, :protocol, :filters, :set, :action, keyword_init: true) do
         def match?(route)
           return false if protocol && protocol != route[:protocol]
-          filters.empty? || filters.any? { |f| f.match?(route[:prefix], route[:prefix_len]) }
+          return true if filters.empty?
+          f = filters.select { |x| x.contains?(route[:prefix], route[:prefix_len]) }.max_by(&:prefix_len)
+          !f.nil? && f.match?(route[:prefix_len])
         end
       end
 
@@ -50,12 +60,9 @@ module OSPFv2
           filters = (from['route-filter'] || {}).map do |pfx, f|
             ip, len = pfx.split('/')
             n = ip.split('.').map(&:to_i).inject(0) { |a, o| (a << 8) | o }
-            match = if f['upto'] then :upto
-                    elsif f['orlonger'] then :orlonger
-                    elsif f['longer'] then :longer
-                    else :exact
-                    end
-            Filter.new(n, len.to_i, match, f['upto'])
+            matches = %w[exact orlonger longer upto].select { |m| f[m] }.map(&:to_sym)
+            matches = [:exact] if matches.empty?
+            Filter.new(n, len.to_i, matches, f['upto'])
           end
           th = t['then'] || {}
           set = { metric: th['metric'], type: th.dig('external', 'type'), tag: th['tag'] }.compact

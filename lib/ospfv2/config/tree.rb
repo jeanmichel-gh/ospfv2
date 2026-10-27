@@ -77,8 +77,12 @@ module OSPFv2
         node = Schema::ROOT
         data = @data
         i = 0
+        after_leaf = false
         loop do
           child = resolve(node, words[i], words.take(i))
+          if after_leaf && !%i[leaf flag].include?(child.kind)
+            raise Error, "'#{words[i]}' cannot follow a value on the same line; give it its own set"
+          end
           path = words.take(i) + [child.name]
           case child.kind
           when :container
@@ -99,10 +103,12 @@ module OSPFv2
             data[child.name] = v
             i += 2
             return self if i == words.size
+            after_leaf = true
           when :flag
             data[child.name] = true
             i += 1
             return self if i == words.size
+            after_leaf = true
           when :keyed_leaf
             key = value(child, child.type, words[i + 1], path)
             sub, sub_type = child.sub
