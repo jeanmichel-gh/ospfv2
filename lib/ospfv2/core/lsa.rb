@@ -89,6 +89,13 @@ module OSPFv2
         "#{type_name} #{Addr.to_s(ls_id)} #{Addr.to_s(advr)}"
       end
 
+      # The instance key events carry, to tie one LSA instance together
+      # across routers and tools: type, Link State ID, advertising router,
+      # sequence number.
+      def instance_fields
+        { lsa_type: type_name.to_s, ls_id: Addr.to_s(ls_id), advr: Addr.to_s(advr), seq: format('0x%08x', seq & 0xffff_ffff) }
+      end
+
       def to_s
         format('%-12s %-15s %-15s age %4d seq 0x%08x csum 0x%04x len %d',
                type_name, Addr.to_s(ls_id), Addr.to_s(advr), age, seq & 0xffff_ffff, checksum, length)

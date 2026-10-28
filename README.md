@@ -322,10 +322,64 @@ Junos forms print Junos style, IOS forms print IOS style.
 | `show ospf events` | `show ip ospf events` |
 | `show ospf statistics` (packets) | `show ip ospf traffic` |
 | `clear ospf neighbor [ROUTER-ID]` | `clear ip ospf process` |
+| `monitor ospf events [KIND]` (live, Ctrl-C stops) | `monitor ip ospf events` |
 | `show configuration` | |
 
 Pipes: `| match REGEX`, `| except REGEX`, `| count`, `| last N`, `| display json`,
-`| display set` (configuration). `include` and `exclude` work as on IOS.
+`| display set` (configuration). `include` and `exclude` work as on IOS. `monitor`
+takes `| match` and `| except`.
+
+### Management API
+
+ospf-cli is one client of ospfd's management API: JSON lines over the Unix socket, one
+request and one reply per line.
+
+```
+-> {"id": 1, "method": "show.neighbors", "params": {}}
+<- {"id": 1, "result": [...]}
+```
+
+`api.info` returns ospfd's version, the API version, the methods and the event kinds.
+The methods: `show.overview`, `show.neighbors`, `show.interfaces`, `show.database`,
+`show.routes`, `show.fib`, `show.spf`, `show.log`, `show.statistics`,
+`show.configuration`, `config.load`, `config.compare`, `config.changed`,
+`config.commit`, `config.discard`, `config.rollback`, `config.history`,
+`clear.neighbors`, `events.subscribe` and `events.unsubscribe`.
+
+`events.subscribe` turns the connection into a stream of events, one per line, with a
+keepalive line every 15 seconds when nothing happens. Use a second connection for
+requests meanwhile; `events.unsubscribe` ends the stream.
+
+```
+-> {"id": 2, "method": "events.subscribe", "params": {"kinds": ["neighbor", "spf"], "since": 120}}
+<- {"id": 2, "result": {"seq": 131, "replayed": 3, "kinds": ["neighbor", "spf"]}}
+<- {"event": {"seq": 128, "time": "2026-10-28T03:18:31.004Z", "level": "info", "kind": "neighbor",
+     "interface": "eth0", "message": "neighbor 2.2.2.2@10.99.0.20: loading -> full (loading_done)",
+     "data": {"router_id": "2.2.2.2", "address": "10.99.0.20", "from": "loading", "to": "full", "event": "loading_done"}}}
+<- {"keepalive": "2026-10-28T03:18:46.010Z", "seq": 131}
+```
+
+Both parameters are optional: `kinds` limits the stream, `since` first replays the
+events numbered above it, from the last 2000 ospfd keeps. Every event has a number, a
+time, a level, a kind, a message and, for most kinds, structured `data`:
+
+| Kind | When | Data |
+| --- | --- | --- |
+| `neighbor` | A neighbor appears or changes state | `router_id`, `address`, `from`, `to`, `event` |
+| `interface` | An interface changes state or is removed | `from`, `to`, `event` |
+| `dr` | The DR or BDR changes | `dr`, `bdr` |
+| `drop` | A packet is dropped | `what`, `reason` |
+| `spf` | Every SPF run | `duration_ms`, `routes`, `added`, `changed`, `removed`, `reasons`, `prefixes` (the first 50, `+`, `~` or `-` in front) |
+| `routes` | An SPF run changed routes | `added`, `changed`, `removed` |
+| `spf_skipped` | SPF skipped a bad LSA | `why` |
+| `lsa` | One of our LSAs is flushed, or an LSA reaches MaxAge | `change`, `lsa_type`, `ls_id`, `advr`, `seq` |
+| `router` | The router starts or stops | `state`, `router_id` |
+| `virtual_link` | A virtual link comes up or goes down | `to`, `neighbor_id`, `cost` |
+| `commit` | A commit | `comment`, `changes`, `statements` (the first 50, secrets hidden), `saved` |
+| `log` | Anything else | none |
+
+A reader too slow to keep up loses the oldest events rather than holding up the router;
+it then gets an `overflow` event with the number lost.
 
 ## Docker
 

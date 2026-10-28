@@ -5,6 +5,9 @@ require 'io/wait'
 require 'json'
 require 'socket'
 require 'fileutils'
+require 'time'
+require_relative 'events'
+require_relative '../version'
 
 module OSPFv2
   class Daemon
@@ -14,12 +17,28 @@ module OSPFv2
     #   <- {"id": 1, "result": [...]}
     #   <- {"id": 1, "error": "unknown method show.foo"}
     #
+    # events.subscribe turns the connection into a stream: after its reply,
+    # one line per event, and a keepalive line when nothing happened for
+    # KEEPALIVE seconds. events.unsubscribe ends the stream and the
+    # connection takes requests again. Use another connection for requests
+    # meanwhile.
+    #
+    #   -> {"id": 2, "method": "events.subscribe", "params": {"kinds": ["neighbor", "spf"], "since": 120}}
+    #   <- {"id": 2, "result": {"seq": 131, "replayed": 11, "kinds": ["neighbor", "spf"]}}
+    #   <- {"event": {"seq": 121, "time": "...", "level": "info", "kind": "neighbor", ...}}
+    #   <- {"keepalive": "2026-10-28T03:18:31.004Z", "seq": 131}
+    #   -> {"id": 3, "method": "events.unsubscribe"}
+    #   <- {"id": 3, "result": {"unsubscribed": true}}
+    #
     # The socket is created mode 0660, so access is by file permission:
     # root, and the socket's group if one is given.
     class Api
       MAX_LINE = 1 << 20   # bytes in one request
       MAX_CLIENTS = 32     # connections served at once
       IDLE = 900           # seconds a connection may sit silent
+      KEEPALIVE = 15       # seconds between keepalive lines on an event stream
+      VERSION = 1          # of this API: raised when a method changes in an incompatible way
+      STREAM_METHODS = %w[events.subscribe events.unsubscribe].freeze
 
       # name => ->(daemon, params) { result }
       METHODS = {
@@ -42,13 +61,18 @@ module OSPFv2
         'config.discard' => ->(d, _) { d.discard && nil },
         'config.rollback' => ->(d, p) { d.rollback(p['number'] || 0) },
         'config.history' => ->(d, _) { d.commit_history.map { |c| c.merge(time: c[:time].utc.iso8601) } },
-        'clear.neighbors' => ->(d, p) { { cleared: d.clear_neighbors(p['router_id']) } }
+        'clear.neighbors' => ->(d, p) { { cleared: d.clear_neighbors(p['router_id']) } },
+        'api.info' => lambda do |d, _|
+          { version: OSPFv2::VERSION, api: VERSION, methods: (METHODS.keys + STREAM_METHODS).sort,
+            event_kinds: Events::KINDS, event_seq: d.events.seq }
+        end
       }.freeze
 
       attr_reader :path
 
-      def initialize(daemon, path:, group: nil, logger: nil)
+      def initialize(daemon, path:, group: nil, logger: nil, keepalive: KEEPALIVE)
         @daemon = daemon
+        @keepalive = keepalive
         @path = path
         @group = group
         @logger = logger
@@ -176,16 +200,68 @@ module OSPFv2
             close_gently(sock)
             return
           end
-          resp = begin
-            req = JSON.parse(line)
-            req.is_a?(Hash) ? handle(req) : { error: 'request must be a JSON object' }
+          req = begin
+            JSON.parse(line)
           rescue JSON::ParserError => e
-            { error: "bad JSON: #{e.message[0, 80]}" }
+            sock.write("#{JSON.generate(error: "bad JSON: #{e.message[0, 80]}")}\n")
+            next
           end
-          sock.write("#{JSON.generate(resp)}\n")
+          unless req.is_a?(Hash)
+            sock.write("#{JSON.generate(error: 'request must be a JSON object')}\n")
+            next
+          end
+          case req['method']
+          when 'events.subscribe' then return unless stream(sock, req)
+          when 'events.unsubscribe' then sock.write("#{JSON.generate(id: req['id'], error: 'not subscribed')}\n")
+          else sock.write("#{JSON.generate(handle(req))}\n")
+          end
         end
       rescue IOError, Errno::ECONNRESET, Errno::EPIPE
         nil
+      end
+
+      # Streams events until the client unsubscribes (returns true: the
+      # connection takes requests again) or goes away (returns false).
+      def stream(sock, req)
+        params = req['params'].is_a?(Hash) ? req['params'] : {}
+        kinds = params['kinds'] && Array(params['kinds']).map(&:to_s)
+        since = params['since'] && Integer(params['since'])
+        sub, replayed = @daemon.events.subscribe(kinds: kinds, since: since)
+        sock.write("#{JSON.generate(id: req['id'], result: { seq: @daemon.events.seq, replayed: replayed, kinds: kinds })}\n")
+        buffer = +''
+        last_write = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+        loop do
+          if sock.wait_readable(0)
+            chunk = sock.read_nonblock(4096, exception: false)
+            return false if chunk.nil? # client gone
+            buffer << chunk unless chunk == :wait_readable
+            return false if buffer.bytesize > MAX_LINE
+            while (i = buffer.index("\n"))
+              line = buffer.slice!(0..i)
+              msg = (JSON.parse(line) rescue nil)
+              if msg.is_a?(Hash) && msg['method'] == 'events.unsubscribe'
+                sock.write("#{JSON.generate(id: msg['id'], result: { unsubscribed: true })}\n")
+                return true
+              end
+              err = { id: msg.is_a?(Hash) ? msg['id'] : nil, error: 'streaming events: only events.unsubscribe, or use another connection' }
+              sock.write("#{JSON.generate(err)}\n")
+            end
+          end
+          ev = sub.pop(timeout: 0.2)
+          now = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          if ev
+            sock.write("#{JSON.generate(event: ev)}\n")
+            last_write = now
+          elsif now - last_write >= @keepalive
+            sock.write("#{JSON.generate(keepalive: Time.now.utc.iso8601(3), seq: @daemon.events.seq)}\n")
+            last_write = now
+          end
+        end
+      rescue ArgumentError, TypeError => e
+        sock.write("#{JSON.generate(id: req['id'], error: e.message)}\n")
+        true
+      ensure
+        sub&.close
       end
     end
   end

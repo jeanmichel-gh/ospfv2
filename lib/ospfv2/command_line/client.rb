@@ -35,7 +35,39 @@ module OSPFv2
         @sock = nil
       end
 
+      # Streams events on a connection of its own: yields each event Hash
+      # until the block returns :stop, ospfd closes the stream, or the
+      # caller is interrupted. Keepalives are not yielded.
+      def subscribe(kinds: nil, since: nil)
+        sock = open_socket
+        params = {}
+        params[:kinds] = kinds if kinds && !kinds.empty?
+        params[:since] = since if since
+        sock.write("#{JSON.generate(id: 1, method: 'events.subscribe', params: params)}\n")
+        first = sock.gets or raise Error, 'ospfd closed the connection'
+        resp = JSON.parse(first)
+        raise Error, resp['error'] if resp['error']
+        while (line = sock.gets)
+          msg = JSON.parse(line)
+          next unless msg['event']
+          break if yield(msg['event']) == :stop
+        end
+        resp['result']
+      rescue Errno::EPIPE, Errno::ECONNRESET, IOError
+        raise Error, 'lost the connection to ospfd'
+      ensure
+        sock&.close
+      end
+
       private
+
+      def open_socket
+        UNIXSocket.new(@path)
+      rescue Errno::ENOENT, Errno::ECONNREFUSED
+        raise Error, "cannot reach ospfd at #{@path}: is it running?"
+      rescue Errno::EACCES
+        raise Error, "permission denied on #{@path}: run as root or a member of its group"
+      end
 
       def connect
         @sock ||= UNIXSocket.new(@path)
@@ -59,6 +91,10 @@ module OSPFv2
       end
 
       def close; end
+
+      def subscribe(**)
+        raise Error, 'monitor needs ospfd over its socket'
+      end
     end
   end
 end

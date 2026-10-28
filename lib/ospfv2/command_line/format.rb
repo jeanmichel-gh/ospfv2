@@ -1,11 +1,22 @@
 # frozen_string_literal: true
 
+require 'time'
+
 module OSPFv2
   module CommandLine
     # Turns the daemon's views (plain Hashes from the API, string keys)
     # into the tables a Junos or IOS user expects.
     module Format
       module_function
+
+      # One line per streamed event, for monitor ospf events:
+      #   03:18:31.004 neighbor  eth0 neighbor 2.2.2.2@10.99.0.20: loading -> full (loading_done)
+      def event_line(ev)
+        t = ev['time'] ? Time.iso8601(ev['time']).localtime.strftime('%H:%M:%S.%L') : '--:--:--.---'
+        where = ev['interface'] ? "#{ev['interface']} " : ''
+        warn = ev['level'] == 'warn' || ev['level'] == 'error' ? "#{ev['level']}: " : ''
+        "#{t} #{ev['kind'].to_s.ljust(9)} #{where}#{warn}#{ev['message']}"
+      end
 
       def render(view, style, data, detail: false, type: nil, router_id: nil)
         case view

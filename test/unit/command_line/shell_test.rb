@@ -220,4 +220,37 @@ class TestCommandLineShell < Test::Unit::TestCase
     @sh.interactive(input: StringIO.new("show ospf neighbor | count\nexit\nshow ospf overview\n"), output: out)
     assert_equal "Count: 2 lines\n", out.string, 'stops at exit'
   end
+
+  def test_monitor_needs_the_socket
+    assert_match(/monitor needs ospfd over its socket/, @sh.execute('monitor ospf events'))
+  end
+
+  def test_monitor_prints_events_and_filters
+    api = Daemon::Api.new(@daemon, path: File.join(@dir, 's', 'ospfd.sock'))
+    api.start
+    out = StringIO.new
+    sh = CommandLine::Shell.new(CommandLine::Client.new(api.path), output: out)
+    sh.monitor_limit = 2
+    t = Thread.new do
+      sleep 0.02 until @daemon.events.subscribers == 1
+      t0 = Time.utc(2026, 10, 28, 3, 18, 31)
+      @daemon.events.publish(time: t0, level: :info, kind: :neighbor, interface: 'eth1', message: 'neighbor 2.2.2.2 up')
+      @daemon.events.publish(time: t0, level: :warn, kind: :neighbor, interface: 'eth1', message: 'neighbor 3.3.3.3 lost')
+      @daemon.events.publish(time: t0, level: :info, kind: :neighbor, interface: 'eth1', message: 'neighbor 2.2.2.2 full')
+    end
+    assert_equal '', sh.execute('mon ospf ev neighbor | match 2.2.2.2')
+    t.join
+    lines = out.string.lines.map(&:chomp)
+    assert_equal 'Watching neighbor events, Ctrl-C stops', lines[0]
+    assert_equal 3, lines.size
+    assert_match(/\A\d\d:\d\d:\d\d\.\d{3} neighbor  eth1 neighbor 2\.2\.2\.2 up\z/, lines[1])
+    assert_match(/2\.2\.2\.2 full\z/, lines[2])
+  ensure
+    api&.stop
+  end
+
+  def test_monitor_help_lists_the_kinds
+    assert_match(/spf\s+Spf events/, @sh.execute('monitor ospf events ?'))
+    assert_match(/monitor ospf events/, @sh.execute('help'))
+  end
 end

@@ -55,7 +55,8 @@ module OSPFv2
         @via = via
         if !up?
           @instance.log(:info, self, "virtual link to #{Addr.to_s(@neighbor_id)} up, cost #{cost}, " \
-                                     "via #{Addr.to_s(remote)} #{via}")
+                                     "via #{Addr.to_s(remote)} #{via}",
+                        kind: :virtual_link, to: 'up', neighbor_id: Addr.to_s(@neighbor_id), cost: cost)
           up
         elsif changed
           @area.schedule_origination
@@ -66,7 +67,8 @@ module OSPFv2
       def unreach
         return unless up?
         @instance.log(:info, self, "virtual link to #{Addr.to_s(@neighbor_id)} down: not reachable in area " \
-                                   "#{Addr.to_s(@transit_area_id)}")
+                                   "#{Addr.to_s(@transit_area_id)}",
+                      kind: :virtual_link, to: 'down', neighbor_id: Addr.to_s(@neighbor_id))
         down
       end
 

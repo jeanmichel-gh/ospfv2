@@ -218,7 +218,7 @@ module OSPFv2
 
       def drop(kind, reason)
         @stats[:"drop_#{kind}"] += 1
-        @instance.log(:warn, self, "dropped #{kind}: #{reason}")
+        @instance.log(:warn, self, "dropped #{kind}: #{reason}", kind: :drop, what: kind.to_s, reason: reason.to_s)
         nil
       end
 
@@ -301,7 +301,8 @@ module OSPFv2
         old = @state
         return if old == new_state
         @state = new_state
-        @instance.log(:info, self, "interface #{@name}: #{old} -> #{new_state} (#{event})")
+        @instance.log(:info, self, "interface #{@name}: #{old} -> #{new_state} (#{event})",
+                      kind: :interface, from: old.to_s, to: new_state.to_s, event: event.to_s)
         @instance.interface_changed(self, old, new_state)
       end
 
@@ -333,7 +334,8 @@ module OSPFv2
             return drop(:hello, "router id #{Addr.to_s(rid)} from #{Addr.to_s(from)} is already neighbor #{other}")
           end
           nbr = @neighbors[key] = Neighbor.new(self, router_id: rid, address: from)
-          @instance.log(:info, self, "new neighbor #{nbr}")
+          @instance.log(:info, self, "new neighbor #{nbr}", kind: :neighbor, router_id: Addr.to_s(rid),
+                                                            address: Addr.to_s(from), from: nil, to: 'new', event: 'hello')
         end
         old_pri = nbr.priority
         was_dr = nbr.declares_dr?
@@ -398,7 +400,8 @@ module OSPFv2
                     end
         change(new_state, event)
         if @dr != old_dr || @bdr != old_bdr
-          @instance.log(:info, self, "interface #{@name}: DR #{Addr.to_s(@dr)} BDR #{Addr.to_s(@bdr)}")
+          @instance.log(:info, self, "interface #{@name}: DR #{Addr.to_s(@dr)} BDR #{Addr.to_s(@bdr)}",
+                        kind: :dr, dr: Addr.to_s(@dr), bdr: Addr.to_s(@bdr))
           @neighbors.values.each { |n| n.adj_ok if n.at_least?(:two_way) }
           @instance.dr_changed(self)
         end
