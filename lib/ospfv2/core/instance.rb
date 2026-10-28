@@ -1,5 +1,6 @@
 # frozen_string_literal: true
 
+require 'time' # Time#iso8601 for SPF runs, without the daemon
 require_relative '../infra/event_loop'
 require_relative 'addr'
 require_relative 'lsa'
