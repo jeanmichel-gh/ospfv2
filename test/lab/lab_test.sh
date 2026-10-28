@@ -193,5 +193,44 @@ check "replay has neighbor and commit events" grep -q '"kinds":\["commit","neigh
 check "in sequence order" grep -q '"seq_ordered":true' "$OUT/api.txt"
 check "the commit event names the statement" grep -q 'interface eth0 metric 5' "$OUT/api.txt"
 
+step "capture and dissect"
+# ospfv2 capture in a container sharing FRR's network: real packets from
+# FRR, the simulator and ospfd, dissected; a link flap brings updates and acks.
+capture() {
+  timeout 40 docker run --rm --network container:ospfv2-frr-1 --cap-add NET_RAW --cap-add NET_ADMIN \
+    ospfv2:latest capture -c 30 >"$OUT/capture.txt" 2>&1
+}
+(capture &)
+wait_for 20 "the capture starts" grep -q '"capture":{"interface":"eth0"' "$OUT/capture.txt"
+sleep 3
+toggle_link 3 >/dev/null; sleep 3; toggle_link 3 >/dev/null
+wait_for 40 "30 packets" sh -c "[ \$(grep -c '\"packet\"' '$OUT/capture.txt') -ge 30 ]"
+dissected() { # every packet: no error, and every byte in a field (bit fields share bytes, never overlap)
+  ruby -rjson -e '
+    bad = []
+    leaves = ->(f) { f["children"] ? f["children"].flat_map { |c| leaves.(c) } : [f] }
+    File.readlines(ARGV[0]).map { |l| JSON.parse(l) rescue nil }.compact.select { |m| m["packet"] }.each do |m|
+      p = m["packet"]
+      bad << "#{p["seq"]} #{p["summary"]}: #{p["errors"].join("; ")}" unless p["errors"].empty?
+      bits = Array.new(p["length"], 0)
+      over = false
+      p["fields"].flat_map { |f| leaves.(f) }.each do |f|
+        f["length"].times do |i|
+          m8 = f["mask"] ? (f["mask"] >> (8 * (f["length"] - 1 - i))) & 0xff : 0xff
+          over ||= (bits[f["offset"] + i] & m8).positive?
+          bits[f["offset"] + i] |= m8
+        end
+      end
+      bad << "#{p["seq"]} #{p["summary"]}: bytes not owned or owned twice" if over || bits.any? { |b| b != 0xff }
+    end
+    puts bad
+    exit(bad.empty? ? 0 : 1)' "$OUT/capture.txt"
+}
+check "every packet dissected, every byte owned" dissected
+check "hellos from FRR, the simulator and ospfd" sh -c "grep -q 'Hello 10.99.0.20 ' '$OUT/capture.txt' && grep -q 'Hello 10.99.0.10 ' '$OUT/capture.txt' && grep -q 'Hello 10.99.0.30 ' '$OUT/capture.txt'"
+check "LS updates after the flap" grep -q '"summary":"LS Update' "$OUT/capture.txt"
+check "and their acks" grep -q '"summary":"LS Ack' "$OUT/capture.txt"
+check "LSAs carry their key" grep -q '"lsa":{"type":1,' "$OUT/capture.txt"
+
 echo
 echo "=== all checks passed"
