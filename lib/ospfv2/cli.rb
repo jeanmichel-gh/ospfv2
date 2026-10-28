@@ -219,7 +219,11 @@ module OSPFv2
     end
 
     def lab_git_init(dir)
+      # The lab's commits are configuration snapshots: they carry the lab's
+      # own identity, set in this repository only.
       ok = system('git', '-C', dir, 'init', '-q', out: File::NULL, err: File::NULL) &&
+           system('git', '-C', dir, 'config', 'user.name', 'lab', out: File::NULL, err: File::NULL) &&
+           system('git', '-C', dir, 'config', 'user.email', 'lab@configs', out: File::NULL, err: File::NULL) &&
            system('git', '-C', dir, 'add', '-A', out: File::NULL, err: File::NULL)
       return 'git: not available, the lab folder has no history' unless ok
       if system('git', '-C', dir, 'commit', '-q', '-m', 'Lab created from ospfv2 examples/lab', out: File::NULL, err: File::NULL)

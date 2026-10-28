@@ -212,6 +212,13 @@ cd $LAB && git status && git diff
 git add -A && git commit -m 'what changed'
 ```
 
+The lab folder's commits are signed `lab <lab@configs>`, set in that repository only by `lab new`. A lab folder made before that needs it once:
+
+```sh
+# in the VM
+cd $LAB && git config user.name lab && git config user.email lab@configs
+```
+
 ## Run the tests in the VM
 
 The ospfv2 lab test makes its own lab folder and brings up its own lab, so it replaces the lab you are running. Start yours again afterwards.
