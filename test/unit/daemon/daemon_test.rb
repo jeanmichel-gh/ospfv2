@@ -3,6 +3,8 @@
 require 'test/unit'
 require 'tmpdir'
 require 'ospfv2/daemon'
+require 'ospfv2/command_line/format'
+require 'json'
 
 # The daemon on a fake clock, with a fake host and a core peer on an
 # in-memory segment.
@@ -55,6 +57,41 @@ class TestDaemon < Test::Unit::TestCase
     @loop.run_until(120) { peer_full? }
     assert_equal %w[eth1 lo], @d.instance.interfaces.keys.sort
     assert_equal '1.1.1.1', @d.views.overview[:router_id]
+  end
+
+  # show timers: every timer with its owner and when it fires, the
+  # neighbor's among them; the clock moves, the time left goes down.
+  def test_timers
+    daemon(BASE.join("\n"))
+    @loop.run_until(120) { peer_full? }
+    @loop.advance(10) # the last acks and retransmits
+    t = @d.views.timers
+    by = ->(name) { t[:timers].select { _1[:name] == name } }
+    hello = by.('hello').find { _1[:owner][:interface] == 'eth1' }
+    assert_equal [{ kind: 'interface', interface: 'eth1' }, true, true, 10], hello.values_at(:owner, :armed, :periodic, :interval)
+    assert_operator hello[:due_in], :<=, 10
+    inact = by.('inactivity').first
+    assert_equal({ kind: 'neighbor', interface: 'eth1', router_id: '2.2.2.2', address: '10.0.0.2' }, inact[:owner])
+    assert_operator inact[:due_in], :<=, 40
+    assert_equal({ kind: 'router' }, by.('maxage_sweep').first[:owner])
+    assert_equal %w[spf spf_holddown spf_learn], t[:timers].select { _1[:owner][:kind] == 'spf' }.map { _1[:name] }.sort
+    refresh = by.('ls_refresh').find { _1[:owner][:type] == 1 }
+    assert_equal({ kind: 'lsa', area: '0.0.0.0', type: 1, ls_id: '1.1.1.1', advr: '1.1.1.1' }, refresh[:owner])
+    assert_operator refresh[:due_in], :>, 1500
+    assert_equal({ min_ls_interval: 5, min_ls_arrival: 1, ls_refresh_time: 1800, max_age: 3600 }, t[:constants])
+    assert_equal [10, 40], t[:interfaces].find { _1[:name] == 'eth1' }.values_at(:hello_interval, :dead_interval)
+    assert_equal [{ interface: 'eth1', router_id: '2.2.2.2', address: '10.0.0.2', state: :full, retransmit: 0, requests: 0 }],
+                 t[:neighbors].map { _1.slice(:interface, :router_id, :address, :state, :retransmit, :requests) }
+    assert_equal @loop.scheduler.size, t[:timers].count { _1[:armed] }, 'every armed timer is listed, once'
+    # The peer shares the loop: its timers are the only ones nobody claims.
+    assert_equal @peer.timers.select { _1[2].active? }.map { _1[1].to_s }.sort,
+                 t[:timers].select { _1[:owner][:kind] == 'other' }.map { _1[:name] }.sort
+    @loop.advance(7)
+    later = @d.views.timers
+    assert_in_delta refresh[:due_in] - 7, later[:timers].find { _1[:name] == 'ls_refresh' && _1[:owner][:type] == 1 }[:due_in], 0.01
+    text = CommandLine::Format.render(:timers, :junos, JSON.parse(JSON.generate(later)))
+    assert_match(/^inactivity +neighbor 2.2.2.2 on eth1 +\d+\.\d{3}s +40s/, text)
+    assert_match(/^hello +interface eth1 .* every 10s/, text)
   end
 
   def test_missing_file_starts_empty_and_a_commit_saves_it
@@ -360,5 +397,43 @@ class TestDaemon < Test::Unit::TestCase
     assert_equal %w[1.1.1.1 2.2.2.2], net[:detail][:attached].sort
     assert(v.log.none? { |e| e[:level] == :debug })
     assert_operator v.statistics['eth1'][:rx_hello], :>, 0
+  end
+
+  # SPF runs: numbered, with their triggers (the LSA instance, who
+  # flooded it, when), wait and compute times, route changes; LSAs and
+  # routes point back at the run they triggered or that changed them.
+  def test_spf_runs
+    daemon(BASE.join("\n"))
+    @loop.run_until(120) { peer_full? }
+    @loop.advance(15)
+    s = @d.views.spf
+    runs = s[:log]
+    assert_equal (runs.first[:run]..runs.last[:run]).to_a, runs.map { _1[:run] }, 'numbered in order'
+    peer = runs.flat_map { |x| x[:reasons].map { |r| [x, r] } }.find { |_, r| r[:kind] == 'router' && r[:detail] == '2.2.2.2' }
+    assert peer, runs.map { _1[:reasons] }.inspect
+    run, r = peer
+    assert_equal({ source: 'neighbor', router_id: '2.2.2.2', address: '10.0.0.2', interface: 'eth1' }, r[:source])
+    assert_equal %w[advr ls_id lsa_type seq type age].sort, r[:lsa].keys.map(&:to_s).sort
+    assert_match(/\A2026-.*Z\z/, r[:at])
+    assert_operator run[:wait_ms], :>=, 0
+    assert_include %w[initial short long], run[:delay]
+    assert run[:started_at] && run[:duration_ms]
+    nbr = runs.flat_map { _1[:reasons] }.find { _1[:kind] == 'neighbor' }
+    assert_equal 'neighbor state', nbr[:source][:source]
+    # The LSA and the routes know their run.
+    db = @d.views.database
+    lsa = db.find { |l| l[:type] == 1 && l[:advr] == '2.2.2.2' }
+    assert_equal runs.select { |x| x[:reasons].any? { _1.dig(:lsa, :seq) == lsa[:seq] && _1[:detail] == '2.2.2.2' } }.last[:run], lsa[:spf_run]
+    route = @d.views.routes[:routes].find { _1[:spf_run] }
+    assert route, 'a route with its run'
+    changed = runs.find { _1[:run] == route[:spf_run] }
+    assert_include changed[:prefixes].map { _1[1..] }, route[:prefix]
+    one = @d.views.spf(100, run: run[:run])[:log]
+    assert_equal [run[:run]], one.map { _1[:run] }
+    text = CommandLine::Format.render(:spf_run, :junos, JSON.parse(JSON.generate(@d.views.spf(100, run: run[:run]))))
+    assert_match(/\ASPF run #{run[:run]} at /, text)
+    assert_match(/router 2.2.2.2 seq 0x8000000\h, flooded by 2.2.2.2 on eth1/, text)
+    log = CommandLine::Format.render(:spf, :junos, JSON.parse(JSON.generate(s)))
+    assert_match(/Run When +Wait ms +SPF ms +FIB ms/, log)
   end
 end

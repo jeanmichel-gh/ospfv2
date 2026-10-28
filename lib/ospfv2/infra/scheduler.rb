@@ -162,6 +162,11 @@ module OSPFv2
       n
     end
 
+    # The armed timers, soonest first.
+    def armed
+      @heap.select { |_, _, t, gen| t.generation == gen }.sort_by { |d, s, _, _| [d, s] }.map { _1[2] }
+    end
+
     # Number of armed timers.
     def size
       drop_stale

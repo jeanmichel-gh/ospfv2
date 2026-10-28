@@ -538,10 +538,12 @@ Every show command has a Junos form, printed Junos style, and an IOS form, print
 | `show ospf database router` | `show ip ospf database router` | One LSA type, with contents in the IOS form. Junos types: `router`, `network`, `netsummary`, `asbrsummary`, `external`. IOS types: `router`, `network`, `summary`, `asbr-summary`, `external` |
 | `show ospf route [detail]` | `show ip ospf route` | Routes SPF computed; detail adds area, origin and tag |
 | `show route protocol ospf` | `show ip route ospf` | OSPF routes in the kernel |
-| `show ospf log` | `show ip ospf statistics` | SPF runs: when, why, how long, what changed |
+| `show ospf log` | `show ip ospf statistics` | SPF runs: number, when, why, wait, compute and kernel times, what changed |
+| `show ospf log run N` | | One run: each trigger with its LSA instance, who flooded it and when; its route changes |
 | `show ospf events` | `show ip ospf events` | Recent protocol events: state changes, dropped packets |
 | `monitor ospf events [KIND]` | `monitor ip ospf events` | Events as they happen, until Ctrl-C. KIND is one of `neighbor`, `interface`, `dr`, `drop`, `spf`, `routes`, `lsa`, `commit` and a few more; `?` lists them |
 | `show ospf statistics` | `show ip ospf traffic` | Packet counters per interface |
+| `show ospf timers` | `show ip ospf timers` | Every timer: what it belongs to, when it fires |
 | `show configuration` | | The running configuration |
 | `clear ospf neighbor [ROUTER-ID]` | `clear ip ospf process` | Bring adjacencies down and up again |
 

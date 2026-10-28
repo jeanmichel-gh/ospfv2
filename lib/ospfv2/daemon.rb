@@ -27,6 +27,9 @@ module OSPFv2
     RECHECK = 5          # seconds between checks of the host interfaces
     APPLY_TIMEOUT = 120  # seconds a commit waits for the router to take it
 
+    # Its own timers by name, for show timers.
+    def timers = { link_recheck: @recheck }.compact
+
     attr_reader :loop, :running, :candidate, :instance, :started_at, :broken_file, :fib, :fib_error, :events
 
     # In-memory kernel table: what a Daemon installs into unless told
@@ -303,7 +306,7 @@ module OSPFv2
         else
           log(:info, "area #{Core::Addr.to_s(id)}: options changed")
           @instance.areas[id]&.schedule_origination
-          @instance.spf.trigger(:area, Core::Addr.to_s(id))
+          @instance.spf.trigger(:area, Core::Addr.to_s(id), source: { source: 'config' })
         end
       end
     end

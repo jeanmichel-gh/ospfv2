@@ -32,6 +32,9 @@ module OSPFv2
 
       attr_reader :backend, :metric, :failed, :repairs, :last_reconcile
 
+      # Its timers by name, for show timers.
+      def timers = { fib_hold: @hold_timer, fib_hold_check: @hold_check, fib_retry: @retry_timer, fib_reconcile: @reconcile_timer }.compact
+
       # settled: ->() { true when nothing configured is still waiting to start }
       def initialize(loop:, backend:, logger: nil, settled: -> { true }, **opts)
         o = DEFAULTS.merge(opts)

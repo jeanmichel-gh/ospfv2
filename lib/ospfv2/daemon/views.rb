@@ -60,7 +60,8 @@ module OSPFv2
             row = { area: area&.id_s, scope: area ? :area : :as, type: l.type, type_name: l.type_name,
                     ls_id: Core::Addr.to_s(l.ls_id), advr: Core::Addr.to_s(l.advr),
                     seq: format('0x%08x', l.seq & 0xffff_ffff), age: l.age, options: format('0x%02x', l.options),
-                    checksum: format('0x%04x', l.checksum), length: l.length, self: l.advr == r.router_id }
+                    checksum: format('0x%04x', l.checksum), length: l.length, self: l.advr == r.router_id,
+                    spf_run: r.spf_run_of_lsa(l.key, format('0x%08x', l.seq & 0xffff_ffff)) }
             row[:detail] = l.detail if detail
             row
           end
@@ -73,7 +74,7 @@ module OSPFv2
         on_loop do |r|
           next { routes: [], routers: [] } unless r
           t = r.route_table
-          { routes: t.routes.values.sort_by { |x| [x.prefix, x.prefix_len] }.map { |x| route(x) },
+          { routes: t.routes.values.sort_by { |x| [x.prefix, x.prefix_len] }.map { |x| route(x).merge(spf_run: r.spf_run_of_route(x.dest_s)) },
             routers: t.routers.values.sort_by { |x| [x.prefix, x.area || 0] }.map do |x|
               route(x).merge(router_id: Core::Addr.to_s(x.prefix), abr: x.tag[:abr], asbr: x.tag[:asbr])
             end }
@@ -101,19 +102,50 @@ module OSPFv2
         end
       end
 
-      # SPF state and the last runs, newest last.
-      def spf(count = 100)
+      # SPF state and the last runs, newest last. Each run: its number,
+      # what triggered it (the LSA instance, where it came from, when), how
+      # long it waited, computed and took to reach the kernel, and the
+      # routes it changed (50 listed, +more+ counts the rest). +run+ keeps
+      # only that run.
+      def spf(count = 100, run: nil)
         on_loop do |r|
           next { configured: false } unless r
           s = r.spf
+          runs = run ? r.spf_log.select { |x| x.n == run } : r.spf_log.last(count)
           { configured: true, state: s.state, runs: s.runs, routes: r.routes.size,
-            next_run_in: s.next_run_in&.round(3),
+            next_run_in: s.next_run_in&.round(3), pending_delay: s.delay&.to_s,
             settings: s.settings.transform_values { |v| (v * 1000).round },
-            log: r.spf_log.last(count).map do |x|
-              { time: x.time.utc.iso8601, ago: ago(x.time), duration_ms: (x.duration * 1000).round(3),
-                routes: x.routes, added: x.diff.added.size, changed: x.diff.changed.size,
-                removed: x.diff.removed.size, reasons: x.reasons.map { |y| { kind: y.kind, detail: y.detail } } }
-            end }
+            log: runs.map { |x| { time: x.time.utc.iso8601(3), ago: ago(x.time) }.merge(r.spf_run_fields(x)) } }
+        end
+      end
+
+      NEAR_MAXAGE = 300 # seconds: LSAs this close to MaxAge are listed
+      NEAR_MAXAGE_MAX = 50
+
+      # Every timer of the router and the daemon: what it belongs to, when
+      # it fires next, its period, how often it fired. Timers nobody claims
+      # come last, kind 'other'. With them, what checking them needs: each
+      # interface's intervals, each neighbor's lists, the LSAs nearest
+      # MaxAge, the protocol constants and SPF's state.
+      def timers
+        on_loop do |r|
+          wall = @daemon.loop.clock.wall
+          rows = []
+          seen = {}.compare_by_identity
+          add = lambda do |owner, name, t|
+            next if t.nil? || seen[t]
+            seen[t] = true
+            rows << timer_row(owner, name, t, wall)
+          end
+          r&.timers&.each { |o, n, t| add.(o, n, t) }
+          @daemon.timers.each { |n, t| add.({ kind: 'daemon' }, n, t) }
+          @daemon.fib&.timers&.each { |n, t| add.({ kind: 'fib' }, n, t) }
+          @daemon.loop.scheduler.armed.each { |t| add.({ kind: 'other' }, t.name, t) }
+          { time: wall.utc.iso8601(3), timers: rows, interfaces: r ? timer_interfaces(r) : [],
+            neighbors: r ? timer_neighbors(r) : [], near_maxage: r ? near_maxage(r) : [],
+            constants: { min_ls_interval: OSPFv2::MinLSInterval, min_ls_arrival: OSPFv2::MinLSArrival,
+                         ls_refresh_time: OSPFv2::LSRefreshTime, max_age: OSPFv2::MaxAge },
+            spf: r ? { state: r.spf.state, settings: r.spf.settings.transform_values { |v| (v * 1000).round } } : nil }
         end
       end
 
@@ -136,6 +168,35 @@ module OSPFv2
 
       def on_loop(&block)
         @daemon.loop.call { block.call(@daemon.instance) }
+      end
+
+      def timer_row(owner, name, t, wall)
+        rem = t.remaining
+        { name: name.to_s, owner: owner, armed: t.active?, due_in: rem&.round(3),
+          due_at: rem && (wall + rem).utc.iso8601(3), interval: t.interval, periodic: t.periodic?, fired: t.fired }
+      end
+
+      def timer_interfaces(r)
+        r.interfaces.values.map do |i|
+          { name: i.name, state: i.state, hello_interval: i.hello_interval, dead_interval: i.dead_interval,
+            rxmt_interval: i.rxmt_interval, transmit_delay: i.transmit_delay }
+        end
+      end
+
+      def timer_neighbors(r)
+        r.interfaces.values.flat_map do |i|
+          i.neighbors.values.map do |n|
+            { interface: i.name, router_id: Core::Addr.to_s(n.router_id), address: Core::Addr.to_s(n.address),
+              state: n.state, retransmit: n.retransmit.size, requests: n.ls_request.size }
+          end
+        end
+      end
+
+      def near_maxage(r)
+        r.database.select { |_, l| l.age >= OSPFv2::MaxAge - NEAR_MAXAGE }.sort_by { |_, l| -l.age }.first(NEAR_MAXAGE_MAX).map do |area, l|
+          { area: area&.id_s, type: l.type, ls_id: Core::Addr.to_s(l.ls_id), advr: Core::Addr.to_s(l.advr), age: l.age,
+            max_age_in: [OSPFv2::MaxAge - l.age, 0].max }
+        end
       end
 
       def ago(time) = (@daemon.loop.clock.wall - time).floor
