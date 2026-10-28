@@ -527,7 +527,22 @@ module OSPFv2
       body = "# ospfd configuration, saved by commit #{@loop.clock.wall.utc.strftime('%F %T')} UTC\n" \
              "#{tree.to_set(hide: false).join("\n")}\n"
       File.open(tmp, File::WRONLY | File::CREAT | File::EXCL, 0o600) { |f| f.write(body) }
+      keep_owner_and_mode(tmp)
       tmp
+    end
+
+    # The new file takes the place of the old one, so it keeps the old
+    # file's owner, group and mode, as an editor would: a configuration in
+    # someone's lab folder stays theirs when ospfd runs as root. Others
+    # never get access, since the file can hold authentication keys. A new
+    # file stays root's, mode 0600.
+    def keep_owner_and_mode(tmp)
+      return unless File.file?(@config_path)
+      st = File.stat(@config_path)
+      File.chmod((st.mode & 0o660) | 0o600, tmp)
+      File.chown(st.uid, st.gid, tmp) if [st.uid, st.gid] != [Process.euid, Process.egid]
+    rescue SystemCallError => e
+      log(:warn, "#{@config_path}: cannot keep its owner and mode: #{e.message}")
     end
 
     def rollback_path(n) = "#{@config_path}.rollback.#{n}"

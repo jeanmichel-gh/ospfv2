@@ -99,7 +99,7 @@ class TestCLI < Test::Unit::TestCase
       assert_equal 0, rc
       assert_match(/lab created in #{Regexp.escape(dir)}/, out)
       assert_match(/export LAB=#{Regexp.escape(dir)}/, out)
-      %w[lab.yml sim/sim.yml peer/peer.yml frr/frr.conf frr/daemons frr/vtysh.conf ospfd/ospfd.conf].each do |f|
+      %w[lab.yml .gitignore tools/frr-start.sh sim/sim.yml peer/peer.yml frr/frr.conf frr/daemons frr/vtysh.conf ospfd/ospfd.conf].each do |f|
         assert File.file?(File.join(dir, f)), "missing #{f}"
       end
       refute File.exist?(File.join(dir, '.git'))

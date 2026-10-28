@@ -72,6 +72,10 @@ services:
         ipv4_address: 10.99.0.20
     volumes:
       - ${LAB:-./examples/lab}/frr:/etc/frr
+      - ${LAB:-./examples/lab}/tools:/lab-tools:ro
+    # FRR's own start, plus giving frr.conf back to the lab folder's owner
+    # after each write memory. See tools/frr-start.sh.
+    entrypoint: ["/sbin/tini", "--", "sh", "/lab-tools/frr-start.sh"]
 
   ospfd:
     <<: *ospfv2

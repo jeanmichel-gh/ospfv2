@@ -8,6 +8,11 @@
 * ospfv2 lab new DIR: copies the template and makes it a git repository
 * docker-compose.yml: ospfd service at 10.99.0.30, socket on the ospfd-run
   volume
+* ospfd commit keeps the owner, group and mode of the configuration file
+  it replaces, without access for others; a new file is still root's, 0600
+* The lab's FRR starts through tools/frr-start.sh, which gives frr.conf
+  back to the lab folder's owner after write memory. The template's
+  .gitignore leaves out the routers' backups and rollbacks
 
 * User guide (docs/user-guide.md): the demo, ospfd and ospf-cli on a Mac,
   natively, in an Ubuntu VM under QEMU and in Docker, with a router lab
