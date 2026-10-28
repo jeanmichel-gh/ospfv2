@@ -25,6 +25,9 @@
 #
 #   bin/ospfv2 lab new ~/labs/ospf-lab
 #   export LAB=~/labs/ospf-lab
+#
+# A LAB folder that does not exist is an error (create_host_path: false),
+# not an empty folder Docker makes as root.
 
 x-ospfv2: &ospfv2
   build: .
@@ -50,7 +53,10 @@ services:
         ipv4_address: 10.99.0.10
     ports: ["8080:8080"]
     volumes:
-      - ${LAB:-./examples/lab}/sim:/lab
+      - type: bind
+        source: ${LAB:-./examples/lab}/sim
+        target: /lab
+        bind: { create_host_path: false }
     command: ["run", "/lab/sim.yml", "--web", "0.0.0.0:8080", "--log", "/tmp/ospfv2.log"]
 
   peer:
@@ -62,7 +68,10 @@ services:
         ipv4_address: 10.99.0.20
     ports: ["8081:8080"]
     volumes:
-      - ${LAB:-./examples/lab}/peer:/lab
+      - type: bind
+        source: ${LAB:-./examples/lab}/peer
+        target: /lab
+        bind: { create_host_path: false }
     command: ["run", "/lab/peer.yml", "--web", "0.0.0.0:8080", "--log", "/tmp/ospfv2.log"]
 
   frr:
@@ -74,7 +83,10 @@ services:
       ospflab:
         ipv4_address: 10.99.0.20
     volumes:
-      - ${LAB:-./examples/lab}/frr:/etc/frr
+      - type: bind
+        source: ${LAB:-./examples/lab}/frr
+        target: /etc/frr
+        bind: { create_host_path: false }
       # The start script comes from the repo, not the lab folder, so lab
       # folders made before it existed work too.
       - ./examples/lab/tools:/lab-tools:ro
@@ -94,7 +106,10 @@ services:
       ospflab:
         ipv4_address: 10.99.0.30
     volumes:
-      - ${LAB:-./examples/lab}/ospfd:/etc/ospfv2
+      - type: bind
+        source: ${LAB:-./examples/lab}/ospfd
+        target: /etc/ospfv2
+        bind: { create_host_path: false }
       - ospfd-run:/run/ospfv2
     entrypoint: ["ospfd"]
     command: []

@@ -610,6 +610,7 @@ Within 5 seconds `ospfd` originates an external LSA for it and FRR has it too: `
 | An empty `lab.yml` folder appears in the repo | Compose started the `ospfv2` service. `rmdir lab.yml`, and name the services: `up -d sim frr`. |
 | `docker run`: the container name is already in use | A stopped container with that name exists. `docker start ospfd` to reuse it, or `docker rm ospfd` and run it again. The compose service avoids this. |
 | `git diff` in the lab folder: permission denied on `frr/frr.conf` | FRR saved it moments ago; its start script gives it back within 2 seconds. If it stays, the FRR container was started from an older compose file: `docker compose --profile frr up -d frr` recreates it. |
+| compose: `bind source path does not exist` | `LAB` names a folder that does not exist. Make it: `bin/ospfv2 lab new $LAB`. |
 | FRR stops at once: `/etc/frr/daemons does not exist` | `LAB` names a folder `ospfv2 lab new` never made, so Docker made it, empty and owned by root. Move it aside and make it: see [lab commands](lab-commands.md), Set LAB once. |
 | FRR stops at once: `can't open '/lab-tools/frr-start.sh'` | The compose file is older than the repo's start script. `git pull` in `~/ospfv2`, then `docker compose --profile frr up -d frr`. |
 | Configuration changes appear in `git status` of ospfv2 | `LAB` is not set, so the template in `examples/lab` is in use. Make your own lab folder: `bin/ospfv2 lab new ~/labs/ospf-lab`. |
