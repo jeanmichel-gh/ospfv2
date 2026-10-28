@@ -37,8 +37,13 @@ module OSPFv2
       MAX_EVENTS = 2000
       MAX_SPF_LOG = 100
 
-      # One SPF run, for show ospf log and show ip ospf statistics.
-      SpfRun = Struct.new(:time, :reasons, :duration, :routes, :diff, keyword_init: true)
+      # One SPF run, for show ospf log and show ip ospf statistics. +n+ its
+      # number; +triggered_at+ the first trigger, +time+ when it started,
+      # +duration+ the calculation, +fib_duration+ handing the route
+      # changes to the kernel (nil when none changed); +delay+ the back-off
+      # delay it waited (:initial, :short, :long, :now).
+      SpfRun = Struct.new(:n, :time, :triggered_at, :delay, :reasons, :duration, :fib_duration, :fib_done_at, :routes, :diff,
+                          keyword_init: true)
       AS_SCOPE = [5].freeze
       AREA_SCOPE = [1, 2, 3, 4, 7].freeze
 
@@ -66,6 +71,9 @@ module OSPFv2
         @max_paths = max_paths
         @route_table = Spf::Table.empty
         @spf_log = []
+        @lsa_runs = {}   # LSA key => [seq, SPF run it triggered]
+        @route_runs = {} # route destination => SPF run that last changed it
+        @arrival = nil   # where the LSA being installed came from, for its SPF trigger
         @externals = {} # key => spec, the AS-external-LSAs we originate
         @virtual_links = {} # neighbor router id => VirtualLink
         @exported = []  # the external routes we were given to advertise
@@ -147,7 +155,7 @@ module OSPFv2
         elsif @running
           area.schedule_origination
         end
-        @spf.trigger(:interface, name) if @running
+        @spf.trigger(:interface, name, source: { source: 'interface', interface: name, to: 'removed' }) if @running
         log(:info, iface, "interface #{name} removed", kind: :interface, state: 'removed')
         iface
       end
@@ -182,7 +190,7 @@ module OSPFv2
         @deferred.clear
         @spf.stop
         # Nothing routes through a stopped router.
-        replace_routes(Spf::Table.empty, [SpfScheduler::Reason.new(:stop, nil)], 0.0) unless @route_table.routes.empty?
+        replace_routes(Spf::Table.empty, [SpfScheduler::Reason.new(:stop, nil, nil, nil, @loop.clock.wall)], 0.0) unless @route_table.routes.empty?
         log(:info, nil, "router #{router_id_s} stopped", kind: :router, state: 'stopped', router_id: router_id_s)
         self
       end
@@ -240,7 +248,9 @@ module OSPFv2
           nbr.iface.area.schedule_origination
           # The V bit in the transit area's router-LSA follows the link.
           @areas[nbr.iface.transit_area_id]&.schedule_origination if nbr.iface.virtual?
-          @spf.trigger(:neighbor, Addr.to_s(nbr.router_id))
+          @spf.trigger(:neighbor, Addr.to_s(nbr.router_id),
+                       source: { source: 'neighbor state', router_id: Addr.to_s(nbr.router_id), interface: nbr.iface.name,
+                                 from: old.to_s, to: new.to_s })
         end
         @listeners.each { |l| l.call(nbr, old, new) }
       end
@@ -252,7 +262,7 @@ module OSPFv2
         # router-LSA carries the B bit.
         @areas.each_value(&:schedule_origination)
         refresh_externals if new != :down
-        @spf.trigger(:interface, iface.name)
+        @spf.trigger(:interface, iface.name, source: { source: 'interface', interface: iface.name, from: old.to_s, to: new.to_s })
       end
 
       # Attached to the backbone and another area: an area border router
@@ -335,7 +345,8 @@ module OSPFv2
 
             flooded_back = flood(lsa, area, from: nbr)
             drop_old_retransmits(lsa, area)
-            db.install(lsa)
+            arriving(source: 'neighbor', router_id: Addr.to_s(nbr.router_id), address: Addr.to_s(nbr.address),
+                     interface: iface.name) { db.install(lsa) }
             @stats[:lsa_installed] += 1
             unless flooded_back
               iface.delayed_ack(lsa) if !iface.backup? || nbr.address == iface.dr
@@ -472,11 +483,12 @@ module OSPFv2
       # in. Called by the SPF scheduler.
       def compute_routes(reasons = [])
         return unless @running
+        started = @loop.clock.wall
         t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         table = Spf.run(router_id: @router_id, areas: spf_areas, externals: @as_lsdb.live, max_paths: @max_paths)
         @stats[:spf_runs] += 1
         prev = @route_table
-        replace_routes(table, reasons, Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0)
+        replace_routes(table, reasons, Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0, started: started)
         update_virtual_links(table)
         # Summaries and externals depend on the table and on how we sit in
         # our areas. When neither changed, there is nothing to redo: with
@@ -791,7 +803,8 @@ module OSPFv2
         return unless @running
         # SPF never uses our own summaries and externals: no run for them.
         return if lsa.advr == @router_id && [3, 4, 5, 7].include?(lsa.type)
-        @spf.trigger(lsa.type_name, lsa.type == 1 ? Addr.to_s(lsa.advr) : "#{Addr.to_s(lsa.ls_id)} from #{Addr.to_s(lsa.advr)}")
+        @spf.trigger(lsa.type_name, lsa.type == 1 ? Addr.to_s(lsa.advr) : "#{Addr.to_s(lsa.ls_id)} from #{Addr.to_s(lsa.advr)}",
+                     lsa: lsa.instance_fields.merge(type: lsa.type, age: lsa.age), source: @arrival || { source: 'unknown' })
       end
 
       def spf_areas
@@ -806,26 +819,78 @@ module OSPFv2
         end
       end
 
-      def replace_routes(table, reasons, duration)
+      # The new table in, the kernel told (route listeners), the run kept
+      # in the log and announced. LSAs that triggered it and routes it
+      # changed remember its number.
+      def replace_routes(table, reasons, duration, started: @loop.clock.wall)
         diff = Spf.diff(@route_table.routes, table.routes)
         @route_table = table
-        @spf_log << SpfRun.new(time: @loop.clock.wall, reasons: reasons, duration: duration,
-                               routes: table.routes.size, diff: diff)
+        n = @spf.runs
+        fib = nil
+        unless diff.empty?
+          t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+          @route_listeners.each { |l| l.call(diff) }
+          fib = Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0
+        end
+        run = SpfRun.new(n: n, time: started, triggered_at: reasons.filter_map(&:at).min, delay: @spf.last_delay,
+                         reasons: reasons, duration: duration, fib_duration: fib, fib_done_at: fib && @loop.clock.wall,
+                         routes: table.routes.size, diff: diff)
+        @spf_log << run
         @spf_log.shift(@spf_log.size - MAX_SPF_LOG) if @spf_log.size > MAX_SPF_LOG
+        remember_run(run)
         why = "#{reasons.first(3).join(', ')}#{reasons.size > 3 ? ', ...' : ''}"
-        publish(:info, "SPF #{(duration * 1000).round(1)} ms, #{table.routes.size} routes, #{diff} (#{why})",
-                kind: :spf, duration_ms: (duration * 1000).round(3), routes: table.routes.size,
-                added: diff.added.size, changed: diff.changed.size, removed: diff.removed.size,
-                reasons: reasons.map { |r| { kind: r.kind.to_s, detail: r.detail&.to_s } },
-                prefixes: spf_prefixes(diff))
+        publish(:info, "SPF #{n}: #{(duration * 1000).round(1)} ms, #{table.routes.size} routes, #{diff} (#{why})",
+                kind: :spf, **spf_run_fields(run))
         return if diff.empty?
-        log(:info, nil, "routes #{diff} after SPF (#{why})", kind: :routes,
-                                                             added: diff.added.size, changed: diff.changed.size,
-                                                             removed: diff.removed.size)
-        @route_listeners.each { |l| l.call(diff) }
+        log(:info, nil, "routes #{diff} after SPF #{n} (#{why})", kind: :routes, run: n,
+                                                                    added: diff.added.size, changed: diff.changed.size,
+                                                                    removed: diff.removed.size)
       end
 
+      # A run as plain data: for events and show.spf.
+      def spf_run_fields(run)
+        wait = run.triggered_at && ((run.time - run.triggered_at) * 1000).round(3)
+        all = run.diff.added.size + run.diff.changed.size + run.diff.removed.size
+        { run: run.n, triggered_at: run.triggered_at&.utc&.iso8601(3), started_at: run.time.utc.iso8601(3),
+          wait_ms: wait, delay: run.delay&.to_s, duration_ms: (run.duration * 1000).round(3),
+          fib_ms: run.fib_duration && (run.fib_duration * 1000).round(3), fib_done_at: run.fib_done_at&.utc&.iso8601(3),
+          routes: run.routes, added: run.diff.added.size, changed: run.diff.changed.size, removed: run.diff.removed.size,
+          reasons: run.reasons.map do |r|
+            { kind: r.kind.to_s, detail: r.detail&.to_s, lsa: r.lsa, source: r.source, at: r.at&.utc&.iso8601(3) }.compact
+          end,
+          prefixes: spf_prefixes(run.diff), more: [all - SPF_EVENT_PREFIXES, 0].max }
+      end
+
+      # The SPF run an LSA instance triggered, if one did: [type, ls_id, advr] and its seq.
+      def spf_run_of_lsa(key, seq)
+        seen, n = @lsa_runs[key]
+        seen == seq ? n : nil
+      end
+
+      # The SPF run that last changed the route to +dest+ ("10.0.0.0/24").
+      def spf_run_of_route(dest) = @route_runs[dest]
+      public :spf_run_fields, :spf_run_of_lsa, :spf_run_of_route
+
       SPF_EVENT_PREFIXES = 50 # prefixes listed per SPF event; the counts cover all
+
+      def remember_run(run)
+        run.reasons.each do |r|
+          next unless r.lsa
+          @lsa_runs[[r.lsa[:type], Addr.to_i(r.lsa[:ls_id]), Addr.to_i(r.lsa[:advr])]] = [r.lsa[:seq], run.n]
+        end
+        run.diff.added.each { |x| @route_runs[x.dest_s] = run.n }
+        run.diff.changed.each { |_, x| @route_runs[x.dest_s] = run.n }
+        run.diff.removed.each { |x| @route_runs.delete(x.dest_s) }
+      end
+
+      # Installs into the LSDB with +source+ noted, so the SPF trigger the
+      # change sets off says where the LSA came from.
+      def arriving(**source)
+        @arrival = source
+        yield
+      ensure
+        @arrival = nil
+      end
 
       def spf_prefixes(diff)
         list = diff.added.map { |r| ['+', r.dest_s] } + diff.changed.map { |_, r| ['~', r.dest_s] } +
@@ -860,7 +925,7 @@ module OSPFv2
 
       def install_own(area, lsa)
         db = own_db(lsa.type, area)
-        db.install(lsa)
+        arriving(source: 'self') { db.install(lsa) }
         @stats[:lsa_originated] += 1
         sk = scope_key(area, lsa.key)
         o = (@own[sk] ||= { area: area, key: lsa.key })
@@ -879,7 +944,7 @@ module OSPFv2
 
       def flush(cur, area)
         lsa = cur.with_age(OSPFv2::MaxAge)
-        own_db(lsa.type, area).install(lsa)
+        arriving(source: lsa.advr == @router_id ? 'self' : 'flush') { own_db(lsa.type, area).install(lsa) }
         # A flush is a new instance too: the next origination waits
         # MinLSInterval, or routers two hops away drop it (13 step 5a).
         @last_origination[scope_key(area, lsa.key)] = @loop.now if lsa.advr == @router_id
@@ -938,7 +1003,8 @@ module OSPFv2
           if e.lsa.age < OSPFv2::MaxAge && !e.aged_out
             e.aged_out = true
             log(:info, nil, "#{e.lsa.id_string} reached MaxAge", kind: :lsa, change: 'maxage', **e.lsa.instance_fields)
-            @spf.trigger(:maxage, e.lsa.id_string)
+            @spf.trigger(:maxage, e.lsa.id_string, lsa: e.lsa.instance_fields.merge(type: e.lsa.type, age: e.lsa.age),
+                                                   source: { source: 'maxage' })
             flood(db.current(e), area)
           end
           next if exchanging?(key[0], area)

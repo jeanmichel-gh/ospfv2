@@ -398,4 +398,42 @@ class TestDaemon < Test::Unit::TestCase
     assert(v.log.none? { |e| e[:level] == :debug })
     assert_operator v.statistics['eth1'][:rx_hello], :>, 0
   end
+
+  # SPF runs: numbered, with their triggers (the LSA instance, who
+  # flooded it, when), wait and compute times, route changes; LSAs and
+  # routes point back at the run they triggered or that changed them.
+  def test_spf_runs
+    daemon(BASE.join("\n"))
+    @loop.run_until(120) { peer_full? }
+    @loop.advance(15)
+    s = @d.views.spf
+    runs = s[:log]
+    assert_equal (runs.first[:run]..runs.last[:run]).to_a, runs.map { _1[:run] }, 'numbered in order'
+    peer = runs.flat_map { |x| x[:reasons].map { |r| [x, r] } }.find { |_, r| r[:kind] == 'router' && r[:detail] == '2.2.2.2' }
+    assert peer, runs.map { _1[:reasons] }.inspect
+    run, r = peer
+    assert_equal({ source: 'neighbor', router_id: '2.2.2.2', address: '10.0.0.2', interface: 'eth1' }, r[:source])
+    assert_equal %w[advr ls_id lsa_type seq type age].sort, r[:lsa].keys.map(&:to_s).sort
+    assert_match(/\A2026-.*Z\z/, r[:at])
+    assert_operator run[:wait_ms], :>=, 0
+    assert_include %w[initial short long], run[:delay]
+    assert run[:started_at] && run[:duration_ms]
+    nbr = runs.flat_map { _1[:reasons] }.find { _1[:kind] == 'neighbor' }
+    assert_equal 'neighbor state', nbr[:source][:source]
+    # The LSA and the routes know their run.
+    db = @d.views.database
+    lsa = db.find { |l| l[:type] == 1 && l[:advr] == '2.2.2.2' }
+    assert_equal runs.select { |x| x[:reasons].any? { _1.dig(:lsa, :seq) == lsa[:seq] && _1[:detail] == '2.2.2.2' } }.last[:run], lsa[:spf_run]
+    route = @d.views.routes[:routes].find { _1[:spf_run] }
+    assert route, 'a route with its run'
+    changed = runs.find { _1[:run] == route[:spf_run] }
+    assert_include changed[:prefixes].map { _1[1..] }, route[:prefix]
+    one = @d.views.spf(100, run: run[:run])[:log]
+    assert_equal [run[:run]], one.map { _1[:run] }
+    text = CommandLine::Format.render(:spf_run, :junos, JSON.parse(JSON.generate(@d.views.spf(100, run: run[:run]))))
+    assert_match(/\ASPF run #{run[:run]} at /, text)
+    assert_match(/router 2.2.2.2 seq 0x8000000\h, flooded by 2.2.2.2 on eth1/, text)
+    log = CommandLine::Format.render(:spf, :junos, JSON.parse(JSON.generate(s)))
+    assert_match(/Run When +Wait ms +SPF ms +FIB ms/, log)
+  end
 end

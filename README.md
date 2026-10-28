@@ -319,6 +319,7 @@ Junos forms print Junos style, IOS forms print IOS style.
 | `show ospf route [detail]` (computed) | `show ip ospf route` (computed, FRR style) |
 | `show route protocol ospf` (in the kernel) | `show ip route ospf` (in the kernel) |
 | `show ospf log` (SPF runs) | `show ip ospf statistics` (SPF runs) |
+| `show ospf log run N` (one run) | |
 | `show ospf events` | `show ip ospf events` |
 | `show ospf statistics` (packets) | `show ip ospf traffic` |
 | `show ospf timers` | `show ip ospf timers` |

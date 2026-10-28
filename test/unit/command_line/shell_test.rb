@@ -162,6 +162,13 @@ class TestCommandLineShell < Test::Unit::TestCase
     assert_match(/^SPF runs: [1-9]\d*, state: (short|long) wait/, log)
     assert_match(/initial 50 ms, short 200 ms, long 5000 ms, learn 500 ms, holddown 10000 ms/, log)
     assert_match(/\+\d+ ~\d+ -\d+\s+.*router 2\.2\.2\.2/, log)
+    # The run that put 2.2.2.2/32 in: its route changes and kernel time.
+    n = log.lines.grep(/^\s*\d+ .*\+[1-9]/).first.to_i
+    run = @sh.execute("show ospf log run #{n}")
+    assert_match(/\ASPF run #{n} at .*, (initial|short|long) delay$/, run)
+    assert_match(/computed in \d+\.\d{3} ms, kernel in \d+\.\d ms/, run)
+    assert_match(/^Route changes\n  \+/, run)
+    assert_match(/No such SPF run/, @sh.execute('show ospf log run 99999'))
     stats = @sh.execute('show ip ospf statistics')
     assert_match(/SPF algorithm executed [1-9]\d* times/, stats)
     assert_match(/^00:00:0\d\s+\d+\s+\d+\s+\+\d+ ~\d+ -\d+\s+.*\bR\b/, stats)
