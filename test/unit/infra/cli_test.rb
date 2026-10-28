@@ -146,6 +146,18 @@ class TestCLI < Test::Unit::TestCase
     assert_equal 0, Dir.mktmpdir { |d| run_cli('lab', 'new', d, '--no-git')[0] }
   end
 
+  def test_lab_new_says_why_it_cannot_make_the_folder
+    omit('root writes anywhere') if Process.uid.zero?
+    Dir.mktmpdir do |d|
+      File.chmod(0o555, d)
+      rc, _, err = run_cli('lab', 'new', File.join(d, 'lab'))
+      assert_equal 2, rc
+      assert_match(/cannot make the lab folder.*not writable: sudo chown/, err)
+    ensure
+      File.chmod(0o755, d)
+    end
+  end
+
   def test_lab_needs_a_subcommand_and_a_folder
     assert_match(/lab new DIR/, run_cli('lab')[2])
     assert_match(/lab new needs a folder/, run_cli('lab', 'new')[2])

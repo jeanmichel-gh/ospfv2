@@ -56,6 +56,7 @@ Make the lab folder before anything uses `LAB`. If compose runs first, Docker cr
 ```sh
 # in the VM
 cd ~/ospfv2
+mkdir -p ~/labs && sudo chown $USER: ~/labs
 [ -f ~/labs/ospf-lab/lab.yml ] && echo "lab folder ok" || bin/ospfv2 lab new ~/labs/ospf-lab
 ```
 
@@ -65,6 +66,8 @@ To make it again from the template (the old one is kept aside, nothing is delete
 # in the VM
 cd ~/ospfv2
 docker compose --profile frr --profile ospfd down
+cd ~/routescope && docker compose down && cd ~/ospfv2
+sudo chown $USER: ~/labs
 sudo mv ~/labs/ospf-lab ~/labs/ospf-lab.old-$(date +%Y%m%d%H%M)
 bin/ospfv2 lab new ~/labs/ospf-lab
 ```

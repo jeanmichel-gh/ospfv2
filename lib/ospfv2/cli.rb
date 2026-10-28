@@ -181,7 +181,13 @@ module OSPFv2
       dir = argv.shift or raise ArgumentError, 'lab new needs a folder, for example: ospfv2 lab new ~/labs/ospf-lab'
       dir = File.expand_path(dir)
       raise ArgumentError, "#{dir} exists and is not empty" if File.exist?(dir) && !(File.directory?(dir) && Dir.empty?(dir))
-      CLI.copy_lab(LAB_TEMPLATE, dir)
+      begin
+        CLI.copy_lab(LAB_TEMPLATE, dir)
+      rescue Errno::EACCES, Errno::EPERM => e
+        parent = File.dirname(dir)
+        hint = File.exist?(parent) && !File.writable?(parent) ? " (#{parent} is not writable: sudo chown $USER: #{parent})" : ''
+        raise ArgumentError, "cannot make the lab folder: #{e.message}#{hint}"
+      end
       @out.puts "lab created in #{dir}"
       @out.puts(lab_git_init(dir)) if git
       @out.puts <<~TXT
