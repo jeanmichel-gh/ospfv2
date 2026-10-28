@@ -1,0 +1,44 @@
+# The router lab: its segment, its nodes, and where each node's startup
+# configuration lives, relative to this folder. docker-compose.yml in the
+# ospfv2 repo mounts each node's folder read-write, so a saved
+# configuration lands back here.
+#
+# Make your own copy before changing anything:
+#   ospfv2 lab new ~/labs/ospf-lab
+#   export LAB=~/labs/ospf-lab
+
+name: ospf-lab
+
+segments:
+  - name: ospflab
+    subnet: 10.99.0.0/24
+
+nodes:
+  - name: sim
+    kind: ospfv2-sim
+    service: sim
+    profiles: [lab, frr]
+    address: 10.99.0.10
+    config: sim/sim.yml
+
+  - name: frr
+    kind: frr
+    service: frr
+    profiles: [frr]
+    address: 10.99.0.20
+    config: frr/frr.conf
+
+  - name: peer
+    kind: ospfv2-sim
+    service: peer
+    profiles: [lab]
+    address: 10.99.0.20
+    config: peer/peer.yml
+
+  - name: ospfd
+    kind: ospfd
+    service: ospfd
+    profiles: [ospfd]
+    address: 10.99.0.30
+    config: ospfd/ospfd.conf
+    socket: /run/ospfv2/ospfd.sock

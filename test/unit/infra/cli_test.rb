@@ -2,6 +2,7 @@ require 'test/unit'
 require 'stringio'
 require 'json'
 require 'tmpdir'
+require 'yaml'
 require 'ospfv2/cli'
 
 class TestCLI < Test::Unit::TestCase
@@ -89,5 +90,54 @@ class TestCLI < Test::Unit::TestCase
     assert_equal 4, t.counts[:summaries]
     assert_equal 5, t.counts[:externals]
     assert t.links.any? { |l| l.from == 'sim' && l.to == 'r1c1' }
+  end
+
+  def test_lab_new_copies_the_template
+    Dir.mktmpdir do |d|
+      dir = File.join(d, 'my-lab')
+      rc, out, = run_cli('lab', 'new', dir, '--no-git')
+      assert_equal 0, rc
+      assert_match(/lab created in #{Regexp.escape(dir)}/, out)
+      assert_match(/export LAB=#{Regexp.escape(dir)}/, out)
+      %w[lab.yml sim/sim.yml peer/peer.yml frr/frr.conf frr/daemons frr/vtysh.conf ospfd/ospfd.conf].each do |f|
+        assert File.file?(File.join(dir, f)), "missing #{f}"
+      end
+      refute File.exist?(File.join(dir, '.git'))
+      assert_equal 0, run_cli('check', File.join(dir, 'sim/sim.yml'))[0]
+    end
+  end
+
+  def test_lab_new_makes_a_git_repository
+    omit('git not installed') unless system('git', '--version', out: File::NULL, err: File::NULL)
+    Dir.mktmpdir do |d|
+      dir = File.join(d, 'lab')
+      rc, out, = run_cli('lab', 'new', dir)
+      assert_equal 0, rc
+      assert_match(/^git: repository created/, out)
+      assert File.directory?(File.join(dir, '.git'))
+    end
+  end
+
+  def test_lab_new_refuses_a_folder_in_use
+    Dir.mktmpdir do |d|
+      File.write(File.join(d, 'keep.txt'), 'mine')
+      rc, _, err = run_cli('lab', 'new', d)
+      assert_equal 2, rc
+      assert_match(/exists and is not empty/, err)
+      assert_equal ['keep.txt'], Dir.children(d)
+    end
+    assert_equal 0, Dir.mktmpdir { |d| run_cli('lab', 'new', d, '--no-git')[0] }
+  end
+
+  def test_lab_needs_a_subcommand_and_a_folder
+    assert_match(/lab new DIR/, run_cli('lab')[2])
+    assert_match(/lab new needs a folder/, run_cli('lab', 'new')[2])
+  end
+
+  def test_lab_template_files_are_valid
+    lab = OSPFv2::CLI::LAB_TEMPLATE
+    %w[sim/sim.yml peer/peer.yml].each { |f| assert_equal 0, run_cli('check', File.join(lab, f))[0], f }
+    nodes = YAML.safe_load(File.read(File.join(lab, 'lab.yml')))['nodes']
+    nodes.each { |n| assert File.file?(File.join(lab, n['config'])), "#{n['name']}: #{n['config']}" }
   end
 end

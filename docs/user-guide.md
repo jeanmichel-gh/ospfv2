@@ -288,8 +288,8 @@ The `ospfv2` image holds three programs, one per role. `--entrypoint` picks whic
 | --- | --- | --- | --- |
 | Demo | `ospfv2` (the default) | `demo` | `docker run --rm --name demo -p 8080:8080 ospfv2` |
 | Simulator in the router lab | `ospfv2` (the default) | `sim`, as compose names it: `ospfv2-sim-1` | `docker compose --profile frr up -d sim frr` |
-| OSPF daemon | `--entrypoint ospfd` | `ospfd` | `docker run -d --name ospfd ... --entrypoint ospfd ospfv2`, section 2b of the router |
-| OSPF CLI | `ospf-cli` | none: it runs inside the `ospfd` container | `docker exec -it ospfd ospf-cli` |
+| OSPF daemon | `--entrypoint ospfd` | `ospfd`, as compose names it: `ospfv2-ospfd-1` | `docker compose up -d ospfd`, section 2b of the router |
+| OSPF CLI | `ospf-cli` | none: it runs inside the `ospfd` container | `docker compose exec ospfd ospf-cli` |
 
 The CLI talks to the daemon over a Unix socket inside that container, so it runs there with `docker exec` rather than in a container of its own. Each program prints its options with `--help`:
 
@@ -414,64 +414,51 @@ Full with FRR, 2Way with the simulator: two routers that are neither DR nor BDR 
 
 ### 2b. ospfd in a container
 
-The same router, in the image you built. The configuration lives in a folder on the VM, so `commit` survives the container.
+The same router, as the `ospfd` service of the compose file. It joins the bridge at 10.99.0.30 and reads its configuration from the lab folder, `ospfd/ospfd.conf`:
 
-Three names meet in the `docker run` line below. They are different things:
-
-| Name | What it is |
-| --- | --- |
-| `ospfv2` (last word) | The image you built. It holds all three programs: `ospfv2` (demo and simulator), `ospfd` and `ospf-cli`. With no other choice it runs `ospfv2`. |
-| `--entrypoint ospfd` | Picks the program: the daemon instead of `ospfv2`. |
-| `--name ospfd` | The container's name, used by `docker logs ospfd`, `docker exec ospfd ...` and `docker rm -f ospfd`. Any name works; it is `ospfd` here because that is what runs inside. |
-
-```sh
-# in the VM
-mkdir -p ~/ospfd-docker
-cat > ~/ospfd-docker/ospfd.conf <<'EOF'
+```
 set routing-options router-id 3.3.3.3
 set protocols ospf area 0 interface eth0 hello-interval 2
 set protocols ospf area 0 interface eth0 priority 0
-EOF
-docker run -d --name ospfd --network ospfv2_ospflab --ip 10.99.0.30 \
-  --cap-add NET_RAW --cap-add NET_ADMIN \
-  -v ~/ospfd-docker:/etc/ospfv2 --entrypoint ospfd ospfv2
-docker logs -f ospfd                      # Ctrl-C stops following, not ospfd
-docker exec ospfd ospf-cli -c 'show ospf overview'
 ```
 
-`NET_RAW` is for OSPF packets, `NET_ADMIN` for routes. `ospfv2_ospflab` is the network compose made; the prefix is the repo's folder name. The routes go into the container's own routing table, not the VM's: `show route protocol ospf` lists them, since the image has no `ip` command. From the VM, `sudo nsenter -t $(docker inspect -f '{{.State.Pid}}' ospfd) -n ip route show proto 89` shows them too.
+Start it once the simulator is Full:
 
-`docker rm -f ospfd` stops it.
-
-#### Name already in use
-
-A stopped container keeps its name. After `docker stop ospfd`, a crash, or a VM reboot, running the `docker run --name ospfd ...` line again fails:
-
-```
-docker: Error response from daemon: Conflict. The container name "/ospfd" is already in use by container "86b5...".
+```sh
+# in the VM, from ~/ospfv2
+docker compose up -d ospfd
+docker compose logs -f ospfd                    # Ctrl-C stops following, not ospfd
+docker compose exec ospfd ospf-cli -c 'show ospf overview'
 ```
 
-Either start the same container again, with the same configuration and mount, or remove it and run a fresh one:
+The compose file gives it `NET_RAW` for OSPF packets and `NET_ADMIN` for routes. Its socket is on the `ospfd-run` volume, where other containers can reach it. The routes go into the container's own routing table, not the VM's: `show route protocol ospf` lists them, since the image has no `ip` command. From the VM, `sudo nsenter -t $(docker inspect -f '{{.State.Pid}}' ospfv2-ospfd-1) -n ip route show proto 89` shows them too.
+
+`commit` in ospf-cli writes the configuration back to the lab folder, so it survives the container. `docker compose stop ospfd` stops it; `docker compose up -d ospfd` starts it again with the same configuration.
+
+#### With docker run
+
+Before the compose service, the guide ran the container by hand. That still works, with a folder of your own for the configuration:
 
 ```sh
 # in the VM
-docker ps -a --filter name=ospfd          # is it there, and stopped?
-docker start ospfd                        # same container again
-docker rm ospfd                           # or remove it, then docker run as above
+docker run -d --name ospfd --network ospfv2_ospflab --ip 10.99.0.30 \
+  --cap-add NET_RAW --cap-add NET_ADMIN \
+  -v ~/ospfd-docker:/etc/ospfv2 --entrypoint ospfd ospfv2
+docker exec ospfd ospf-cli -c 'show ospf overview'
 ```
 
-`docker run --rm` containers, such as `demo`, remove themselves when they stop, so their names never linger. Compose services never hit this either: `docker compose up` reuses or replaces its own containers.
+A stopped container keeps its name, so a second `docker run --name ospfd` fails with "The container name "/ospfd" is already in use". `docker start ospfd` reuses it; `docker rm ospfd` removes it. Compose services never hit this: `docker compose up` reuses or replaces its own containers.
 
 #### After a VM reboot or a kill
 
-Nothing needs cleaning. Routing tables live in memory, so the containers' routes and the VM's are gone. `ospfd` removes the socket file a dead daemon left behind. Commits in `~/ospfd-docker` are written to a temporary file and renamed into place, so a kill cannot leave half a configuration. Docker starts at boot and the `ospfv2_ospflab` network survives.
+Nothing needs cleaning. Routing tables live in memory, so the containers' routes and the VM's are gone. `ospfd` removes the socket file a dead daemon left behind. Commits are written to a temporary file and renamed into place, so a kill cannot leave half a configuration. Docker starts at boot and the `ospfv2_ospflab` network survives.
 
 The containers do not restart by themselves. Start them again, the simulator before `ospfd`:
 
 ```sh
 # in the VM, from ~/ospfv2
 docker compose --profile frr up -d sim frr
-docker start ospfd                        # once the simulator is Full
+docker compose up -d ospfd                # once the simulator is Full
 ```
 
 Killing QEMU is like pulling the power cord. Ubuntu recovers, but `ssh ospflab sudo poweroff` is cleaner. Now and then, with the VM off, `qemu-img check ~/vms/ospflab/disk.qcow2` checks the disk image.
@@ -480,9 +467,25 @@ Killing QEMU is like pulling the power cord. Ubuntu recovers, but `ssh ospflab s
 
 ```sh
 # in the VM, from ~/ospfv2
-docker rm -f ospfd 2>/dev/null
-docker compose --profile frr down
+docker compose --profile frr --profile ospfd down
 ```
+
+`down` keeps the lab folder and the `ospfd-run` volume. `down -v` removes the volume too.
+
+### Your own lab folder
+
+The lab's configurations live in a lab folder: one folder per node, `sim/`, `peer/`, `frr/` and `ospfd/`, and `lab.yml`, which lists the nodes. Compose mounts each node's folder read-write, so a configuration you save in the lab lands back in the folder: `commit` in ospf-cli, `write memory` in FRR's vtysh.
+
+Without `LAB`, compose uses the template in the repo, `examples/lab`, and saved changes show up in `git status` of ospfv2. Make your own copy before changing anything:
+
+```sh
+# in the VM, from ~/ospfv2
+bin/ospfv2 lab new ~/labs/ospf-lab        # copies the template, makes it a git repo
+export LAB=~/labs/ospf-lab                # add it to ~/.bashrc to keep it
+docker compose --profile frr up -d sim frr
+```
+
+The lab folder is a git repository with a first commit. After changing configurations, `git -C $LAB diff` shows what changed and `git -C $LAB commit -am "what and why"` keeps it. A branch per experiment and `git checkout` to go back work as usual. Restart the nodes after switching branches, so they read the files again.
 
 ## ospf-cli
 
@@ -493,7 +496,7 @@ docker compose --profile frr down
 | Where `ospfd` runs | Command |
 | --- | --- |
 | On the VM | `sudo bin/ospf-cli` in the VM, or without `sudo` once your user is in the `ospf` group |
-| In the container | `docker exec -it ospfd ospf-cli` |
+| In the container | `docker compose exec ospfd ospf-cli`, from `~/ospfv2` |
 | On the VM, CLI on the Mac | Forward the socket over SSH, below |
 
 ### On the Mac, through SSH
@@ -579,7 +582,8 @@ Within 5 seconds `ospfd` originates an external LSA for it and FRR has it too: `
 | No neighbor, or stuck in Init | Hello timers must match: the lab's FRR uses 2 seconds. `show ospf events` shows the dropped hellos. |
 | The simulator loops between ExStart and Exchange | It was not Full before `ospfd` came up. `docker compose restart sim`. |
 | An empty `lab.yml` folder appears in the repo | Compose started the `ospfv2` service. `rmdir lab.yml`, and name the services: `up -d sim frr`. |
-| `docker run`: the container name is already in use | A stopped container with that name exists. `docker start ospfd` to reuse it, or `docker rm ospfd` and run it again. |
+| `docker run`: the container name is already in use | A stopped container with that name exists. `docker start ospfd` to reuse it, or `docker rm ospfd` and run it again. The compose service avoids this. |
+| Configuration changes appear in `git status` of ospfv2 | `LAB` is not set, so the template in `examples/lab` is in use. Make your own lab folder: `bin/ospfv2 lab new ~/labs/ospf-lab`. |
 
 ### Cheat sheet
 
@@ -598,10 +602,14 @@ In the VM, from `~/ospfv2`:
 # in the VM, from ~/ospfv2
 git pull && docker build -t ospfv2 .           # update code and image
 bin/ospfv2 demo --web 0.0.0.0:8080             # demo, http://localhost:8080 on the Mac
+bin/ospfv2 lab new ~/labs/ospf-lab             # your own lab folder, once
+export LAB=~/labs/ospf-lab                     # which lab folder compose uses
 docker compose --profile frr up -d sim frr     # the lab's neighbors
 sudo bin/ospfd -g ospf                         # router on the VM
 sudo bin/ospf-cli                              # its CLI
-docker compose --profile frr down              # stop the lab
+docker compose up -d ospfd                     # or the router in a container
+docker compose exec ospfd ospf-cli             # its CLI
+docker compose --profile frr --profile ospfd down   # stop the lab
 ```
 
 ## Sources

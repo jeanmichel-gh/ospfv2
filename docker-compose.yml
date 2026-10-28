@@ -4,13 +4,27 @@
 #                                      host network. Put it in ./lab.yml first
 #                                      (ospfv2 init > lab.yml), dashboard on :8080.
 #
-#   docker compose --profile lab up    self-contained lab: the simulator floods a
-#                                      5x5 grid to a second ospfv2 over a bridge,
-#                                      using real raw sockets. Dashboards on :8080
-#                                      (simulator) and :8081 (peer).
+#   The router lab, on a bridge (10.99.0.0/24), from a lab folder:
 #
-#   docker compose --profile frr up    the same simulator against FRRouting ospfd,
+#   docker compose --profile lab up    the simulator floods a 5x5 grid to a second
+#                                      ospfv2 using real raw sockets. Dashboards on
+#                                      :8080 (simulator) and :8081 (peer).
+#
+#   docker compose --profile frr up -d sim frr
+#                                      the same simulator against FRRouting ospfd,
 #                                      then: docker compose exec frr vtysh -c "show ip ospf neighbor"
+#
+#   docker compose up -d ospfd         ospfd as a third router, once the simulator
+#                                      is Full. Its socket is on the ospfd-run volume:
+#                                      docker compose exec ospfd ospf-cli
+#
+# The lab folder holds one folder per node (sim/, peer/, frr/, ospfd/), each
+# mounted read-write, so configurations saved in the lab land back there.
+# LAB selects it; without it, the template in examples/lab is used. Make your
+# own copy before changing configurations:
+#
+#   bin/ospfv2 lab new ~/labs/ospf-lab
+#   export LAB=~/labs/ospf-lab
 
 x-ospfv2: &ospfv2
   build: .
@@ -34,7 +48,9 @@ services:
       ospflab:
         ipv4_address: 10.99.0.10
     ports: ["8080:8080"]
-    command: ["run", "/app/examples/lab/sim.yml", "--web", "0.0.0.0:8080", "--log", "/tmp/ospfv2.log"]
+    volumes:
+      - ${LAB:-./examples/lab}/sim:/lab
+    command: ["run", "/lab/sim.yml", "--web", "0.0.0.0:8080", "--log", "/tmp/ospfv2.log"]
 
   peer:
     <<: *ospfv2
@@ -43,7 +59,9 @@ services:
       ospflab:
         ipv4_address: 10.99.0.20
     ports: ["8081:8080"]
-    command: ["run", "/app/examples/lab/peer.yml", "--web", "0.0.0.0:8080", "--log", "/tmp/ospfv2.log"]
+    volumes:
+      - ${LAB:-./examples/lab}/peer:/lab
+    command: ["run", "/lab/peer.yml", "--web", "0.0.0.0:8080", "--log", "/tmp/ospfv2.log"]
 
   frr:
     profiles: [frr]
@@ -53,11 +71,29 @@ services:
       ospflab:
         ipv4_address: 10.99.0.20
     volumes:
-      - ./examples/lab/frr/daemons:/etc/frr/daemons:ro
-      - ./examples/lab/frr/frr.conf:/etc/frr/frr.conf:ro
+      - ${LAB:-./examples/lab}/frr:/etc/frr
+
+  ospfd:
+    <<: *ospfv2
+    profiles: [ospfd]
+    # Docker's default capabilities, as with docker run: commit rewrites the
+    # configuration in the mounted folder, which needs root's file access.
+    cap_drop: []
+    cap_add: [NET_RAW, NET_ADMIN]
+    networks:
+      ospflab:
+        ipv4_address: 10.99.0.30
+    volumes:
+      - ${LAB:-./examples/lab}/ospfd:/etc/ospfv2
+      - ospfd-run:/run/ospfv2
+    entrypoint: ["ospfd"]
+    command: []
 
 networks:
   ospflab:
     ipam:
       config:
         - subnet: 10.99.0.0/24
+
+volumes:
+  ospfd-run:

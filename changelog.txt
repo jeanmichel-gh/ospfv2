@@ -1,5 +1,14 @@
 === Unreleased
 
+* Lab folder for the router lab: one folder per node (sim/, peer/, frr/,
+  ospfd/) plus lab.yml, mounted read-write by docker-compose.yml, so
+  configurations saved in the lab land back in it. LAB selects the folder;
+  examples/lab is the template. examples/lab/sim.yml and peer.yml moved
+  to sim/sim.yml and peer/peer.yml
+* ospfv2 lab new DIR: copies the template and makes it a git repository
+* docker-compose.yml: ospfd service at 10.99.0.30, socket on the ospfd-run
+  volume
+
 * User guide (docs/user-guide.md): the demo, ospfd and ospf-cli on a Mac,
   natively, in an Ubuntu VM under QEMU and in Docker, with a router lab
   against FRR and the simulator

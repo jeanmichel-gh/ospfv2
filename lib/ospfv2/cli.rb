@@ -2,6 +2,7 @@
 
 require 'optparse'
 require 'json'
+require 'fileutils'
 require_relative 'simulator'
 require_relative 'console'
 require_relative 'infra/parse_options'
@@ -15,9 +16,10 @@ module OSPFv2
   #   ospfv2 export TOPOLOGY --format dot|json|yaml
   #   ospfv2 check TOPOLOGY
   #   ospfv2 init [--grid 3x3] [--interface 10.0.0.2/24]
+  #   ospfv2 lab new DIR [--no-git]
   #   ospfv2 -i 192.168.1.10/24 -g 3x3 ...       original flags, still work
   class CLI
-    COMMANDS = %w[run demo show export check init version help].freeze
+    COMMANDS = %w[run demo show export check init lab version help].freeze
 
     def self.start(argv = ARGV, out: $stdout, err: $stderr)
       new(out: out, err: err).run(argv.dup)
@@ -43,6 +45,7 @@ module OSPFv2
       when 'export'  then cmd_export(argv)
       when 'check'   then cmd_check(argv)
       when 'init'    then cmd_init(argv)
+      when 'lab'     then cmd_lab(argv)
       when 'version', '-v', '--version' then @out.puts("ospfv2 #{VERSION}") || 0
       when 'help', '-h', '--help' then @out.puts(usage) || 0
       else
@@ -68,6 +71,7 @@ module OSPFv2
           ospfv2 export TOPOLOGY.yml -f FMT    dot (Graphviz), json or yaml
           ospfv2 check TOPOLOGY.yml            validate and summarize
           ospfv2 init [--grid CxR]             print a starter topology
+          ospfv2 lab new DIR [--no-git]        copy the router lab template to DIR
           ospfv2 -i ADDR/LEN -g CxR ...        original command line (ospfv2 -h for flags)
 
         Run options:
@@ -163,6 +167,42 @@ module OSPFv2
       @out.puts "  prefixes   #{c[:networks]} stub, #{c[:summaries]} summary, #{c[:asbr_summaries]} asbr-summary, #{c[:externals]} external"
       @out.puts "  lsdb       #{sim.ls_db.size} LSAs, #{sim.ls_db.all.sum { |l| l.encode.bytesize }} bytes"
       0
+    end
+
+    LAB_TEMPLATE = File.expand_path('../../examples/lab', __dir__)
+
+    # Copies the router lab template into a new folder and makes it a git
+    # repository, so saved configurations have history.
+    def cmd_lab(argv)
+      sub = argv.shift
+      raise ArgumentError, "lab needs a subcommand: lab new DIR" unless sub == 'new'
+      git = true
+      OptionParser.new { |o| o.on('--no-git') { git = false } }.parse!(argv)
+      dir = argv.shift or raise ArgumentError, 'lab new needs a folder, for example: ospfv2 lab new ~/labs/ospf-lab'
+      dir = File.expand_path(dir)
+      raise ArgumentError, "#{dir} exists and is not empty" if File.exist?(dir) && !(File.directory?(dir) && Dir.empty?(dir))
+      FileUtils.mkdir_p(dir)
+      FileUtils.cp_r(File.join(LAB_TEMPLATE, '.'), dir)
+      @out.puts "lab created in #{dir}"
+      @out.puts(lab_git_init(dir)) if git
+      @out.puts <<~TXT
+
+        Use it from the ospfv2 folder:
+          export LAB=#{dir}
+          docker compose --profile frr up -d sim frr
+      TXT
+      0
+    end
+
+    def lab_git_init(dir)
+      ok = system('git', '-C', dir, 'init', '-q', out: File::NULL, err: File::NULL) &&
+           system('git', '-C', dir, 'add', '-A', out: File::NULL, err: File::NULL)
+      return 'git: not available, the lab folder has no history' unless ok
+      if system('git', '-C', dir, 'commit', '-q', '-m', 'Lab created from ospfv2 examples/lab', out: File::NULL, err: File::NULL)
+        'git: repository created with a first commit'
+      else
+        'git: repository created; the first commit failed (set git user.name and user.email, then commit)'
+      end
     end
 
     def cmd_init(argv)
