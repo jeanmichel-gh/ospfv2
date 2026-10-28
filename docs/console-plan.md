@@ -2,7 +2,7 @@
 
 A web console for the ospfd router lab: one window to see, drive, debug and record every device in the lab. It goes well past the demo dashboard, which shows one simulator and polls it.
 
-Status: plan agreed in outline, phase 0 (UX mockups) in progress.
+Status: plan agreed in outline, phase 0 (UX mockups) in progress. Each pane, its inputs and decisions: `console-panes.md`.
 
 ## Goals
 
