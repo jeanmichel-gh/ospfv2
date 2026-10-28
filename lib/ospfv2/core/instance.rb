@@ -839,12 +839,12 @@ module OSPFv2
         @spf_log.shift(@spf_log.size - MAX_SPF_LOG) if @spf_log.size > MAX_SPF_LOG
         remember_run(run)
         why = "#{reasons.first(3).join(', ')}#{reasons.size > 3 ? ', ...' : ''}"
-        publish(:info, "SPF #{n}: #{(duration * 1000).round(1)} ms, #{table.routes.size} routes, #{diff} (#{why})",
+        publish(:info, "SPF #{(duration * 1000).round(1)} ms, #{table.routes.size} routes, #{diff} (#{why})",
                 kind: :spf, **spf_run_fields(run))
         return if diff.empty?
-        log(:info, nil, "routes #{diff} after SPF #{n} (#{why})", kind: :routes, run: n,
-                                                                    added: diff.added.size, changed: diff.changed.size,
-                                                                    removed: diff.removed.size)
+        log(:info, nil, "routes #{diff} after SPF (#{why})", kind: :routes, run: n,
+                                                             added: diff.added.size, changed: diff.changed.size,
+                                                             removed: diff.removed.size)
       end
 
       # A run as plain data: for events and show.spf.
