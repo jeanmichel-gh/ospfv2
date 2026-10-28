@@ -14,6 +14,9 @@ Since 1.0 it has a second mode: `ospfd`, an OSPFv2 router you configure and quer
 computes routes and installs them in the Linux routing table. See
 [Router mode](#router-mode-ospfd-and-ospf-cli).
 
+To set it all up on a Mac (an Ubuntu VM under QEMU, Docker, a router lab with FRR),
+follow the [user guide](docs/user-guide.md).
+
 ## Quick start
 
 ```sh
