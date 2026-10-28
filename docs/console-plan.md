@@ -22,11 +22,21 @@ Status: plan agreed in outline, phase 0 (UX mockups) in progress. Each pane, its
 | 4 | Works with ospfd running natively in the VM or in its container | Agreed |
 | 5 | Our own small lab file first. Containerlab import later; nothing in the design may block it | Agreed |
 | 6 | Single user on localhost, but auth built in from day one and switched off, so login is easy to add | Agreed |
-| 7 | Separate repo for the console, its own license; ospfv2 gets the APIs it needs as normal features | Proposed, to confirm |
+| 7 | Separate private repo `jeanmichel-gh/console`, its own license, cloned side by side with ospfv2; ospfv2 gets the APIs it needs as normal features | Agreed |
 | 8 | A lab is a folder: `lab.yml` plus one config file per node, mounted read-write, kept in git | Agreed |
 | 9 | SPF observability lives in ospfd; ospf-cli and the console both read it | Agreed |
 
 ospfv2 stays standard library only. The console has its own gems and Node packages.
+
+## Working across the two repos
+
+- **The APIs are the contract:** ospfd's JSON socket API, the simulator's HTTP API, and the ospfv2 library the console loads for decoding.
+- **Additive changes only.** New methods and fields are fine; renames and removals go through a deprecation. ospfv2 can always merge first without breaking the console.
+- **Discovery.** ospfd answers `api.info` with its version and methods. The console checks it at connect and greys out what an older ospfd lacks, with a message naming the version needed.
+- **Shared fixtures.** ospfv2's tests record sample responses of each API method in `test/fixtures/api/`. The console's tests use the same files.
+- **Side by side clones** on the Mac and in the VM: `~/src/ospfv2` and `~/src/console`.
+- **Pinned, with a local override.** The console pins ospfv2 to a tag in its Gemfile and compose file. For local work, `bundle config local.ospfv2 ~/src/ospfv2` and a compose build context of `../ospfv2` use the sibling checkout directly.
+- **A feature that spans both** is two linked PRs: ospfv2 first, merged and tagged, then the console bumps its pin.
 
 ## What the console does
 
@@ -80,6 +90,7 @@ Mac browser ── QEMU forward 127.0.0.1:8082 ──► console container (VM)
 | ospf-cli: `show ospf log` timing columns, `show ospf log run N`, SPF links in route and database detail; IOS forms too | Same insight without the console |
 | Compose and lab template: per node configs mounted read-write from a lab folder, not baked in the image or read only | Save to lab |
 | Socket on a volume in the containerized ospfd, documented | Console reaches it |
+| `api.info`: version and supported methods; recorded API fixtures in `test/fixtures/api/` | Cross repo contract |
 | systemd unit for native ospfd | Lifecycle and journal logs |
 
 ## Phases
