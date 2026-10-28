@@ -132,6 +132,8 @@ class TestCLI < Test::Unit::TestCase
       assert_equal 0, rc
       assert_match(/^git: repository created/, out)
       assert File.directory?(File.join(dir, '.git'))
+      env = { 'GIT_AUTHOR_NAME' => nil, 'GIT_AUTHOR_EMAIL' => nil, 'GIT_COMMITTER_NAME' => nil, 'GIT_COMMITTER_EMAIL' => nil }
+      assert_equal "lab <lab@configs>\n", IO.popen(env, ['git', '-C', dir, 'log', '-1', '--format=%an <%ae>'], &:read)
     end
   end
 
