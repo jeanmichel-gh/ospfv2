@@ -342,9 +342,11 @@ request and one reply per line.
 `api.info` returns ospfd's version, the API version, the methods and the event kinds.
 The methods: `show.overview`, `show.neighbors`, `show.interfaces`, `show.database`,
 `show.routes`, `show.fib`, `show.spf`, `show.log`, `show.statistics`,
-`show.configuration`, `config.load`, `config.compare`, `config.changed`,
+`show.configuration`, `config.load`, `config.replace`, `config.compare`, `config.changed`,
 `config.commit`, `config.discard`, `config.rollback`, `config.history`,
-`clear.neighbors`, `events.subscribe` and `events.unsubscribe`.
+`clear.neighbors`, `events.subscribe` and `events.unsubscribe`. `config.load` adds set
+lines to the candidate; `config.replace` makes them the whole candidate, like Junos
+`load override` (a console restoring a saved file uses it).
 
 `events.subscribe` turns the connection into a stream of events, one per line, with a
 keepalive line every 15 seconds when nothing happens. Use a second connection for

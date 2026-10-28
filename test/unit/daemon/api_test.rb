@@ -43,6 +43,19 @@ class TestDaemonApi < Test::Unit::TestCase
     assert_equal 'first', call('config.history')[:result].first[:comment]
   end
 
+  def test_replace_the_whole_candidate
+    call('config.load', 'lines' => ['set routing-options router-id 1.1.1.1', 'set protocols ospf area 0 interface lo passive'])
+    assert call('config.commit', 'comment' => 'first')[:result][:ok]
+    r = call('config.replace', 'lines' => ['# a saved file', 'set routing-options router-id 2.2.2.2'])
+    assert_equal({ errors: [] }, r[:result])
+    assert_equal ['- set protocols ospf area 0.0.0.0 interface lo passive', '- set routing-options router-id 1.1.1.1',
+                  '+ set routing-options router-id 2.2.2.2'].sort, call('config.compare')[:result].sort
+    bad = call('config.replace', 'lines' => ['set nonsense'])[:result][:errors]
+    assert_match(/nonsense/, bad.first)
+    assert_equal 3, call('config.compare')[:result].size, 'a bad text keeps the candidate'
+    assert_includes call('api.info')[:result][:methods], 'config.replace'
+  end
+
   def test_errors_come_back_as_messages
     assert_equal 'unknown method show.secrets', call('show.secrets')[:error]
     assert_match(/line 1: .*unknown 'bogus'/, call('config.load', 'lines' => ['set bogus'])[:result][:errors].first)
