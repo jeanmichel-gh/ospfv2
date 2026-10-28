@@ -79,7 +79,7 @@ Set the branch of each repo you want to run, then paste the whole block. It fetc
 ```sh
 # in the VM
 OSPFV2_BRANCH=master            # or a branch, e.g. lab-commands
-ROUTESCOPE_BRANCH=skeleton      # main once PR #1 is merged
+ROUTESCOPE_BRANCH=main          # or a branch, e.g. lab-missing
 
 cd ~/ospfv2
 git fetch origin && git switch "$OSPFV2_BRANCH" && git pull --ff-only
