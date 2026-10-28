@@ -5,6 +5,7 @@ require 'time'
 require 'stringio'
 require_relative '../ospfv2'
 require_relative 'topology'
+require_relative 'core/lsa'
 
 module OSPFv2
   # Runs a Topology: builds its link state database, brings up the
@@ -241,17 +242,27 @@ module OSPFv2
       end
     end
 
-    def lsdb_rows
+    # The LSAs it holds, one row each. +detail+ adds each body as plain
+    # data, the shape ospfd's show.database gives (Core::Lsa#detail).
+    def lsdb_rows(detail: false)
       synchronize do
         @ls_db.all.sort_by { |l| [l.ls_type.to_i, l.advertising_router.to_i, lsa_id(l)] }.map do |l|
-          {
+          row = {
             type: l.ls_type.to_sym, type_name: l.ls_type.to_junos, ls_id: IP.create(lsa_id(l)).to_s,
             advertising_router: l.advertising_router.to_ip, seq: format('0x%08x', l.sequence_number.to_I),
             age: l.ls_age.to_i, checksum: format('0x%04x', l.encode && l.send(:csum_to_i)),
             length: l.encode.bytesize, acked: l.ack?, originated: @ls_db.proxied?(l.advertising_router)
           }
+          row[:detail] = lsa_detail(l) if detail
+          row
         end
       end
+    end
+
+    def lsa_detail(l)
+      Core::Lsa.parse(l.encode.b).detail
+    rescue Core::Lsa::Error => e
+      { error: e.message }
     end
 
     def graph

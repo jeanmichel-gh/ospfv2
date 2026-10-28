@@ -56,7 +56,7 @@ module OSPFv2
         when %w[GET /api/state]
           json(200, @sim.snapshot)
         when %w[GET /api/lsdb]
-          json(200, @sim.lsdb_rows)
+          json(200, @sim.lsdb_rows(detail: query['detail'] == '1'))
         when %w[GET /api/lsdb.txt]
           fmt = %w[junos ios plain].include?(query['format']) ? query['format'] : 'junos'
           [200, 'text/plain; charset=utf-8', @sim.lsdb_text(fmt, verbose: query['verbose'] == '1')]

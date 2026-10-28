@@ -96,6 +96,20 @@ class TestCoreLsa < Test::Unit::TestCase
     assert_equal 1, links[1].metric
   end
 
+  def test_detail
+    d = router_lsa.detail
+    assert_equal [{ b: false, e: false, v: false }, %i[stub p2p]], [d[:flags], d[:links].map { _1[:type] }]
+    assert_equal({ type: :p2p, id: '2.2.2.2', data: router_lsa.router_links[1].then { Addr.to_s(_1.data) }, metric: 1 }, d[:links][1])
+    net = Lsa.network(dr_address: '10.0.0.1', advr: '1.1.1.1', mask: '255.255.255.0', attached: %w[1.1.1.1 2.2.2.2], seq: 1)
+    assert_equal({ mask: '255.255.255.0', attached: %w[1.1.1.1 2.2.2.2] }, net.detail)
+    ext = Lsa.build(type: 5, ls_id: '50.0.0.0', advr: '1.1.1.1', seq: 1,
+                    body: [Addr.to_i('255.255.255.0'), 0x8000_0014, Addr.to_i('10.0.0.9'), 7].pack('NNNN'))
+    assert_equal({ mask: '255.255.255.0', metric: 20, external_type: 2, forwarding: '10.0.0.9', tag: 7 }, ext.detail)
+    sum = Lsa.build(type: 3, ls_id: '30.0.0.0', advr: '1.1.1.1', seq: 1, body: [Addr.to_i('255.255.0.0'), 5].pack('NN'))
+    assert_equal({ mask: '255.255.0.0', metric: 5 }, sum.detail)
+    assert_match(/body of 4 bytes/, Lsa.build(type: 3, ls_id: '3.0.0.0', advr: '1.1.1.1', seq: 1, body: "\0" * 4).detail[:error])
+  end
+
   def test_signed_sequence_numbers
     assert_equal(-0x7fff_ffff, router_lsa.seq)
     assert_equal '0x80000001', format('0x%08x', router_lsa.seq & 0xffff_ffff)

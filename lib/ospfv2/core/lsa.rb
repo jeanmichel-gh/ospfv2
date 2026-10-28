@@ -267,6 +267,35 @@ module OSPFv2
         [mask, routers]
       end
 
+      # The body as plain data, the same for ospfd's API and the simulator's:
+      # router flags and links, network mask and attached routers, summary
+      # and external mask, metric, type, forwarding address and tag. Other
+      # types give {}. A body that does not decode gives { error: }.
+      def detail
+        case type
+        when 1
+          flags, links = router_body
+          { flags: { b: flags[0] == 1, e: flags[1] == 1, v: flags[2] == 1 },
+            links: links.map { |k| { type: k.type_name, id: Addr.to_s(k.id), data: Addr.to_s(k.data), metric: k.metric } } }
+        when 2
+          mask, routers = network_body
+          { mask: Addr.to_s(mask), attached: routers.map { |x| Addr.to_s(x) } }
+        when 3, 4, 5, 7
+          b = body
+          raise Error, "type #{type} LSA body of #{b.bytesize} bytes" if b.bytesize < 8
+          mask, metric = b.unpack('NN')
+          d = { mask: Addr.to_s(mask), metric: metric & 0xff_ffff }
+          if type >= 5 && b.bytesize >= 16
+            _, _, fwd, tag = b.unpack('NNNN')
+            d.merge!(external_type: metric >> 31 == 1 ? 2 : 1, forwarding: Addr.to_s(fwd), tag: tag)
+          end
+          d
+        else {}
+        end
+      rescue Error => e
+        { error: e.message }
+      end
+
       def self.router(advr:, seq:, links:, flags: 0, options: 0x02, age: 0)
         body = [flags, 0, links.size].pack('CCn')
         links.each do |l|
