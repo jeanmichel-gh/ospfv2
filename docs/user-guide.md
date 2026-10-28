@@ -497,7 +497,7 @@ export LAB=~/labs/ospf-lab                # add it to ~/.bashrc to keep it
 docker compose --profile frr up -d sim frr
 ```
 
-Saved files stay yours. ospfd keeps the owner and mode of the file it replaces. FRR's `write memory` gives the file to FRR's own user; the lab's FRR start script (`tools/frr-start.sh`) gives it back to the folder's owner within 2 seconds, mode 640. Files the routers keep next to their configuration (`frr.conf.sav`, ospfd's rollbacks) are in the lab's `.gitignore`.
+Saved files stay yours. ospfd keeps the owner and mode of the file it replaces. FRR's `write memory` gives the file to FRR's own user; the lab's FRR start script (`examples/lab/tools/frr-start.sh` in the repo) gives it back to the folder's owner within 2 seconds, mode 640. Files the routers keep next to their configuration (`frr.conf.sav`, ospfd's rollbacks) are in the lab's `.gitignore`.
 
 The lab folder is a git repository with a first commit. After changing configurations, `git -C $LAB diff` shows what changed and `git -C $LAB commit -am "what and why"` keeps it. A branch per experiment and `git checkout` to go back work as usual. Restart the nodes after switching branches, so they read the files again.
 
@@ -610,6 +610,7 @@ Within 5 seconds `ospfd` originates an external LSA for it and FRR has it too: `
 | An empty `lab.yml` folder appears in the repo | Compose started the `ospfv2` service. `rmdir lab.yml`, and name the services: `up -d sim frr`. |
 | `docker run`: the container name is already in use | A stopped container with that name exists. `docker start ospfd` to reuse it, or `docker rm ospfd` and run it again. The compose service avoids this. |
 | `git diff` in the lab folder: permission denied on `frr/frr.conf` | FRR saved it moments ago; its start script gives it back within 2 seconds. If it stays, the FRR container was started from an older compose file: `docker compose --profile frr up -d frr` recreates it. |
+| FRR stops at once: `can't open '/lab-tools/frr-start.sh'` | The compose file is older than the repo's start script. `git pull` in `~/ospfv2`, then `docker compose --profile frr up -d frr`. |
 | Configuration changes appear in `git status` of ospfv2 | `LAB` is not set, so the template in `examples/lab` is in use. Make your own lab folder: `bin/ospfv2 lab new ~/labs/ospf-lab`. |
 
 ### Cheat sheet

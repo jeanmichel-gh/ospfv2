@@ -81,7 +81,7 @@ docker compose --profile frr up -d sim frr
 timeout 90 sh -c "until docker compose exec -T frr vtysh -c 'show ip ospf neighbor' 2>/dev/null | grep -q '1\.1\.1\.1.*Full'; do sleep 2; done" && echo sim Full || docker compose logs --tail 40 frr
 docker compose up -d ospfd
 cd ~/routescope && docker compose up -d --force-recreate
-sleep 3; curl -s localhost:8082/api/health; echo
+sleep 3; curl -s --max-time 5 localhost:8082/api/health; echo
 cd ~/ospfv2 && git log --oneline -1 && cd ~/routescope && git log --oneline -1
 ```
 
@@ -112,7 +112,7 @@ docker compose --profile frr up -d sim frr
 timeout 90 sh -c "until docker compose exec -T frr vtysh -c 'show ip ospf neighbor' 2>/dev/null | grep -q '1\.1\.1\.1.*Full'; do sleep 2; done" && echo sim Full || docker compose logs --tail 40 frr
 docker compose up -d ospfd
 cd ~/routescope && docker compose up -d
-curl -s localhost:8082/api/health; echo
+curl -s --max-time 5 localhost:8082/api/health; echo
 ```
 
 The wait gives up after 90 seconds and shows FRR's last log lines. Then open http://localhost:8082 on the Mac.
@@ -172,8 +172,8 @@ routescope's view of the lab:
 
 ```sh
 # in the VM
-curl -s localhost:8082/api/health; echo
-curl -s localhost:8082/api/labs/ospf-lab/nodes | ruby -rjson -e 'JSON.parse($stdin.read).each { |n| puts [n["name"], n["health"], n["reason"]].compact.join("  ") }'
+curl -s --max-time 5 localhost:8082/api/health; echo
+curl -s --max-time 5 localhost:8082/api/labs/ospf-lab/nodes | ruby -rjson -e 'JSON.parse($stdin.read).each { |n| puts [n["name"], n["health"], n["reason"]].compact.join("  ") }'
 cd ~/routescope && docker compose logs --tail 50
 ```
 
