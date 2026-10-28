@@ -30,7 +30,7 @@ ospfv2 stays standard library only. The console has its own gems and Node packag
 
 ## What the console does
 
-1. **Lab map.** Containers, segments, addresses, adjacencies colored by state. The simulated area shows as a cloud behind `sim` that expands into its routers. Click anything to inspect it.
+1. **Lab map.** Containers, segments, addresses, adjacencies colored by state. The simulated area shows as a cloud behind `sim`. Click anything to inspect it. Inspecting the simulated area gives the demo's controls in place: its grid with links to click down or up, flap, metric, refresh, aging and flush, plus a link to the full simulator workbench.
 2. **Device inspector.** Overview, neighbors, interfaces, LSDB, OSPF routes, kernel routes, configuration. The same tables for ospfd, FRR and the simulator.
 3. **Terminals.** xterm.js tabs and splits: a shell in any node, `vtysh` on FRR, `ospf-cli` on ospfd.
 4. **Simulator workbench.** The simulated topology drawn as routers and links, like the demo dashboard. Click a link to take it down or up, a router to inspect it. Refresh one LSA or all, flush, flap, aging on or off, add or withdraw externals. A log shows what each action originated and when frr and ospfd installed it.
