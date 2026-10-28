@@ -58,23 +58,47 @@ No lab folder yet? Make one, once:
 cd ~/ospfv2 && bin/ospfv2 lab new ~/labs/ospf-lab
 ```
 
-## Get the latest code
+## Get the code: a branch, or the latest
+
+Set the branch of each repo you want to run, then paste the whole block. It fetches, switches, pulls, rebuilds both images, and brings everything up again from zero. `master` and `main` are the default branches; a pull request's branch name is at the top of its page on GitHub.
 
 ```sh
 # in the VM
-cd ~/ospfv2 && git pull && docker build -t ospfv2 .
-cd ~/routescope && git pull && docker compose up -d --build
+OSPFV2_BRANCH=master            # or a branch, e.g. lab-commands
+ROUTESCOPE_BRANCH=skeleton      # main once PR #1 is merged
+
+cd ~/ospfv2
+git fetch origin && git switch "$OSPFV2_BRANCH" && git pull --ff-only
+docker build -t ospfv2 .
+
+cd ~/routescope
+git fetch origin && git switch "$ROUTESCOPE_BRANCH" && git pull --ff-only
+docker compose build
+
+cd ~/ospfv2
+docker compose --profile frr --profile ospfd down
+docker compose --profile frr up -d sim frr
+timeout 90 sh -c "until docker compose exec -T frr vtysh -c 'show ip ospf neighbor' 2>/dev/null | grep -q '1\.1\.1\.1.*Full'; do sleep 2; done" && echo sim Full || docker compose logs --tail 40 frr
+docker compose up -d ospfd
+cd ~/routescope && docker compose up -d --force-recreate
+sleep 3; curl -s localhost:8082/api/health; echo
+cd ~/ospfv2 && git log --oneline -1 && cd ~/routescope && git log --oneline -1
 ```
 
-routescope's first version is on the `skeleton` branch until its PR is merged. Before that, in `~/routescope`, run `git checkout skeleton` once. After the merge, `git checkout main && git pull`.
+The last line shows the commit each repo runs. `git pull --ff-only` refuses when you have local changes to a file the branch changes; `git status` shows them and `git stash` puts them aside.
+
+A branch that was force pushed (rebased) does not pull. Reset it to GitHub's copy, which drops any local commits on it:
+
+```sh
+# in the VM, in the repo
+git fetch origin && git reset --hard "origin/$(git branch --show-current)"
+```
 
 First time only, to get routescope:
 
 ```sh
 # in the VM
 cd ~ && git clone https://github.com/jeanmichel-gh/routescope.git
-cd ~/routescope && git checkout skeleton
-docker compose up -d --build
 ```
 
 ## Start everything after a VM boot
