@@ -1,3 +1,9 @@
+=== Unreleased
+
+* User guide (docs/user-guide.md): the demo, ospfd and ospf-cli on a Mac,
+  natively, in an Ubuntu VM under QEMU and in Docker, with a router lab
+  against FRR and the simulator
+
 === 1.0.0 2026-10-27
 
 ospfd, a real OSPFv2 router next to the simulator. It forms adjacencies,
