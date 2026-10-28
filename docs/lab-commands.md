@@ -85,13 +85,13 @@ The lab containers do not restart by themselves. routescope does: Docker starts 
 # in the VM
 cd ~/ospfv2
 docker compose --profile frr up -d sim frr
-until docker compose exec -T frr vtysh -c 'show ip ospf neighbor' | grep -q '1\.1\.1\.1.*Full'; do sleep 2; done; echo sim Full
+timeout 90 sh -c "until docker compose exec -T frr vtysh -c 'show ip ospf neighbor' 2>/dev/null | grep -q '1\.1\.1\.1.*Full'; do sleep 2; done" && echo sim Full || docker compose logs --tail 40 frr
 docker compose up -d ospfd
 cd ~/routescope && docker compose up -d
 curl -s localhost:8082/api/health; echo
 ```
 
-Then open http://localhost:8082 on the Mac.
+The wait gives up after 90 seconds and shows FRR's last log lines. Then open http://localhost:8082 on the Mac.
 
 ## Restart
 
@@ -102,7 +102,7 @@ Everything, lab and routescope:
 cd ~/ospfv2
 docker compose --profile frr --profile ospfd down
 docker compose --profile frr up -d sim frr
-until docker compose exec -T frr vtysh -c 'show ip ospf neighbor' | grep -q '1\.1\.1\.1.*Full'; do sleep 2; done; echo sim Full
+timeout 90 sh -c "until docker compose exec -T frr vtysh -c 'show ip ospf neighbor' 2>/dev/null | grep -q '1\.1\.1\.1.*Full'; do sleep 2; done" && echo sim Full || docker compose logs --tail 40 frr
 docker compose up -d ospfd
 cd ~/routescope && docker compose restart
 ```
