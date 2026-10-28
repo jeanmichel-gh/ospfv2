@@ -434,7 +434,11 @@ bundle install
 bundle exec rake test               # unit and integration tests
 bundle exec rake test:integration   # two simulators syncing over an in-memory segment
 docker build --target test .        # the same tests inside the image
+test/lab/lab_test.sh                # the compose router lab end to end (Docker, a few minutes)
 ```
+
+CI runs the unit tests on Ruby 3.2 to 4.0, the FRR interop tests in network
+namespaces, the image build, and `test/lab/lab_test.sh`.
 
 `REVIEW.md` describes the code base, what changed in the 2026 refresh and what is
 worth rewriting next.

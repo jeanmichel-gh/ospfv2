@@ -216,6 +216,15 @@ ruby -Ilib -Itest -e 'Dir["test/unit/**/*_test.rb"].each { |f| require "./#{f}" 
 
 If it says it cannot load `test/unit`, run `sudo gem install test-unit` and try again.
 
+To check the whole router lab (about 3 minutes; it builds the image, brings the lab up from a fresh lab folder, tests it, and takes it down):
+
+```sh
+# in the VM, from ~/ospfv2
+test/lab/lab_test.sh
+```
+
+It prints `ok` or `FAIL` per check, and on a failure the routers' neighbors and logs. CI runs the same script on every push. `KEEP_LAB=1 test/lab/lab_test.sh` leaves the lab running at the end.
+
 ### On the Mac
 
 Only for the demo and for `ospf-cli`. Any Ruby 3.2 or newer works; with [rv](https://github.com/spinel-coop/rv):
