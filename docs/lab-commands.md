@@ -234,3 +234,109 @@ routescope's end-to-end test, against the running lab and routescope:
 # in the VM
 cd ~/routescope && ROUTESCOPE_URL=http://127.0.0.1:8082 ruby test/e2e/lab_test.rb
 ```
+
+## Troubleshooting
+
+Blocks we used to find out what was wrong. Each one only looks; none changes anything unless it says so. Paste the whole output when asking for help.
+
+### The lab folder
+
+Which folder compose uses, who owns it, and what is in it. Everything should belong to you, and `frr/` should hold `daemons`. A folder owned by root was made by Docker, not by `lab new`; see "Set LAB once" to make it again.
+
+```sh
+# in the VM
+echo "LAB=$LAB"
+ls -la ~/labs $LAB $LAB/frr $LAB/ospfd
+cd $LAB && git status --short && git log --format='%h %an / %cn  %s' -5
+```
+
+### What a container really mounted
+
+The folders a container got, and whether it can write them. Compare with `$LAB`.
+
+```sh
+# in the VM
+docker inspect ospfv2-frr-1 -f '{{range .Mounts}}{{.Source}} -> {{.Destination}} rw={{.RW}}{{println}}{{end}}'
+docker inspect ospfv2-ospfd-1 -f '{{range .Mounts}}{{.Source}} -> {{.Destination}} rw={{.RW}}{{println}}{{end}}'
+docker inspect routescope-routescope-1 -f '{{range .Mounts}}{{.Source}} -> {{.Destination}} rw={{.RW}}{{println}}{{end}}'
+```
+
+### A container that stops or restarts
+
+Its state and its last log lines say why: a missing file, a bad configuration.
+
+```sh
+# in the VM
+cd ~/ospfv2 && docker compose ps -a
+docker compose logs --tail 40 frr
+docker compose logs --tail 40 ospfd
+docker compose logs --tail 40 sim
+```
+
+### Which code runs
+
+The commit each repo is on, and when each container was made. A container older than your last `git pull` runs the old code: rebuild it ("Get the code").
+
+```sh
+# in the VM
+cd ~/ospfv2 && git log --oneline -1 && docker compose ps
+cd ~/routescope && git log --oneline -1 && docker compose ps
+docker images --format '{{.Repository}}:{{.Tag}}  {{.CreatedSince}}' | grep -E 'ospfv2|routescope'
+```
+
+### routescope
+
+What routescope sees, piece by piece. `problems` in the health answer says what keeps a lab from loading.
+
+```sh
+# in the VM
+curl -s --max-time 5 localhost:8082/api/health; echo
+curl -s --max-time 5 localhost:8082/api/labs/ospf-lab/nodes | ruby -rjson -e 'JSON.parse($stdin.read).each { |n| puts [n["name"], n["health"], n["reason"]].compact.join("  ") }'
+curl -s --max-time 10 localhost:8082/api/labs/ospf-lab/config | ruby -rjson -e 'o=JSON.parse($stdin.read); p o["git"]; o["nodes"].each { |n| p n.slice("node","saved","git","error") }'
+curl -s --max-time 5 localhost:8082/api/labs/ospf-lab/audit | ruby -rjson -e 'JSON.parse($stdin.read).last(10).each { |e| puts e.values_at("time","user","action","node").compact.join("  ") }'
+cd ~/routescope && docker compose logs --tail 50
+```
+
+One table of one router, as the inspector gets it (tables: neighbors, interfaces, lsdb, routes):
+
+```sh
+# in the VM
+curl -s --max-time 10 localhost:8082/api/labs/ospf-lab/nodes/frr/tables/neighbors | ruby -rjson -e 'JSON.parse($stdin.read)["rows"].each { |r| p r }'
+```
+
+The tools routescope needs inside its container: git, and setpriv to run git as the lab folder's owner. `command -v` in `sh` only reports its first name, so ask for each.
+
+```sh
+# in the VM
+docker exec routescope-routescope-1 sh -c 'command -v git; command -v setpriv; command -v docker; id'
+```
+
+### Do it without the page
+
+The same actions the page takes, straight through the API. When the page seems to do nothing, these show the server's answer or its error.
+
+```sh
+# in the VM: commit the lab's changed files (this changes your lab's git history)
+curl -s -X POST -H 'X-Routescope: 1' -H 'Content-Type: application/json' \
+  -d '{"message":"frr: test commit from curl"}' localhost:8082/api/labs/ospf-lab/config/commit; echo
+
+# FRR writes its running configuration to its file (write memory)
+curl -s -X POST -H 'X-Routescope: 1' localhost:8082/api/labs/ospf-lab/config/frr/save; echo
+
+# take a simulated link down, then up again (link 1)
+curl -s -X POST -H 'X-Routescope: 1' -H 'Content-Type: application/json' -d '{"link":1}' localhost:8082/api/labs/ospf-lab/nodes/sim/area/link.down; echo
+curl -s -X POST -H 'X-Routescope: 1' -H 'Content-Type: application/json' -d '{"link":1}' localhost:8082/api/labs/ospf-lab/nodes/sim/area/link.up; echo
+```
+
+### Known problems and their fixes
+
+| What you see | Why | Fix |
+| --- | --- | --- |
+| FRR stops at once: `/etc/frr/daemons does not exist` | `LAB` names a folder Docker made, empty and owned by root | Make it again: "Set LAB once" |
+| `lab new`: cannot make the lab folder | `~/labs` belongs to root | `sudo chown $USER: ~/labs` |
+| compose: `bind source path does not exist` | `LAB` names a folder that does not exist | `bin/ospfv2 lab new $LAB` |
+| The page hangs, `curl` to 8082 hangs | routescope cannot load the lab and restarts | `docker compose logs` in `~/routescope`; health says why |
+| The wait for Full never ends | FRR stopped | `docker compose logs --tail 40 frr` |
+| Simulator loops between ExStart and Exchange | ospfd came up before the simulator was Full | `docker compose restart sim` |
+| `git` in the lab folder: permission denied on `frr/frr.conf` | FRR saved it moments ago | Wait 2 seconds; its start script gives it back |
+| Lab commit failed: needs `user.name` | A lab folder made before `lab new` set its identity | `cd $LAB && git config user.name lab && git config user.email lab@configs` |
