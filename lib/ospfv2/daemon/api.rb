@@ -55,6 +55,14 @@ module OSPFv2
           d.show_configuration(candidate: p['candidate'] == true, format: p['format'] == 'set' ? :set : :curly)
         end,
         'config.load' => ->(d, p) { { errors: d.configure(Array(p['lines']).map(&:to_s)) } },
+        # The whole candidate from set lines, like Junos "load override". A
+        # bad text keeps the candidate as it was.
+        'config.replace' => lambda do |d, p|
+          d.load_override(Array(p['lines']).map(&:to_s).join("\n"))
+          { errors: [] }
+        rescue Config::Error => e
+          { errors: [e.message] }
+        end,
         'config.compare' => ->(d, _) { d.compare },
         'config.changed' => ->(d, _) { d.candidate_changed? },
         'config.commit' => ->(d, p) { d.commit(check: p['check'] == true, comment: p['comment']&.to_s) },
