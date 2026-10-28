@@ -181,8 +181,13 @@ module OSPFv2
       dir = argv.shift or raise ArgumentError, 'lab new needs a folder, for example: ospfv2 lab new ~/labs/ospf-lab'
       dir = File.expand_path(dir)
       raise ArgumentError, "#{dir} exists and is not empty" if File.exist?(dir) && !(File.directory?(dir) && Dir.empty?(dir))
-      FileUtils.mkdir_p(dir)
-      FileUtils.cp_r(File.join(LAB_TEMPLATE, '.'), dir)
+      begin
+        CLI.copy_lab(LAB_TEMPLATE, dir)
+      rescue Errno::EACCES, Errno::EPERM => e
+        parent = File.dirname(dir)
+        hint = File.exist?(parent) && !File.writable?(parent) ? " (#{parent} is not writable: sudo chown $USER: #{parent})" : ''
+        raise ArgumentError, "cannot make the lab folder: #{e.message}#{hint}"
+      end
       @out.puts "lab created in #{dir}"
       @out.puts(lab_git_init(dir)) if git
       @out.puts <<~TXT
@@ -192,6 +197,25 @@ module OSPFv2
           docker compose --profile frr up -d sim frr
       TXT
       0
+    end
+
+    # Copies a lab folder, leaving out what its .gitignore lists: files a
+    # router wrote there when the template itself was in use (no LAB set).
+    # Those can belong to root and are no part of a new lab.
+    def self.copy_lab(src, dst)
+      ignore = File.readlines(File.join(src, '.gitignore'), chomp: true).map(&:strip).reject { |l| l.empty? || l.start_with?('#') }
+      FileUtils.mkdir_p(dst)
+      Dir.glob('**/*', File::FNM_DOTMATCH, base: src).sort.each do |rel|
+        next if File.basename(rel) == '.' || ignore.any? { |pat| File.fnmatch?(pat, File.basename(rel), File::FNM_DOTMATCH) }
+        from = File.join(src, rel)
+        to = File.join(dst, rel)
+        if File.directory?(from)
+          FileUtils.mkdir_p(to)
+        else
+          FileUtils.cp(from, to)
+          File.chmod(File.stat(from).mode & 0o777, to)
+        end
+      end
     end
 
     def lab_git_init(dir)

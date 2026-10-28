@@ -107,6 +107,23 @@ class TestCLI < Test::Unit::TestCase
     end
   end
 
+  def test_lab_new_leaves_out_what_the_routers_wrote_in_the_template
+    Dir.mktmpdir do |d|
+      src = File.join(d, 'template')
+      FileUtils.mkdir_p(File.join(src, 'frr'))
+      File.write(File.join(src, '.gitignore'), "# routers' files\n*.sav\n*.rollback.*\n")
+      File.write(File.join(src, 'lab.yml'), 'nodes: {}')
+      File.write(File.join(src, 'frr/frr.conf'), 'hostname frr')
+      File.write(File.join(src, 'frr/frr.conf.sav'), 'old')
+      File.write(File.join(src, 'frr/x.conf.rollback.1'), 'old')
+      File.write(File.join(src, 'frr/unreadable.sav'), 'root only')
+      File.chmod(0o000, File.join(src, 'frr/unreadable.sav'))
+      dst = File.join(d, 'lab')
+      OSPFv2::CLI.copy_lab(src, dst)
+      assert_equal %w[.gitignore frr frr/frr.conf lab.yml], Dir.glob('**/*', File::FNM_DOTMATCH, base: dst).reject { |f| File.basename(f) == '.' }.sort
+    end
+  end
+
   def test_lab_new_makes_a_git_repository
     omit('git not installed') unless system('git', '--version', out: File::NULL, err: File::NULL)
     Dir.mktmpdir do |d|
@@ -127,6 +144,18 @@ class TestCLI < Test::Unit::TestCase
       assert_equal ['keep.txt'], Dir.children(d)
     end
     assert_equal 0, Dir.mktmpdir { |d| run_cli('lab', 'new', d, '--no-git')[0] }
+  end
+
+  def test_lab_new_says_why_it_cannot_make_the_folder
+    omit('root writes anywhere') if Process.uid.zero?
+    Dir.mktmpdir do |d|
+      File.chmod(0o555, d)
+      rc, _, err = run_cli('lab', 'new', File.join(d, 'lab'))
+      assert_equal 2, rc
+      assert_match(/cannot make the lab folder.*not writable: sudo chown/, err)
+    ensure
+      File.chmod(0o755, d)
+    end
   end
 
   def test_lab_needs_a_subcommand_and_a_folder

@@ -51,11 +51,25 @@ grep -q 'export LAB=' ~/.bashrc || echo 'export LAB=~/labs/ospf-lab' >> ~/.bashr
 source ~/.bashrc; echo "$LAB"
 ```
 
-No lab folder yet? Make one, once:
+Make the lab folder before anything uses `LAB`. If compose runs first, Docker creates the folder itself: empty, owned by root, and FRR stops with `/etc/frr/daemons does not exist`. Once:
 
 ```sh
 # in the VM
-cd ~/ospfv2 && bin/ospfv2 lab new ~/labs/ospf-lab
+cd ~/ospfv2
+mkdir -p ~/labs && sudo chown $USER: ~/labs
+[ -f ~/labs/ospf-lab/lab.yml ] && echo "lab folder ok" || bin/ospfv2 lab new ~/labs/ospf-lab
+```
+
+To make it again from the template (the old one is kept aside, nothing is deleted):
+
+```sh
+# in the VM
+cd ~/ospfv2
+docker compose --profile frr --profile ospfd down
+cd ~/routescope && docker compose down && cd ~/ospfv2
+sudo chown $USER: ~/labs
+sudo mv ~/labs/ospf-lab ~/labs/ospf-lab.old-$(date +%Y%m%d%H%M)
+bin/ospfv2 lab new ~/labs/ospf-lab
 ```
 
 ## Get the code: a branch, or the latest
@@ -78,10 +92,10 @@ docker compose build
 cd ~/ospfv2
 docker compose --profile frr --profile ospfd down
 docker compose --profile frr up -d sim frr
-timeout 90 sh -c "until docker compose exec -T frr vtysh -c 'show ip ospf neighbor' 2>/dev/null | grep -q '1\.1\.1\.1.*Full'; do sleep 2; done" && echo sim Full || docker compose logs --tail 40 frr
+full=; for i in $(seq 45); do docker compose exec -T frr vtysh -c 'show ip ospf neighbor' </dev/null 2>/dev/null | grep -q '1\.1\.1\.1.*Full' && full=1 && break; sleep 2; done; [ "$full" ] && echo sim Full || docker compose logs --tail 40 frr
 docker compose up -d ospfd
 cd ~/routescope && docker compose up -d --force-recreate
-sleep 3; curl -s localhost:8082/api/health; echo
+sleep 3; curl -s --max-time 5 localhost:8082/api/health; echo
 cd ~/ospfv2 && git log --oneline -1 && cd ~/routescope && git log --oneline -1
 ```
 
@@ -109,13 +123,13 @@ The lab containers do not restart by themselves. routescope does: Docker starts 
 # in the VM
 cd ~/ospfv2
 docker compose --profile frr up -d sim frr
-timeout 90 sh -c "until docker compose exec -T frr vtysh -c 'show ip ospf neighbor' 2>/dev/null | grep -q '1\.1\.1\.1.*Full'; do sleep 2; done" && echo sim Full || docker compose logs --tail 40 frr
+full=; for i in $(seq 45); do docker compose exec -T frr vtysh -c 'show ip ospf neighbor' </dev/null 2>/dev/null | grep -q '1\.1\.1\.1.*Full' && full=1 && break; sleep 2; done; [ "$full" ] && echo sim Full || docker compose logs --tail 40 frr
 docker compose up -d ospfd
 cd ~/routescope && docker compose up -d
-curl -s localhost:8082/api/health; echo
+curl -s --max-time 5 localhost:8082/api/health; echo
 ```
 
-The wait gives up after 90 seconds and shows FRR's last log lines. Then open http://localhost:8082 on the Mac.
+The wait gives up after about 90 seconds and shows FRR's last log lines. Then open http://localhost:8082 on the Mac.
 
 ## Restart
 
@@ -126,7 +140,7 @@ Everything, lab and routescope:
 cd ~/ospfv2
 docker compose --profile frr --profile ospfd down
 docker compose --profile frr up -d sim frr
-timeout 90 sh -c "until docker compose exec -T frr vtysh -c 'show ip ospf neighbor' 2>/dev/null | grep -q '1\.1\.1\.1.*Full'; do sleep 2; done" && echo sim Full || docker compose logs --tail 40 frr
+full=; for i in $(seq 45); do docker compose exec -T frr vtysh -c 'show ip ospf neighbor' </dev/null 2>/dev/null | grep -q '1\.1\.1\.1.*Full' && full=1 && break; sleep 2; done; [ "$full" ] && echo sim Full || docker compose logs --tail 40 frr
 docker compose up -d ospfd
 cd ~/routescope && docker compose restart
 ```
@@ -172,8 +186,8 @@ routescope's view of the lab:
 
 ```sh
 # in the VM
-curl -s localhost:8082/api/health; echo
-curl -s localhost:8082/api/labs/ospf-lab/nodes | ruby -rjson -e 'JSON.parse($stdin.read).each { |n| puts [n["name"], n["health"], n["reason"]].compact.join("  ") }'
+curl -s --max-time 5 localhost:8082/api/health; echo
+curl -s --max-time 5 localhost:8082/api/labs/ospf-lab/nodes | ruby -rjson -e 'JSON.parse($stdin.read).each { |n| puts [n["name"], n["health"], n["reason"]].compact.join("  ") }'
 cd ~/routescope && docker compose logs --tail 50
 ```
 
