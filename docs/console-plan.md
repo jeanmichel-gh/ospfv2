@@ -1,6 +1,6 @@
-# Lab console plan
+# routescope: lab console plan
 
-A web console for the ospfd router lab: one window to see, drive, debug and record every device in the lab. It goes well past the demo dashboard, which shows one simulator and polls it.
+routescope is a web console for the ospfd router lab: one window to see, drive, debug and record every device in the lab. It goes well past the demo dashboard, which shows one simulator and polls it.
 
 Status: plan agreed in outline, phase 0 (UX mockups) in progress. Each pane, its inputs and decisions: `console-panes.md`.
 
@@ -22,7 +22,7 @@ Status: plan agreed in outline, phase 0 (UX mockups) in progress. Each pane, its
 | 4 | Works with ospfd running natively in the VM or in its container | Agreed |
 | 5 | Our own small lab file first. Containerlab import later; nothing in the design may block it | Agreed |
 | 6 | Single user on localhost, but auth built in from day one and switched off, so login is easy to add | Agreed |
-| 7 | Separate private repo `jeanmichel-gh/console`, its own license, cloned side by side with ospfv2; ospfv2 gets the APIs it needs as normal features | Agreed |
+| 7 | Separate private repo `jeanmichel-gh/routescope`, its own license, cloned side by side with ospfv2; ospfv2 gets the APIs it needs as normal features | Agreed |
 | 8 | A lab is a folder: `lab.yml` plus one config file per node, mounted read-write, kept in git | Agreed |
 | 9 | SPF observability lives in ospfd; ospf-cli and the console both read it | Agreed |
 
@@ -34,7 +34,7 @@ ospfv2 stays standard library only. The console has its own gems and Node packag
 - **Additive changes only.** New methods and fields are fine; renames and removals go through a deprecation. ospfv2 can always merge first without breaking the console.
 - **Discovery.** ospfd answers `api.info` with its version and methods. The console checks it at connect and greys out what an older ospfd lacks, with a message naming the version needed.
 - **Shared fixtures.** ospfv2's tests record sample responses of each API method in `test/fixtures/api/`. The console's tests use the same files.
-- **Side by side clones** on the Mac and in the VM: `~/src/ospfv2` and `~/src/console`.
+- **Side by side clones** on the Mac and in the VM: `~/src/ospfv2` and `~/src/routescope`.
 - **Pinned, with a local override.** The console pins ospfv2 to a tag in its Gemfile and compose file. For local work, `bundle config local.ospfv2 ~/src/ospfv2` and a compose build context of `../ospfv2` use the sibling checkout directly.
 - **A feature that spans both** is two linked PRs: ospfv2 first, merged and tagged, then the console bumps its pin.
 
@@ -57,7 +57,7 @@ ospfv2 stays standard library only. The console has its own gems and Node packag
 ## Architecture
 
 ```
-Mac browser ── QEMU forward 127.0.0.1:8082 ──► console container (VM)
+Mac browser ── QEMU forward 127.0.0.1:8082 ──► routescope container (VM)
                                                  │ Falcon: static UI + websocket API
                                                  │ auth gate ─► lab service ─► drivers
                                                  ├─ Docker socket: exec, logs, lifecycle
@@ -119,6 +119,6 @@ Each phase ends usable on its own.
 
 ## Open questions
 
-- Repo name and license for the console.
+- License for routescope. None while the repo is private.
 - Scenario script format: Ruby DSL or YAML.
 - How long recordings are kept, and where.

@@ -1,6 +1,6 @@
-# Lab console panes
+# routescope: lab console panes
 
-What each pane of the lab console shows, where its data comes from, what you can do in it, and what we decided. It goes with `console-plan.md`, which holds the architecture and phases.
+What each pane of routescope, the lab console, shows, where its data comes from, what you can do in it, and what we decided. It goes with `console-plan.md`, which holds the architecture and phases.
 
 The mockups are on the "Lab console mockups" canvas. Screen numbers below refer to it.
 
