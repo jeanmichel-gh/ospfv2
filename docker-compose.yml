@@ -42,6 +42,7 @@ services:
     command: ["run", "/work/lab.yml", "--web", "0.0.0.0:8080", "--log", "-"]
 
   sim:
+    hostname: sim
     <<: *ospfv2
     profiles: [lab, frr]
     networks:
@@ -53,6 +54,7 @@ services:
     command: ["run", "/lab/sim.yml", "--web", "0.0.0.0:8080", "--log", "/tmp/ospfv2.log"]
 
   peer:
+    hostname: peer
     <<: *ospfv2
     profiles: [lab]
     networks:
@@ -64,6 +66,7 @@ services:
     command: ["run", "/lab/peer.yml", "--web", "0.0.0.0:8080", "--log", "/tmp/ospfv2.log"]
 
   frr:
+    hostname: frr
     profiles: [frr]
     image: quay.io/frrouting/frr:10.2.1
     cap_add: [NET_ADMIN, NET_RAW, SYS_ADMIN]
@@ -78,6 +81,7 @@ services:
     entrypoint: ["/sbin/tini", "--", "sh", "/lab-tools/frr-start.sh"]
 
   ospfd:
+    hostname: ospfd
     <<: *ospfv2
     profiles: [ospfd]
     # Docker's default capabilities, as with docker run: commit rewrites the
