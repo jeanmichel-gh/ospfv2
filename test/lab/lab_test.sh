@@ -29,12 +29,35 @@ STEP=''
 export GIT_AUTHOR_NAME="${GIT_AUTHOR_NAME:-lab test}" GIT_AUTHOR_EMAIL="${GIT_AUTHOR_EMAIL:-lab-test@localhost}"
 export GIT_COMMITTER_NAME="${GIT_COMMITTER_NAME:-lab test}" GIT_COMMITTER_EMAIL="${GIT_COMMITTER_EMAIL:-lab-test@localhost}"
 
+PASSED=0
+RESULTS=()
 step() { STEP="$*"; echo; echo "=== $*"; }
-ok() { echo "  ok   $*"; }
+ok() {
+  echo "  ok   $*"
+  PASSED=$((PASSED + 1))
+  RESULTS+=("| ${STEP} | $* | ok |")
+}
 fail() {
   echo "  FAIL $*"
+  RESULTS+=("| ${STEP} | $* | **FAIL** |")
   FAILED=1
   exit 1
+}
+
+# In GitHub Actions: an annotation with the outcome, and the checks as a
+# table in the job summary.
+report() {
+  [ -n "${GITHUB_ACTIONS:-}" ] || return 0
+  if ((FAILED)); then
+    echo "::error title=Router lab::failed at ${STEP} after ${PASSED} passed checks"
+  else
+    echo "::notice title=Router lab::${PASSED} checks passed"
+  fi
+  if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+    { echo "### Router lab: ${PASSED} passed$( ((FAILED)) && echo ', 1 failed')"
+      echo; echo "| Step | Check | Result |"; echo "| --- | --- | --- |"
+      printf '%s\n' "${RESULTS[@]}"; } >>"$GITHUB_STEP_SUMMARY"
+  fi
 }
 check() { # check "what" command...
   local what="$1"; shift
@@ -74,7 +97,9 @@ spf_changed_routes() { grep -E 'SPF [0-9.]+ ms, [0-9]+ routes, \+[0-9]+ ~[0-9]+ 
 
 cleanup() {
   local rc=$?
-  if ((rc != 0 || FAILED)); then
+  ((rc == 0)) || FAILED=1
+  report
+  if ((FAILED)); then
     echo
     echo "=== failed at: ${STEP}"
     echo "--- ospf-cli: show ospf neighbor"; cli 'show ospf neighbor' 2>&1 || true
