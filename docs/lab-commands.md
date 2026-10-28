@@ -219,6 +219,24 @@ The lab folder's commits are signed `lab <lab@configs>`, set in that repository 
 cd $LAB && git config user.name lab && git config user.email lab@configs
 ```
 
+## Recordings
+
+routescope's Record button keeps events, logs, packets and before and after snapshots in `$LAB/recordings/`. Git ignores that folder. The first recording adds it to `$LAB/.gitignore`; commit that change once.
+
+```sh
+# in the VM
+ls -lt $LAB/recordings
+cat $LAB/recordings/*/meta.json | head -40
+du -sh $LAB/recordings
+```
+
+Delete a recording from the Recordings panel, or by hand:
+
+```sh
+# in the VM
+rm -rf $LAB/recordings/RECORDING_ID
+```
+
 ## Run the tests in the VM
 
 The ospfv2 lab test makes its own lab folder and brings up its own lab, so it replaces the lab you are running. Start yours again afterwards.
