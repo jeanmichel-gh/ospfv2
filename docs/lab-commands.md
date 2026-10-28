@@ -92,7 +92,7 @@ docker compose build
 cd ~/ospfv2
 docker compose --profile frr --profile ospfd down
 docker compose --profile frr up -d sim frr
-timeout 90 sh -c "until docker compose exec -T frr vtysh -c 'show ip ospf neighbor' 2>/dev/null | grep -q '1\.1\.1\.1.*Full'; do sleep 2; done" && echo sim Full || docker compose logs --tail 40 frr
+full=; for i in $(seq 45); do docker compose exec -T frr vtysh -c 'show ip ospf neighbor' </dev/null 2>/dev/null | grep -q '1\.1\.1\.1.*Full' && full=1 && break; sleep 2; done; [ "$full" ] && echo sim Full || docker compose logs --tail 40 frr
 docker compose up -d ospfd
 cd ~/routescope && docker compose up -d --force-recreate
 sleep 3; curl -s --max-time 5 localhost:8082/api/health; echo
@@ -123,13 +123,13 @@ The lab containers do not restart by themselves. routescope does: Docker starts 
 # in the VM
 cd ~/ospfv2
 docker compose --profile frr up -d sim frr
-timeout 90 sh -c "until docker compose exec -T frr vtysh -c 'show ip ospf neighbor' 2>/dev/null | grep -q '1\.1\.1\.1.*Full'; do sleep 2; done" && echo sim Full || docker compose logs --tail 40 frr
+full=; for i in $(seq 45); do docker compose exec -T frr vtysh -c 'show ip ospf neighbor' </dev/null 2>/dev/null | grep -q '1\.1\.1\.1.*Full' && full=1 && break; sleep 2; done; [ "$full" ] && echo sim Full || docker compose logs --tail 40 frr
 docker compose up -d ospfd
 cd ~/routescope && docker compose up -d
 curl -s --max-time 5 localhost:8082/api/health; echo
 ```
 
-The wait gives up after 90 seconds and shows FRR's last log lines. Then open http://localhost:8082 on the Mac.
+The wait gives up after about 90 seconds and shows FRR's last log lines. Then open http://localhost:8082 on the Mac.
 
 ## Restart
 
@@ -140,7 +140,7 @@ Everything, lab and routescope:
 cd ~/ospfv2
 docker compose --profile frr --profile ospfd down
 docker compose --profile frr up -d sim frr
-timeout 90 sh -c "until docker compose exec -T frr vtysh -c 'show ip ospf neighbor' 2>/dev/null | grep -q '1\.1\.1\.1.*Full'; do sleep 2; done" && echo sim Full || docker compose logs --tail 40 frr
+full=; for i in $(seq 45); do docker compose exec -T frr vtysh -c 'show ip ospf neighbor' </dev/null 2>/dev/null | grep -q '1\.1\.1\.1.*Full' && full=1 && break; sleep 2; done; [ "$full" ] && echo sim Full || docker compose logs --tail 40 frr
 docker compose up -d ospfd
 cd ~/routescope && docker compose restart
 ```
