@@ -160,6 +160,40 @@ class TestCLI < Test::Unit::TestCase
     end
   end
 
+  # A pcap file with two OSPF frames and one ARP frame, dissected one JSON
+  # line each.
+  def test_capture_reads_a_pcap_file
+    require 'ospfv2/core/wire'
+    w = OSPFv2::Core::Wire
+    hello = w.encode(w::Hello.new(netmask: 0xffffff00, hello_interval: 2, options: 2, priority: 1, dead_interval: 8,
+                                  dr: 0, bdr: 0, neighbors: []), router_id: 0x02020202, area_id: 0)
+    ip = [0x45, 0, 20 + hello.bytesize, 0, 0, 1, 89, 0, 0x0a630014, 0xe0000005].pack('CCnnnCCnNN')
+    s = ip.unpack('n*').sum
+    s = (s & 0xffff) + (s >> 16) while s > 0xffff
+    ip[10, 2] = [~s & 0xffff].pack('n')
+    eth = ['01005e000005', '0242ac110002'].pack('H12H12') + [0x0800].pack('n')
+    frames = [eth + ip + hello, ['ffffffffffff0242ac1100020806'].pack('H*') + ("\0" * 46), eth + ip + hello]
+    Dir.mktmpdir do |d|
+      path = File.join(d, 'cap.pcap')
+      File.open(path, 'wb') do |f|
+        f.write([0xa1b2c3d4, 2, 4, 0, 0, 65_535, 1].pack('VvvVVVV'))
+        frames.each_with_index { |fr, i| f.write([1_793_200_000 + i, 250_000, fr.bytesize, fr.bytesize].pack('VVVV') + fr) }
+      end
+      rc, out, = run_cli('capture', '-r', path, '-c', '2')
+      assert_equal 0, rc
+      lines = out.lines.map { JSON.parse(_1) }
+      assert_equal({ 'interface' => nil, 'file' => path, 'link' => 'ethernet', 'filter' => 'ip proto 89' }, lines[0]['capture'])
+      p1, p2 = lines[1]['packet'], lines[2]['packet']
+      assert_equal [1, 'Hello 10.99.0.20 > 224.0.0.5, DR 0.0.0.0, 0 neighbors', []], p1.values_at('seq', 'summary', 'errors')
+      assert_equal '2026-10-28T15:06:40.250000Z', p1['time']
+      assert_equal 'not OSPF', p2['summary']
+      assert_equal 3, lines.size, '-c 2 stops after two packets'
+      File.write(path, 'junk' * 6)
+      rc, out, = run_cli('capture', '-r', path)
+      assert_equal [1, 'not a pcap stream'], [rc, JSON.parse(out)['error'][0, 17]]
+    end
+  end
+
   def test_lab_needs_a_subcommand_and_a_folder
     assert_match(/lab new DIR/, run_cli('lab')[2])
     assert_match(/lab new needs a folder/, run_cli('lab', 'new')[2])

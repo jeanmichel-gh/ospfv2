@@ -19,7 +19,7 @@ module OSPFv2
   #   ospfv2 lab new DIR [--no-git]
   #   ospfv2 -i 192.168.1.10/24 -g 3x3 ...       original flags, still work
   class CLI
-    COMMANDS = %w[run demo show export check init lab version help].freeze
+    COMMANDS = %w[run demo show export check init lab capture version help].freeze
 
     def self.start(argv = ARGV, out: $stdout, err: $stderr)
       new(out: out, err: err).run(argv.dup)
@@ -46,6 +46,7 @@ module OSPFv2
       when 'check'   then cmd_check(argv)
       when 'init'    then cmd_init(argv)
       when 'lab'     then cmd_lab(argv)
+      when 'capture' then cmd_capture(argv)
       when 'version', '-v', '--version' then @out.puts("ospfv2 #{VERSION}") || 0
       when 'help', '-h', '--help' then @out.puts(usage) || 0
       else
@@ -72,6 +73,7 @@ module OSPFv2
           ospfv2 check TOPOLOGY.yml            validate and summarize
           ospfv2 init [--grid CxR]             print a starter topology
           ospfv2 lab new DIR [--no-git]        copy the router lab template to DIR
+          ospfv2 capture [-i IFACE] [-r FILE]  OSPF packets dissected, one JSON line each
           ospfv2 -i ADDR/LEN -g CxR ...        original command line (ospfv2 -h for flags)
 
         Run options:
@@ -231,6 +233,62 @@ module OSPFv2
       else
         'git: repository created; the first commit failed (set git user.name and user.email, then commit)'
       end
+    end
+
+    # Captures OSPF packets (tcpdump on an interface, or a pcap file or
+    # stream) and prints each one dissected, one JSON line per message:
+    #
+    #   {"capture": {"interface":, "link":, "filter":}}   first
+    #   {"packet": {"seq":, "time":, "length":, "hex":, "summary":, "fields":, "errors":}}
+    #   {"error": "..."}                                    and the exit status is 1
+    #
+    # A console runs it next to a router: docker run --network container:NAME.
+    def cmd_capture(argv)
+      require 'json'
+      require 'time'
+      require_relative 'pcap'
+      require_relative 'dissect'
+      opts = { interface: 'eth0', filter: 'ip proto 89', count: nil, file: nil }
+      OptionParser.new do |o|
+        o.on('-i', '--interface IFACE') { |v| opts[:interface] = v }
+        o.on('-r', '--read FILE', 'a pcap file, - for stdin') { |v| opts[:file] = v }
+        o.on('-f', '--filter EXPR') { |v| opts[:filter] = v }
+        o.on('-c', '--count N', Integer) { |v| opts[:count] = v }
+      end.parse!(argv)
+      $stdout.sync = true
+      io, pid = capture_source(opts)
+      reader = Pcap::Reader.new(io)
+      link = Dissect::LINKS.fetch(reader.link) { raise ArgumentError, "link type #{reader.link} is not supported" }
+      @out.puts JSON.generate(capture: { interface: opts[:file] ? nil : opts[:interface], file: opts[:file], link: link, filter: opts[:filter] })
+      seq = 0
+      reader.each do |rec|
+        seq += 1
+        d = Dissect.frame(rec.data, link: link).to_h
+        @out.puts JSON.generate(packet: { seq: seq, time: rec.time.utc.iso8601(6), length: rec.length,
+                                          hex: rec.data.unpack1('H*') }.merge(d))
+        break if opts[:count] && seq >= opts[:count]
+      end
+      0
+    rescue Pcap::Error, ArgumentError, SystemCallError => e
+      @out.puts JSON.generate(error: e.message)
+      1
+    ensure
+      if pid
+        Process.kill('TERM', pid) rescue nil
+        Process.wait(pid) rescue nil
+      end
+    end
+
+    def capture_source(opts)
+      return [$stdin.binmode, nil] if opts[:file] == '-'
+      return [File.open(opts[:file], 'rb'), nil] if opts[:file]
+      r, w = IO.pipe
+      pid = Process.spawn('tcpdump', '-U', '-n', '-s', '0', '-w', '-', '-i', opts[:interface], *opts[:filter].split,
+                          out: w, err: File::NULL)
+      w.close
+      [r, pid]
+    rescue Errno::ENOENT
+      raise ArgumentError, 'tcpdump is not installed here'
     end
 
     def cmd_init(argv)

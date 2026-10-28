@@ -392,6 +392,16 @@ docker run --rm --network host --cap-add NET_RAW \
   -v $PWD/lab.yml:/work/lab.yml ospfv2 run lab.yml --web 0.0.0.0:8080
 ```
 
+### Capturing and dissecting packets
+
+`ospfv2 capture` runs tcpdump on an interface (or reads a pcap file with `-r FILE`, `-r -` for
+stdin) and prints each OSPF packet dissected, one JSON line per packet: every field with its
+byte offset, length and bit mask, every byte in a field, checksums verified. A console uses it
+to decode packets at the byte level. Next to a router of the lab:
+
+    docker run --rm --network container:ospfv2-frr-1 --cap-add NET_RAW --cap-add NET_ADMIN \
+      ospfv2 capture -c 5
+
 `docker-compose.yml` has these setups:
 
 * `docker compose up ospfv2` runs `./lab.yml` on the host network against a real router.
