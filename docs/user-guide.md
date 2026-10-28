@@ -542,6 +542,7 @@ Every show command has a Junos form, printed Junos style, and an IOS form, print
 | `show ospf events` | `show ip ospf events` | Recent protocol events: state changes, dropped packets |
 | `monitor ospf events [KIND]` | `monitor ip ospf events` | Events as they happen, until Ctrl-C. KIND is one of `neighbor`, `interface`, `dr`, `drop`, `spf`, `routes`, `lsa`, `commit` and a few more; `?` lists them |
 | `show ospf statistics` | `show ip ospf traffic` | Packet counters per interface |
+| `show ospf timers` | `show ip ospf timers` | Every timer: what it belongs to, when it fires |
 | `show configuration` | | The running configuration |
 | `clear ospf neighbor [ROUTER-ID]` | `clear ip ospf process` | Bring adjacencies down and up again |
 

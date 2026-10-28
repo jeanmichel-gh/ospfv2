@@ -64,6 +64,9 @@ module OSPFv2
         self
       end
 
+      # Its timers by name, for show timers.
+      def timers = { spf: @spf, spf_learn: @learn, spf_holddown: @holddown }
+
       # Seconds until the next run, or nil if none is due.
       def next_run_in = @spf.remaining
 

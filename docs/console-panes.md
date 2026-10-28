@@ -26,7 +26,7 @@ Status: phase 0. Decisions are agreed unless marked open.
 
 | Source | What it gives |
 | --- | --- |
-| ospfd API (JSON over Unix socket) | `show.overview`, `show.neighbors`, `show.interfaces`, `show.database`, `show.routes`, `show.fib`, `show.spf`, `show.log`, `show.statistics`, `show.configuration`, `config.load`, `config.replace`, `config.compare`, `config.commit`, `config.rollback`, `config.history`, `clear.neighbors` |
+| ospfd API (JSON over Unix socket) | `show.overview`, `show.neighbors`, `show.interfaces`, `show.database`, `show.routes`, `show.fib`, `show.spf`, `show.log`, `show.statistics`, `show.timers`, `show.configuration`, `config.load`, `config.replace`, `config.compare`, `config.commit`, `config.rollback`, `config.history`, `clear.neighbors` |
 | Simulator HTTP API | `GET /api/state`, `/api/lsdb`, `/api/lsdb.txt`, `/api/lsa`, `/api/events`, `/api/topology`; `POST /api/refresh` (all), `/api/flush` (all), `/api/aging`, `/api/neighbor/start` and `stop`, `/api/links/:id/up`, `down`, `toggle`, `flap` |
 | FRR | `vtysh -c "... json"` through `docker exec`; debug logs |
 | Docker | exec, logs, start, stop, inspect |

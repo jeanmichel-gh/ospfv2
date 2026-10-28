@@ -32,6 +32,7 @@ module OSPFv2
           style == :ios ? ios_routes(data) : junos_routes(data, detail)
         when :fib then style == :ios ? ios_fib(data) : junos_fib(data)
         when :spf then style == :ios ? ios_spf(data, router_id) : junos_spf(data)
+        when :timers then timers(data)
         else data.to_s
         end
       end
@@ -458,6 +459,32 @@ module OSPFv2
           out << "  Dropped: #{drops.map { |k, v| "#{k.delete_prefix('drop_')} #{v}" }.join(', ')}" unless drops.empty?
         end
         out.join("\n")
+      end
+
+      # ---- timers ----
+
+      def timers(data)
+        widths = [16, 34, -9, -12, -6]
+        out = [row(%w[Timer Owner Due Interval Fired], widths)]
+        data['timers'].each do |t|
+          due = t['armed'] ? format('%.3fs', t['due_in']) : 'idle'
+          interval = t['interval'] ? "#{t['periodic'] ? 'every ' : ''}#{t['interval']}s" : ''
+          out << row([t['name'], timer_owner(t['owner']), due, interval, t['fired']], widths)
+        end
+        unless data['near_maxage'].to_a.empty?
+          out << '' << 'LSAs near MaxAge'
+          data['near_maxage'].each { |l| out << "  type #{l['type']} #{l['ls_id']} #{l['advr']} age #{l['age']}, MaxAge in #{l['max_age_in']}s" }
+        end
+        out.join("\n")
+      end
+
+      def timer_owner(o)
+        case o['kind']
+        when 'interface' then "interface #{o['interface']}"
+        when 'neighbor' then "neighbor #{o['router_id']} on #{o['interface']}"
+        when 'lsa' then "LSA #{o['type']} #{o['ls_id']} #{o['advr']}"
+        else o['kind'].to_s
+        end
       end
 
       # ---- helpers ----

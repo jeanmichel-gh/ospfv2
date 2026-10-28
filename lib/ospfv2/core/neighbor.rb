@@ -241,6 +241,9 @@ module OSPFv2
         }
       end
 
+      # Its timers by name, for show timers.
+      def timers = { inactivity: @inactivity, dd_rxmt: @dd_timer, lsr_rxmt: @lsr_timer, lsu_rxmt: @rxmt_timer }.compact
+
       private
 
       def change(new_state, event)
