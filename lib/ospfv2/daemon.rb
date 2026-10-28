@@ -306,7 +306,7 @@ module OSPFv2
         else
           log(:info, "area #{Core::Addr.to_s(id)}: options changed")
           @instance.areas[id]&.schedule_origination
-          @instance.spf.trigger(:area, Core::Addr.to_s(id))
+          @instance.spf.trigger(:area, Core::Addr.to_s(id), source: { source: 'config' })
         end
       end
     end

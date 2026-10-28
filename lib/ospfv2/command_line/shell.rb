@@ -160,7 +160,7 @@ module OSPFv2
           return "#{n} neighbor#{n == 1 ? '' : 's'} cleared"
         end
         return monitor(a[:kinds], pipes) if a[:monitor]
-        run_view(a, pipes)
+        run_view(a, pipes, m.args)
       end
 
       # Prints events until Ctrl-C (or, for tests, +stop_after+ events).
@@ -188,14 +188,15 @@ module OSPFv2
         ''
       end
 
-      def run_view(a, pipes)
+      def run_view(a, pipes, args = [])
         if a[:view] == :configuration
           set = pipes.any? { |p| p == %w[display set] }
           text = @client.call('show.configuration', format: set ? 'set' : 'curly')
           return pipe(text, pipes.reject { |p| p == %w[display set] }, nil)
         end
-        method = "show.#{a[:view]}"
+        method = "show.#{a[:view] == :spf_run ? :spf : a[:view]}"
         params = a[:view] == :database ? { detail: a[:detail] || a[:style] == :ios } : {}
+        params = { run: args.first.to_i } if a[:view] == :spf_run
         data = @client.call(method, params)
         router_id = needs_router_id?(a) ? @client.call('show.overview')['router_id'] : nil
         text = Format.render(a[:view], a[:style], data, detail: a[:detail], type: a[:type], router_id: router_id)

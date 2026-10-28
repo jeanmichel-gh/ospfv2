@@ -143,7 +143,11 @@ module OSPFv2
               cmd 'detail', 'With area, origin and tag', action: { view: :routes, style: :junos, detail: true }
             end
             cmd 'overview', 'Router id, areas, counts', action: { view: :overview, style: :junos }
-            cmd 'log', 'SPF runs: when, why, how long', action: { view: :spf, style: :junos }
+            cmd 'log', 'SPF runs: when, why, how long', action: { view: :spf, style: :junos } do
+              cmd 'run', 'One SPF run: its triggers, timing and route changes' do
+                arg NUMBER, 'Run number, from show ospf log', action: { view: :spf_run, style: :junos }
+              end
+            end
             cmd 'events', 'Recent protocol events', action: { view: :log, style: :junos }
             cmd 'statistics', 'Packet counters per interface', action: { view: :statistics, style: :junos }
             cmd 'timers', 'Every timer: what it belongs to, when it fires', action: { view: :timers, style: :junos }

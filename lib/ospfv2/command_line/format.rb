@@ -32,6 +32,7 @@ module OSPFv2
           style == :ios ? ios_routes(data) : junos_routes(data, detail)
         when :fib then style == :ios ? ios_fib(data) : junos_fib(data)
         when :spf then style == :ios ? ios_spf(data, router_id) : junos_spf(data)
+        when :spf_run then spf_run(data)
         when :timers then timers(data)
         else data.to_s
         end
@@ -163,6 +164,7 @@ module OSPFv2
                           r['self'] ? '*' : ' ', r['ls_id'], r['advr'], r['seq'], r['age'], r['options'],
                           r['checksum'], r['length'])
             out.concat(junos_detail(r)) if detail
+            out << "  triggered SPF run #{r['spf_run']}" if detail && r['spf_run']
           end
         end
         out.join("\n")
@@ -278,6 +280,7 @@ module OSPFv2
           d << "type 2 metric #{r['type2_cost']}, internal #{r['cost']}" if r['path_type'] == 'ext2'
           d << "fwd addr #{r['forwarding']}" if r['forwarding']
           d << "tag #{r['tag']}" if r['tag'].to_i.positive?
+          d << "set by SPF run #{r['spf_run']} (show ospf log run #{r['spf_run']})" if r['spf_run']
           out << "  #{d.join(', ')}"
         end
         out.join("\n")
@@ -414,11 +417,42 @@ module OSPFv2
                "next run: #{s['next_run_in'] ? "in #{(s['next_run_in'] * 1000).round} ms" : 'none'}",
                "Back-off (RFC 8405): initial #{st['initial']} ms, short #{st['short']} ms, long #{st['long']} ms, " \
                "learn #{st['learn']} ms, holddown #{st['holddown']} ms", '',
-               format('%-20s %-10s %6s  %-11s %s', 'When', 'Elapsed', 'Routes', 'Changes', 'Trigger')]
+               format('%5s %-23s %8s %9s %8s %6s  %-11s %s', 'Run', 'When', 'Wait ms', 'SPF ms', 'FIB ms', 'Routes', 'Changes', 'Trigger')]
         s['log'].each do |x|
-          out << format('%-20s %-10.6f %6d  %-11s %s', x['time'].sub('T', ' ').sub('Z', ''), x['duration_ms'] / 1000.0,
-                        x['routes'], "+#{x['added']} ~#{x['changed']} -#{x['removed']}",
+          out << format('%5s %-23s %8s %9.3f %8s %6d  %-11s %s', x['run'], x['time'].sub('T', ' ').sub('Z', ''), ms(x['wait_ms']),
+                        x['duration_ms'], ms(x['fib_ms']), x['routes'], "+#{x['added']} ~#{x['changed']} -#{x['removed']}",
                         x['reasons'].map { |y| [y['kind'], y['detail']].compact.join(' ') }.join(', '))
+        end
+        out.join("\n")
+      end
+
+      def ms(v) = v.nil? ? '-' : format('%.1f', v)
+
+      # "show ospf log run N": one run, its triggers and route changes.
+      def spf_run(s)
+        return 'OSPF is not configured' unless s['configured']
+        x = s['log'].first or return 'No such SPF run: the log keeps the last 100'
+        out = ["SPF run #{x['run']} at #{x['started_at'].sub('T', ' ').sub('Z', '')}, #{x['delay'] || 'no'} delay",
+               "  waited #{ms(x['wait_ms'])} ms after the first trigger, computed in #{format('%.3f', x['duration_ms'])} ms, " \
+               "kernel in #{ms(x['fib_ms'])} ms",
+               "  #{x['routes']} routes: +#{x['added']} ~#{x['changed']} -#{x['removed']}", '', 'Triggers']
+        x['reasons'].each do |r|
+          what = [r['kind'], r['detail']].compact.join(' ')
+          what += " seq #{r.dig('lsa', 'seq')}" if r['lsa']
+          src = r['source'] || {}
+          from = case src['source']
+                 when 'neighbor' then "flooded by #{src['router_id']} on #{src['interface']}"
+                 when 'neighbor state' then "neighbor #{src['router_id']} #{src['from']} -> #{src['to']}"
+                 when 'interface' then "interface #{src['interface']} #{[src['from'], src['to']].compact.join(' -> ')}"
+                 when nil then nil
+                 else src['source']
+                 end
+          out << "  #{r['at']&.sub('T', ' ')&.sub('Z', '')}  #{what}#{from ? ", #{from}" : ''}"
+        end
+        unless x['prefixes'].empty?
+          out << '' << 'Route changes'
+          x['prefixes'].each { |p| out << "  #{p}" }
+          out << "  and #{x['more']} more" if x['more'].to_i.positive?
         end
         out.join("\n")
       end

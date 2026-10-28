@@ -20,12 +20,19 @@ module OSPFv2
       DEFAULTS = { initial: 0.05, short: 0.2, long: 5.0, learn: 0.5, holddown: 10.0 }.freeze
       MAX_REASONS = 32
 
-      # What set off a run: LSA types, or a local change.
-      Reason = Struct.new(:kind, :detail) do
+      # What set off a run: LSA types, or a local change. +lsa+ is the LSA
+      # instance (Lsa#instance_fields) when one did; +source+ says where it
+      # came from ({ source: 'neighbor', router_id:, ... }, 'self', 'maxage',
+      # 'neighbor state', 'interface', 'config'); +at+ is the wall time.
+      Reason = Struct.new(:kind, :detail, :lsa, :source, :at) do
         def to_s = detail ? "#{kind} #{detail}" : kind.to_s
+
+        def same?(o) = kind == o.kind && detail == o.detail && lsa == o.lsa
       end
 
-      attr_reader :state, :settings, :runs, :last_run
+      # The delay the pending run waits: :initial, :short or :long. Kept
+      # once it runs, as #last_delay.
+      attr_reader :state, :settings, :runs, :last_run, :delay, :last_delay
 
       def initialize(loop, **settings, &compute)
         @loop = loop
@@ -46,20 +53,20 @@ module OSPFv2
       end
 
       # Something that can change routes happened (RFC 8405 section 6).
-      def trigger(kind, detail = nil)
-        note(kind, detail)
+      def trigger(kind, detail = nil, lsa: nil, source: nil)
+        note(kind, detail, lsa, source)
         case @state
         when :quiet
-          @spf.restart(@settings[:initial]) unless @spf.active?
+          arm(:initial)
           @learn.restart
           @holddown.restart
           @state = :short_wait
         when :short_wait
           @holddown.restart
-          @spf.restart(@settings[:short]) unless @spf.active?
+          arm(:short)
         when :long_wait
           @holddown.restart
-          @spf.restart(@settings[:long]) unless @spf.active?
+          arm(:long)
         end
         self
       end
@@ -75,6 +82,7 @@ module OSPFv2
       # Runs now, whatever the state. For clear commands and tests.
       def run_now(kind = :manual)
         note(kind, nil)
+        @delay = :now
         @spf.cancel
         run
       end
@@ -88,10 +96,16 @@ module OSPFv2
 
       private
 
-      def note(kind, detail)
-        r = Reason.new(kind, detail)
+      def arm(delay)
+        return if @spf.active?
+        @delay = delay
+        @spf.restart(@settings[delay])
+      end
+
+      def note(kind, detail, lsa = nil, source = nil)
+        r = Reason.new(kind, detail, lsa, source, @loop.clock.wall)
         if @reasons.size < MAX_REASONS
-          @reasons << r unless @reasons.include?(r)
+          @reasons << r unless @reasons.any? { _1.same?(r) }
         else
           @dropped += 1
         end
@@ -104,6 +118,8 @@ module OSPFv2
         @dropped = 0
         @runs += 1
         @last_run = @loop.now
+        @last_delay = @delay
+        @delay = nil
         @compute.call(reasons)
       end
 
