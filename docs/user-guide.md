@@ -614,6 +614,8 @@ Within 5 seconds `ospfd` originates an external LSA for it and FRR has it too: `
 
 ### Cheat sheet
 
+The full list, with routescope and restarts, is in [lab commands](lab-commands.md).
+
 On the Mac:
 
 ```sh
