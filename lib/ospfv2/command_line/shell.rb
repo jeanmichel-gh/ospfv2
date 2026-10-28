@@ -35,16 +35,21 @@ module OSPFv2
           show ospf statistics        show ip ospf traffic
           show configuration
           clear ospf neighbor         clear ip ospf process
+          monitor ospf events [KIND]  monitor ip ospf events      (Ctrl-C stops)
           configure                   (then set, delete, show, compare, commit, rollback, exit)
         Type ? at the end of a line for the options there, Tab to complete.
         Pipes: | match REGEX, | except REGEX, | count, | last N, | display json, | display set
       TXT
 
       attr_reader :mode
+      attr_writer :monitor_limit # tests: monitor returns after this many events
 
-      def initialize(client, hostname: 'ospf')
+      # +output+ is where monitor prints events as they come, since it
+      # does not return until stopped.
+      def initialize(client, hostname: 'ospf', output: $stdout)
         @client = client
         @hostname = hostname
+        @output = output
         @mode = :operational
       end
 
@@ -154,7 +159,33 @@ module OSPFv2
           n = @client.call('clear.neighbors', router_id: m.args.first)['cleared']
           return "#{n} neighbor#{n == 1 ? '' : 's'} cleared"
         end
+        return monitor(a[:kinds], pipes) if a[:monitor]
         run_view(a, pipes)
+      end
+
+      # Prints events until Ctrl-C (or, for tests, +stop_after+ events).
+      # | match and | except filter the lines.
+      def monitor(kinds, pipes, stop_after: @monitor_limit)
+        filters = pipes.map do |p|
+          w = Config::Tree.split(p)
+          kind = PIPES[w.first]
+          raise Error, 'monitor takes | match REGEX and | except REGEX' unless %i[match except].include?(kind) && w[1]
+          [kind == :match, Regexp.new(w.drop(1).join(' '))]
+        end
+        @output.puts "Watching #{kinds ? kinds.join(', ') : 'all'} events, Ctrl-C stops"
+        n = 0
+        begin
+          @client.subscribe(kinds: kinds) do |ev|
+            line = Format.event_line(ev)
+            next unless filters.all? { |keep, re| re.match?(line) == keep }
+            @output.puts line
+            n += 1
+            :stop if stop_after && n >= stop_after
+          end
+        rescue Interrupt
+          nil
+        end
+        ''
       end
 
       def run_view(a, pipes)

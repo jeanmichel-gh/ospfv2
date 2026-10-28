@@ -1,5 +1,14 @@
 === Unreleased
 
+* ospfd event stream: events.subscribe on the management API streams
+  protocol events as JSON lines, each with a sequence number, a kind and
+  structured data (neighbor, interface, dr, drop, spf, routes, lsa,
+  router, virtual_link, commit), and replays from a number it kept.
+  events.unsubscribe ends it. Every SPF run is an event
+* api.info: ospfd's version, the API version, the methods and the event
+  kinds
+* ospf-cli: monitor ospf events [KIND], live until Ctrl-C, with | match
+  and | except
 * Lab folder for the router lab: one folder per node (sim/, peer/, frr/,
   ospfd/) plus lab.yml, mounted read-write by docker-compose.yml, so
   configurations saved in the lab land back in it. LAB selects the folder;

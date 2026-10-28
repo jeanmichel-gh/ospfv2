@@ -30,6 +30,9 @@ module OSPFv2
         'router' => 1, 'network' => 2, 'summary' => 3, 'asbr-summary' => 4, 'external' => 5
       }.freeze
 
+      # Kinds of events ospfd streams (Daemon::Events::KINDS).
+      EVENT_KINDS = %w[neighbor interface dr drop spf spf_skipped routes lsa router virtual_link commit log].freeze
+
       ROUTER_ID = { name: '<router-id>', match: /\A\d{1,3}(\.\d{1,3}){3}\z/ }.freeze
       NUMBER = { name: '<number>', match: /\A\d+\z/ }.freeze
       TEXT = { name: '<text>', match: /./ }.freeze
@@ -182,6 +185,20 @@ module OSPFv2
           cmd 'ip', 'IP (IOS style)' do
             cmd 'ospf', 'OSPF' do
               cmd 'process', 'Bring every adjacency down and up again', action: { clear: :neighbors }
+            end
+          end
+        end
+        cmd 'monitor', 'Watch events as they happen (Ctrl-C stops)' do
+          cmd 'ospf', 'OSPF (Junos style)' do
+            cmd 'events', 'Protocol events, all kinds or some', action: { monitor: :events } do
+              EVENT_KINDS.each do |k|
+                cmd k, "#{k.tr('_', ' ').capitalize} events", action: { monitor: :events, kinds: [k] }
+              end
+            end
+          end
+          cmd 'ip', 'IP (IOS style)' do
+            cmd 'ospf', 'OSPF' do
+              cmd 'events', 'Protocol events', action: { monitor: :events }
             end
           end
         end

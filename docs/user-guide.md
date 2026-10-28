@@ -531,9 +531,21 @@ Every show command has a Junos form, printed Junos style, and an IOS form, print
 | `show route protocol ospf` | `show ip route ospf` | OSPF routes in the kernel |
 | `show ospf log` | `show ip ospf statistics` | SPF runs: when, why, how long, what changed |
 | `show ospf events` | `show ip ospf events` | Recent protocol events: state changes, dropped packets |
+| `monitor ospf events [KIND]` | `monitor ip ospf events` | Events as they happen, until Ctrl-C. KIND is one of `neighbor`, `interface`, `dr`, `drop`, `spf`, `routes`, `lsa`, `commit` and a few more; `?` lists them |
 | `show ospf statistics` | `show ip ospf traffic` | Packet counters per interface |
 | `show configuration` | | The running configuration |
 | `clear ospf neighbor [ROUTER-ID]` | `clear ip ospf process` | Bring adjacencies down and up again |
+
+To watch the adjacency form, start the monitor in one terminal and clear the neighbors in another:
+
+```
+monitor ospf events neighbor
+```
+
+```sh
+# in the VM, second terminal
+sudo bin/ospf-cli -c 'clear ospf neighbor'
+```
 
 Pipes go after any show command: `| match REGEX` (or `include`), `| except REGEX` (or `exclude`), `| count`, `| last N`, `| display json`, and `| display set` for the configuration. They chain: `show ospf route | except Ext2 | count`.
 

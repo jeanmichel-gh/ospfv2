@@ -6,6 +6,7 @@ require_relative 'config/model'
 require_relative 'fib'
 require_relative 'daemon/system'
 require_relative 'daemon/views'
+require_relative 'daemon/events'
 
 module OSPFv2
   # ospfd: runs the router core from a configuration file and answers the
@@ -22,10 +23,11 @@ module OSPFv2
   # versions as rollback 1..9.
   class Daemon
     ROLLBACKS = 9
+    COMMIT_EVENT_LINES = 50 # statements listed in a commit event; the count covers all
     RECHECK = 5          # seconds between checks of the host interfaces
     APPLY_TIMEOUT = 120  # seconds a commit waits for the router to take it
 
-    attr_reader :loop, :running, :candidate, :instance, :started_at, :broken_file, :fib, :fib_error
+    attr_reader :loop, :running, :candidate, :instance, :started_at, :broken_file, :fib, :fib_error, :events
 
     # In-memory kernel table: what a Daemon installs into unless told
     # otherwise, so tests and embedding never touch the host. bin/ospfd
@@ -57,6 +59,7 @@ module OSPFv2
       @pending = {}      # ifname => why it is not running
       @applied = {}      # ifname => options the interface runs with
       @lock = Mutex.new  # guards candidate, running and the files
+      @events = Events.new
       @commits = []
     end
 
@@ -165,7 +168,9 @@ module OSPFv2
           @commits.pop while @commits.size > ROLLBACKS
         end
         @broken_file = nil if save
-        log(:info, "commit#{comment ? " (#{comment})" : ''}: #{changes.size} change(s)")
+        log(:info, "commit#{comment ? " (#{comment})" : ''}: #{changes.size} change(s)",
+            kind: :commit, comment: comment, changes: changes.size, statements: changes.first(COMMIT_EVENT_LINES),
+            saved: !staged.nil?)
         { ok: true, errors: [], warnings: warnings, changes: changes }
       end
     rescue Config::Error => e
@@ -216,15 +221,27 @@ module OSPFv2
       end
     end
 
-    # Logs to the logger and to the router's event list (show ospf log).
-    def log(level, message)
+    # Logs to the logger, to the router's event list (show ospf events)
+    # and to the event stream. With no router yet, to the stream directly.
+    def log(level, message, kind: :log, **data)
       @logger&.call(level, message)
       return if level == :debug # logger only, as Instance#log
-      record = -> { @instance&.record(level, message) }
+      record = lambda do
+        if @instance
+          @instance.record(level, message, kind: kind, **data)
+        else
+          @events.publish(time: @loop.clock.wall, level: level, kind: kind, message: message, data: data)
+        end
+      end
       @loop.on_loop_thread? || !@loop.running? ? record.call : @loop.post(&record)
     end
 
     private
+
+    def publish_core_event(ev)
+      @events.publish(time: ev.time, level: ev.level, kind: ev.kind || :log, message: ev.message,
+                      interface: ev.interface, data: ev.data || {})
+    end
 
     # ---- applying a model, on the loop thread ----
 
@@ -255,6 +272,7 @@ module OSPFv2
         # Start first, then add: every interface then goes through add,
         # whose failures are contained.
         @instance = Core::Instance.new(router_id: model.router_id, loop: @loop, logger: @logger)
+        @instance.on_event { |ev| publish_core_event(ev) }
         @instance.start
         @applied = {}
         @pending = {}

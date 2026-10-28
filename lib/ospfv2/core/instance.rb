@@ -27,7 +27,10 @@ module OSPFv2
     # Every method runs on the loop thread. From another thread, wrap
     # calls in loop.call { ... }.
     class Instance
-      Event = Struct.new(:time, :level, :interface, :message) do
+      # One protocol event. +kind+ says what happened (:neighbor, :spf, ...;
+      # :log for plain messages) and +data+ carries its fields, so a program
+      # need not parse +message+.
+      Event = Struct.new(:time, :level, :interface, :message, :kind, :data) do
         def to_s = "#{time.strftime('%H:%M:%S')} #{interface ? "#{interface} " : ''}#{message}"
       end
 
@@ -79,6 +82,7 @@ module OSPFv2
         @events = []
         @stats = Hash.new(0)
         @listeners = []
+        @event_listeners = []
         @running = false
       end
 
@@ -144,14 +148,14 @@ module OSPFv2
           area.schedule_origination
         end
         @spf.trigger(:interface, name) if @running
-        log(:info, iface, "interface #{name} removed")
+        log(:info, iface, "interface #{name} removed", kind: :interface, state: 'removed')
         iface
       end
 
       def start
         return self if @running
         @running = true
-        log(:info, nil, "router #{router_id_s} starting")
+        log(:info, nil, "router #{router_id_s} starting", kind: :router, state: 'starting', router_id: router_id_s)
         # Virtual links come up when SPF reaches their other end.
         @interfaces.each_value { |i| i.up unless i.virtual? }
         refresh_externals
@@ -179,7 +183,7 @@ module OSPFv2
         @spf.stop
         # Nothing routes through a stopped router.
         replace_routes(Spf::Table.empty, [SpfScheduler::Reason.new(:stop, nil)], 0.0) unless @route_table.routes.empty?
-        log(:info, nil, "router #{router_id_s} stopped")
+        log(:info, nil, "router #{router_id_s} stopped", kind: :router, state: 'stopped', router_id: router_id_s)
         self
       end
 
@@ -484,7 +488,7 @@ module OSPFv2
           refresh_externals(table)
         end
         # Warn once per bad LSA, not on every run.
-        (table.stats[:skipped] - @spf_skipped).each { |why| log(:warn, nil, "SPF skipped #{why}") }
+        (table.stats[:skipped] - @spf_skipped).each { |why| log(:warn, nil, "SPF skipped #{why}", kind: :spf_skipped, why: why.to_s) }
         @spf_skipped = table.stats[:skipped]
         table
       end
@@ -549,17 +553,46 @@ module OSPFv2
 
       # Debug lines go to the logger only: kept in the event list they
       # would push out the events people look for.
-      def log(level, iface, message)
-        record(level, message, iface) unless level == :debug
+      #
+      #   log(:info, iface, "neighbor ...", kind: :neighbor, router_id: '2.2.2.2', ...)
+      def log(level, iface, message, kind: :log, **data)
+        record(level, message, iface, kind: kind, **data) unless level == :debug
         @logger&.call(level, iface ? "#{iface.name} #{message}" : message)
       end
 
-      # Adds an event to the list without passing it to the logger.
-      def record(level, message, iface = nil)
-        ev = Event.new(@loop.clock.wall, level, iface&.name, message)
+      # Adds an event to the list without passing it to the logger, and
+      # tells the event listeners.
+      def record(level, message, iface = nil, kind: :log, **data)
+        ev = Event.new(@loop.clock.wall, level, iface&.name, message, kind, data)
         @events << ev
         @events.shift(@events.size - MAX_EVENTS) if @events.size > MAX_EVENTS
+        notify_event(ev)
         ev
+      end
+
+      # Calls the block with each Event as it happens, on the loop thread.
+      # Gets every recorded event, plus some that are not kept in the list
+      # because they have their own (an SPF run is in the SPF log).
+      def on_event(&block)
+        @event_listeners << block
+        block
+      end
+
+      def remove_event_listener(block)
+        @event_listeners.delete(block)
+      end
+
+      # Tells the listeners without keeping the event in the list.
+      def publish(level, message, iface = nil, kind:, **data)
+        notify_event(Event.new(@loop.clock.wall, level, iface&.name, message, kind, data))
+      end
+
+      def notify_event(ev)
+        @event_listeners.each do |l|
+          l.call(ev)
+        rescue StandardError => e
+          @logger&.call(:error, "event listener: #{e.class}: #{e.message}")
+        end
       end
 
       def trace(dir, iface, pkt, peer)
@@ -760,9 +793,25 @@ module OSPFv2
         @spf_log << SpfRun.new(time: @loop.clock.wall, reasons: reasons, duration: duration,
                                routes: table.routes.size, diff: diff)
         @spf_log.shift(@spf_log.size - MAX_SPF_LOG) if @spf_log.size > MAX_SPF_LOG
+        why = "#{reasons.first(3).join(', ')}#{reasons.size > 3 ? ', ...' : ''}"
+        publish(:info, "SPF #{(duration * 1000).round(1)} ms, #{table.routes.size} routes, #{diff} (#{why})",
+                kind: :spf, duration_ms: (duration * 1000).round(3), routes: table.routes.size,
+                added: diff.added.size, changed: diff.changed.size, removed: diff.removed.size,
+                reasons: reasons.map { |r| { kind: r.kind.to_s, detail: r.detail&.to_s } },
+                prefixes: spf_prefixes(diff))
         return if diff.empty?
-        log(:info, nil, "routes #{diff} after SPF (#{reasons.first(3).join(', ')}#{reasons.size > 3 ? ', ...' : ''})")
+        log(:info, nil, "routes #{diff} after SPF (#{why})", kind: :routes,
+                                                             added: diff.added.size, changed: diff.changed.size,
+                                                             removed: diff.removed.size)
         @route_listeners.each { |l| l.call(diff) }
+      end
+
+      SPF_EVENT_PREFIXES = 50 # prefixes listed per SPF event; the counts cover all
+
+      def spf_prefixes(diff)
+        list = diff.added.map { |r| ['+', r.dest_s] } + diff.changed.map { |_, r| ['~', r.dest_s] } +
+               diff.removed.map { |r| ['-', r.dest_s] }
+        list.first(SPF_EVENT_PREFIXES).map { |m, p| "#{m}#{p}" }
       end
 
       # An area with no interfaces left: stop refreshing our LSAs in it and
@@ -810,7 +859,7 @@ module OSPFv2
         # A flush is a new instance too: the next origination waits
         # MinLSInterval, or routers two hops away drop it (13 step 5a).
         @last_origination[scope_key(area, lsa.key)] = @loop.now if lsa.advr == @router_id
-        log(:info, nil, "flushing #{lsa.id_string}")
+        log(:info, nil, "flushing #{lsa.id_string}", kind: :lsa, change: 'flush', **lsa.instance_fields)
         drop_old_retransmits(lsa, area)
         flood(lsa, area)
       end
@@ -864,7 +913,7 @@ module OSPFv2
           key = e.key
           if e.lsa.age < OSPFv2::MaxAge && !e.aged_out
             e.aged_out = true
-            log(:info, nil, "#{e.lsa.id_string} reached MaxAge")
+            log(:info, nil, "#{e.lsa.id_string} reached MaxAge", kind: :lsa, change: 'maxage', **e.lsa.instance_fields)
             @spf.trigger(:maxage, e.lsa.id_string)
             flood(db.current(e), area)
           end

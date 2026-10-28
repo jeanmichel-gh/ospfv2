@@ -126,4 +126,92 @@ class TestDaemonApi < Test::Unit::TestCase
     e = assert_raise(CommandLine::Error) { CommandLine::Client.new(File.join(@dir, 'none.sock')).call('show.overview') }
     assert_match(/cannot reach ospfd/, e.message)
   end
+
+  def publish(msg, kind: :log)
+    @daemon.events.publish(time: Time.now, level: :info, kind: kind, message: msg)
+  end
+
+  def read_json(sock) = JSON.parse(sock.gets)
+
+  def test_api_info
+    info = call('api.info')[:result]
+    assert_equal OSPFv2::VERSION, info[:version]
+    assert_equal Daemon::Api::VERSION, info[:api]
+    assert_include info[:methods], 'events.subscribe'
+    assert_include info[:methods], 'show.neighbors'
+    assert_include info[:event_kinds], 'neighbor'
+  end
+
+  def test_event_stream_over_the_socket
+    @api.stop
+    @api = Daemon::Api.new(@daemon, path: @api.path, keepalive: 0.3)
+    @api.start
+    since = @daemon.events.seq # the daemon's own startup events come before
+    publish('before')
+    s = UNIXSocket.new(@api.path)
+    s.write("#{JSON.generate(id: 7, method: 'events.subscribe', params: { since: since, kinds: %w[log spf] })}\n")
+    r = read_json(s)
+    assert_equal 7, r['id']
+    assert_equal 1, r['result']['replayed']
+    assert_equal %w[log spf], r['result']['kinds']
+    assert_equal 'before', read_json(s)['event']['message'], 'replayed first'
+
+    publish('ignored', kind: :neighbor)
+    publish('live', kind: :spf)
+    ev = read_json(s)['event']
+    assert_equal %w[live spf], [ev['message'], ev['kind']]
+    assert_kind_of Integer, ev['seq']
+
+    ka = read_json(s)
+    assert ka.key?('keepalive'), "expected a keepalive, got #{ka}"
+
+    s.write("#{JSON.generate(id: 8, method: 'show.overview')}\n")
+    assert_match(/only events.unsubscribe/, read_json(s)['error'])
+
+    s.write("#{JSON.generate(id: 9, method: 'events.unsubscribe')}\n")
+    line = read_json(s)
+    line = read_json(s) while line.key?('keepalive') || line.key?('event')
+    assert_equal({ 'id' => 9, 'result' => { 'unsubscribed' => true } }, line)
+    sleep 0.05
+    assert_equal 0, @daemon.events.subscribers
+    s.write("#{JSON.generate(id: 10, method: 'config.changed')}\n")
+    assert_equal false, read_json(s)['result'], 'back to requests'
+    s.close
+  end
+
+  def test_stream_ends_when_the_client_goes
+    @api.start
+    s = UNIXSocket.new(@api.path)
+    s.write("#{JSON.generate(id: 1, method: 'events.subscribe')}\n")
+    read_json(s)
+    assert_equal 1, @daemon.events.subscribers
+    s.close
+    deadline = Time.now + 2
+    sleep 0.05 while @daemon.events.subscribers.positive? && Time.now < deadline
+    assert_equal 0, @daemon.events.subscribers
+  end
+
+  def test_subscribe_errors
+    @api.start
+    s = UNIXSocket.new(@api.path)
+    s.write("#{JSON.generate(id: 1, method: 'events.subscribe', params: { kinds: ['bogus'] })}\n")
+    assert_match(/unknown event kind bogus/, read_json(s)['error'])
+    s.write("#{JSON.generate(id: 2, method: 'events.unsubscribe')}\n")
+    assert_equal 'not subscribed', read_json(s)['error']
+    s.close
+  end
+
+  def test_client_subscribe
+    @api.start
+    client = CommandLine::Client.new(@api.path)
+    got = []
+    t = Thread.new do
+      client.subscribe(kinds: %w[log]) { |ev| got << ev['message']; :stop if got.size == 2 }
+    end
+    sleep 0.02 until @daemon.events.subscribers == 1
+    publish('a')
+    publish('b')
+    assert t.join(2), 'subscribe returns on :stop'
+    assert_equal %w[a b], got
+  end
 end

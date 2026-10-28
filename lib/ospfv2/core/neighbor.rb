@@ -249,7 +249,9 @@ module OSPFv2
         @state = new_state
         @last_change = now
         @state_changes += 1
-        instance.log(:info, @iface, "neighbor #{self}: #{old} -> #{new_state} (#{event})")
+        instance.log(:info, @iface, "neighbor #{self}: #{old} -> #{new_state} (#{event})",
+                     kind: :neighbor, router_id: Addr.to_s(@router_id), address: Addr.to_s(@address),
+                     from: old.to_s, to: new_state.to_s, event: event.to_s)
         instance.neighbor_changed(self, old, new_state)
         crossed_two_way = (RANK[old] >= RANK[:two_way]) != (RANK[new_state] >= RANK[:two_way])
         @iface.neighbor_change if crossed_two_way
