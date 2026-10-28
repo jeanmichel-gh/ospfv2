@@ -146,6 +146,7 @@ module OSPFv2
             cmd 'log', 'SPF runs: when, why, how long', action: { view: :spf, style: :junos }
             cmd 'events', 'Recent protocol events', action: { view: :log, style: :junos }
             cmd 'statistics', 'Packet counters per interface', action: { view: :statistics, style: :junos }
+            cmd 'timers', 'Every timer: what it belongs to, when it fires', action: { view: :timers, style: :junos }
           end
           cmd 'ip', 'IP information (IOS style)' do
             cmd 'ospf', 'OSPF process', action: { view: :overview, style: :ios } do
@@ -163,6 +164,7 @@ module OSPFv2
               cmd 'route', 'OSPF routing table', action: { view: :routes, style: :ios }
               cmd 'statistics', 'SPF runs', action: { view: :spf, style: :ios }
               cmd 'traffic', 'Packet counters per interface', action: { view: :statistics, style: :ios }
+              cmd 'timers', 'Every timer: what it belongs to, when it fires', action: { view: :timers, style: :ios }
               cmd 'events', 'Recent protocol events', action: { view: :log, style: :ios }
             end
             cmd 'route', 'IP routing table' do

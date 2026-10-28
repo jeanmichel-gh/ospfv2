@@ -321,6 +321,7 @@ Junos forms print Junos style, IOS forms print IOS style.
 | `show ospf log` (SPF runs) | `show ip ospf statistics` (SPF runs) |
 | `show ospf events` | `show ip ospf events` |
 | `show ospf statistics` (packets) | `show ip ospf traffic` |
+| `show ospf timers` | `show ip ospf timers` |
 | `clear ospf neighbor [ROUTER-ID]` | `clear ip ospf process` |
 | `monitor ospf events [KIND]` (live, Ctrl-C stops) | `monitor ip ospf events` |
 | `show configuration` | |
@@ -341,7 +342,7 @@ request and one reply per line.
 
 `api.info` returns ospfd's version, the API version, the methods and the event kinds.
 The methods: `show.overview`, `show.neighbors`, `show.interfaces`, `show.database`,
-`show.routes`, `show.fib`, `show.spf`, `show.log`, `show.statistics`,
+`show.routes`, `show.fib`, `show.spf`, `show.log`, `show.statistics`, `show.timers`,
 `show.configuration`, `config.load`, `config.replace`, `config.compare`, `config.changed`,
 `config.commit`, `config.discard`, `config.rollback`, `config.history`,
 `clear.neighbors`, `events.subscribe` and `events.unsubscribe`. `config.load` adds set

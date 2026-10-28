@@ -105,6 +105,9 @@ module OSPFv2
       # E bit unless the area is a stub (RFC 2328 A.2).
       def options = @area.options
 
+      # Its timers by name, for show timers.
+      def timers = { hello: @hello_timer, wait: @wait_timer, delayed_ack: @ack_timer }.compact
+
       def dr? = @state == :dr
       def backup? = @state == :backup
 

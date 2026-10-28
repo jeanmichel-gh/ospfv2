@@ -3,6 +3,8 @@
 require 'test/unit'
 require 'tmpdir'
 require 'ospfv2/daemon'
+require 'ospfv2/command_line/format'
+require 'json'
 
 # The daemon on a fake clock, with a fake host and a core peer on an
 # in-memory segment.
@@ -55,6 +57,41 @@ class TestDaemon < Test::Unit::TestCase
     @loop.run_until(120) { peer_full? }
     assert_equal %w[eth1 lo], @d.instance.interfaces.keys.sort
     assert_equal '1.1.1.1', @d.views.overview[:router_id]
+  end
+
+  # show timers: every timer with its owner and when it fires, the
+  # neighbor's among them; the clock moves, the time left goes down.
+  def test_timers
+    daemon(BASE.join("\n"))
+    @loop.run_until(120) { peer_full? }
+    @loop.advance(10) # the last acks and retransmits
+    t = @d.views.timers
+    by = ->(name) { t[:timers].select { _1[:name] == name } }
+    hello = by.('hello').find { _1[:owner][:interface] == 'eth1' }
+    assert_equal [{ kind: 'interface', interface: 'eth1' }, true, true, 10], hello.values_at(:owner, :armed, :periodic, :interval)
+    assert_operator hello[:due_in], :<=, 10
+    inact = by.('inactivity').first
+    assert_equal({ kind: 'neighbor', interface: 'eth1', router_id: '2.2.2.2', address: '10.0.0.2' }, inact[:owner])
+    assert_operator inact[:due_in], :<=, 40
+    assert_equal({ kind: 'router' }, by.('maxage_sweep').first[:owner])
+    assert_equal %w[spf spf_holddown spf_learn], t[:timers].select { _1[:owner][:kind] == 'spf' }.map { _1[:name] }.sort
+    refresh = by.('ls_refresh').find { _1[:owner][:type] == 1 }
+    assert_equal({ kind: 'lsa', area: '0.0.0.0', type: 1, ls_id: '1.1.1.1', advr: '1.1.1.1' }, refresh[:owner])
+    assert_operator refresh[:due_in], :>, 1500
+    assert_equal({ min_ls_interval: 5, min_ls_arrival: 1, ls_refresh_time: 1800, max_age: 3600 }, t[:constants])
+    assert_equal [10, 40], t[:interfaces].find { _1[:name] == 'eth1' }.values_at(:hello_interval, :dead_interval)
+    assert_equal [{ interface: 'eth1', router_id: '2.2.2.2', address: '10.0.0.2', state: :full, retransmit: 0, requests: 0 }],
+                 t[:neighbors].map { _1.slice(:interface, :router_id, :address, :state, :retransmit, :requests) }
+    assert_equal @loop.scheduler.size, t[:timers].count { _1[:armed] }, 'every armed timer is listed, once'
+    # The peer shares the loop: its timers are the only ones nobody claims.
+    assert_equal @peer.timers.select { _1[2].active? }.map { _1[1].to_s }.sort,
+                 t[:timers].select { _1[:owner][:kind] == 'other' }.map { _1[:name] }.sort
+    @loop.advance(7)
+    later = @d.views.timers
+    assert_in_delta refresh[:due_in] - 7, later[:timers].find { _1[:name] == 'ls_refresh' && _1[:owner][:type] == 1 }[:due_in], 0.01
+    text = CommandLine::Format.render(:timers, :junos, JSON.parse(JSON.generate(later)))
+    assert_match(/^inactivity +neighbor 2.2.2.2 on eth1 +\d+\.\d{3}s +40s/, text)
+    assert_match(/^hello +interface eth1 .* every 10s/, text)
   end
 
   def test_missing_file_starts_empty_and_a_commit_saves_it

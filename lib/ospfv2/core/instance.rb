@@ -599,6 +599,25 @@ module OSPFv2
         @tracer&.call(dir, iface.name, pkt, peer)
       end
 
+      # Every timer of this router, with what it belongs to:
+      # [{ kind:, ... }, name, timer]. Kinds: router, interface, neighbor,
+      # lsa (its refresh, or an origination held by MinLSInterval), spf.
+      def timers
+        out = []
+        out << [{ kind: 'router' }, :maxage_sweep, @sweep] if @sweep
+        @interfaces.each_value do |i|
+          i.timers.each { |n, t| out << [{ kind: 'interface', interface: i.name }, n, t] }
+          i.neighbors.each_value do |nb|
+            who = { kind: 'neighbor', interface: i.name, router_id: Addr.to_s(nb.router_id), address: Addr.to_s(nb.address) }
+            nb.timers.each { |n, t| out << [who, n, t] }
+          end
+        end
+        @own.each { |sk, o| out << [lsa_owner(sk), :ls_refresh, o[:refresh]] if o[:refresh] }
+        @deferred.each { |sk, t| out << [lsa_owner(sk), :min_ls_interval, t] }
+        @spf.timers.each { |n, t| out << [{ kind: 'spf' }, n, t] }
+        out
+      end
+
       private
 
       # ---- summary-LSAs (RFC 2328 12.4.3) ----
@@ -827,6 +846,11 @@ module OSPFv2
       end
 
       # An LSA key made unique across areas: [area id or nil for AS scope, *key].
+      def lsa_owner(sk)
+        area, type, ls_id, advr = sk
+        { kind: 'lsa', area: area && Addr.to_s(area), type: type, ls_id: Addr.to_s(ls_id), advr: Addr.to_s(advr) }
+      end
+
       def scope_key(area, key) = [AS_SCOPE.include?(key[0]) ? nil : area.id, *key]
 
       # Where our own LSA of +type+ lives: the AS database for externals,

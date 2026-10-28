@@ -152,6 +152,7 @@ class TestDaemonApi < Test::Unit::TestCase
     assert_equal Daemon::Api::VERSION, info[:api]
     assert_include info[:methods], 'events.subscribe'
     assert_include info[:methods], 'show.neighbors'
+    assert_include info[:methods], 'show.timers'
     assert_include info[:event_kinds], 'neighbor'
   end
 
