@@ -51,11 +51,22 @@ grep -q 'export LAB=' ~/.bashrc || echo 'export LAB=~/labs/ospf-lab' >> ~/.bashr
 source ~/.bashrc; echo "$LAB"
 ```
 
-No lab folder yet? Make one, once:
+Make the lab folder before anything uses `LAB`. If compose runs first, Docker creates the folder itself: empty, owned by root, and FRR stops with `/etc/frr/daemons does not exist`. Once:
 
 ```sh
 # in the VM
-cd ~/ospfv2 && bin/ospfv2 lab new ~/labs/ospf-lab
+cd ~/ospfv2
+[ -f ~/labs/ospf-lab/lab.yml ] && echo "lab folder ok" || bin/ospfv2 lab new ~/labs/ospf-lab
+```
+
+To make it again from the template (the old one is kept aside, nothing is deleted):
+
+```sh
+# in the VM
+cd ~/ospfv2
+docker compose --profile frr --profile ospfd down
+sudo mv ~/labs/ospf-lab ~/labs/ospf-lab.old-$(date +%Y%m%d%H%M)
+bin/ospfv2 lab new ~/labs/ospf-lab
 ```
 
 ## Get the code: a branch, or the latest
