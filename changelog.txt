@@ -10,6 +10,10 @@
   volume
 * ospfd commit keeps the owner, group and mode of the configuration file
   it replaces, without access for others; a new file is still root's, 0600
+* ospfd's saved configuration has no date in its header, so the same
+  statements give the same file and a diff shows only real changes
+* Lab template: frr.conf and ospfd.conf in the form each router saves,
+  and fixed hostnames for the lab's containers
 * The lab's FRR starts through tools/frr-start.sh, which gives frr.conf
   back to the lab folder's owner after write memory. The template's
   .gitignore leaves out the routers' backups and rollbacks

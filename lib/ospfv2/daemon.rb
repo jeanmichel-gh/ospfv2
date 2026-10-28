@@ -524,7 +524,9 @@ module OSPFv2
       FileUtils.mkdir_p(File.dirname(@config_path))
       tmp = "#{@config_path}.tmp"
       File.delete(tmp) if File.file?(tmp)
-      body = "# ospfd configuration, saved by commit #{@loop.clock.wall.utc.strftime('%F %T')} UTC\n" \
+      # No date in the file: unchanged statements give an unchanged file,
+      # so a diff shows only real changes. Commit times are in the history.
+      body = "# ospfd configuration, saved by commit\n" \
              "#{tree.to_set(hide: false).join("\n")}\n"
       File.open(tmp, File::WRONLY | File::CREAT | File::EXCL, 0o600) { |f| f.write(body) }
       keep_owner_and_mode(tmp)

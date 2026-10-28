@@ -66,6 +66,16 @@ class TestDaemon < Test::Unit::TestCase
     assert_equal BASE.map { |l| l.sub('area 0 ', 'area 0.0.0.0 ') }, File.read(@path).lines.drop(1).map(&:chomp)
   end
 
+  def test_the_same_statements_give_the_same_file
+    daemon
+    commit!(*BASE)
+    first = File.read(@path)
+    @loop.clock.advance(3600)
+    commit!('set protocols ospf area 0 interface eth1 metric 5')
+    commit!('delete protocols ospf area 0 interface eth1 metric')
+    assert_equal first, File.read(@path), 'no date or other noise in the file'
+  end
+
   def test_a_commit_keeps_the_file_mode_without_access_for_others
     { 0o640 => 0o640, 0o664 => 0o660, 0o600 => 0o600, 0o444 => 0o640 }.each do |before, after|
       File.write(@path, BASE.join("\n") + "\n")

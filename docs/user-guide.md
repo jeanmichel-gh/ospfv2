@@ -417,10 +417,13 @@ Full with FRR, 2Way with the simulator: two routers that are neither DR nor BDR 
 The same router, as the `ospfd` service of the compose file. It joins the bridge at 10.99.0.30 and reads its configuration from the lab folder, `ospfd/ospfd.conf`:
 
 ```
+# ospfd configuration, saved by commit
 set routing-options router-id 3.3.3.3
-set protocols ospf area 0 interface eth0 hello-interval 2
-set protocols ospf area 0 interface eth0 priority 0
+set protocols ospf area 0.0.0.0 interface eth0 priority 0
+set protocols ospf area 0.0.0.0 interface eth0 hello-interval 2
 ```
+
+It is written the way `commit` saves it, so a commit adds or removes only the lines that changed.
 
 Start it once the simulator is Full:
 
