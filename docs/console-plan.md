@@ -23,6 +23,8 @@ Status: plan agreed in outline, phase 0 (UX mockups) in progress.
 | 5 | Our own small lab file first. Containerlab import later; nothing in the design may block it | Agreed |
 | 6 | Single user on localhost, but auth built in from day one and switched off, so login is easy to add | Agreed |
 | 7 | Separate repo for the console, its own license; ospfv2 gets the APIs it needs as normal features | Proposed, to confirm |
+| 8 | A lab is a folder: `lab.yml` plus one config file per node, mounted read-write, kept in git | Agreed |
+| 9 | SPF observability lives in ospfd; ospf-cli and the console both read it | Agreed |
 
 ospfv2 stays standard library only. The console has its own gems and Node packages.
 
@@ -35,11 +37,12 @@ ospfv2 stays standard library only. The console has its own gems and Node packag
 5. **LSDB explorer.** The databases of all routers side by side, differences highlighted: missing LSAs, older sequence numbers, checksum mismatches.
 6. **Packet decoder.** Wireshark style: packet list, field tree, hex dump. Selecting a field highlights its bytes; flag fields show each bit (Options, router LSA V/E/B, DD I/M/MS). Packet and LSA Fletcher checksums are verified. An LSA instance can be followed through flood, ack and retransmit. Optional cross check with `tshark`. Save as pcap.
 7. **Timers.** One lane per timer, per device, interface and neighbor, scrolling with time: hello, dead, wait, retransmit, inactivity, LSA refresh, MinLSInterval, MinLSArrival, MaxAge, SPF delay and hold, delayed ack. Exact for ospfd, measured from captures for FRR and the simulator. Checks flag hello or dead mismatch, near expiries, retransmit pile ups and SPF throttling.
-8. **Timeline.** One correlated event stream across devices: state changes, floods, SPF runs, link flaps, commits. Scrub back in time.
-9. **Recording.** Start, act, stop. The bundle holds logs, pcap, events and before and after snapshots, and replays in the timeline.
-10. **Config workbench.** ospfd candidate, compare, commit, history, rollback. FRR running configuration. Simulator YAML with `check` validation and apply.
-11. **Scenarios.** Short scripts with assertions: flap link 3 five times, wait for Full, expect 293 routes, measure convergence. Results kept as reports.
-12. **Lab lifecycle.** Up, down, restart a node, health, start order handled (the simulator Full before ospfd).
+8. **SPF runs.** Live, one column per router on a shared time axis. Each run shows its triggers (LSA instances, clickable to the LSDB and the decoder), a timing bar (wait, compute, FIB install) and its route diff. A chart strip shows runs and duration over time. One LSA instance can be followed from origination to the kernel route on every router, which measures convergence end to end. Rows freeze while selected; "follow live" resumes.
+9. **Timeline.** One correlated event stream across devices: state changes, floods, SPF runs, link flaps, commits. Scrub back in time.
+10. **Recording.** Start, act, stop. The bundle holds logs, pcap, events and before and after snapshots, and replays in the timeline. A recording names the lab version it ran on.
+11. **Config workbench.** Per node: startup (the lab file), running, and for ospfd the candidate. A badge shows when running differs from startup; a diff lets you save or revert line by line. ospfd keeps compare, commit check, commit and rollback. FRR changes apply through vtysh. Simulator YAML with `check` validation and apply. Changes made in a terminal show up too (see Lab folder). Authentication keys masked.
+12. **Scenarios.** Short scripts with assertions: flap link 3 five times, wait for Full, expect 293 routes, measure convergence. Results kept as reports.
+13. **Lab lifecycle.** Up, down, restart a node, health, start order handled (the simulator Full before ospfd).
 
 ## Architecture
 
@@ -52,7 +55,9 @@ Mac browser ── QEMU forward 127.0.0.1:8082 ──► console container (VM)
                                                  └─ nsenter: captures, host shell
 ```
 
-- **Lab file.** Lists nodes with a kind and a location, and the segments between them. Compose is the default way to bring the lab up.
+- **Lab folder.** One directory per lab: `lab.yml` lists nodes with a kind and a location, and the segments between them; next to it, one startup config per node (`ospfd.conf`, `frr.conf`, `sim.yml`). Compose mounts each file read-write into its node. The repo's `examples/lab` becomes a template to copy. The console reads and writes only inside the lab folder.
+- **Save flow.** "Save to lab" writes a node's running config to its file: ospfd already does on commit, FRR through `write memory` or the console writing the file, the simulator by exporting its topology (runtime state such as a link taken down in the UI is saved only if asked). The lab folder is a git repo: each save is a commit with a message, so the lab has history, diffs, a branch per experiment and one click rollback.
+- **Change detection.** ospfd announces commits on its event stream. FRR has no commit event: the console re-reads `show running-config` after each command typed in its FRR terminal, plus a slow poll for changes made elsewhere. A file changed on disk outside the console shows as a conflict to merge, never overwritten.
 - **Drivers.** Each kind declares capabilities: terminal, show, config, logs, capture, lifecycle. Shows return a normalized model (neighbors, interfaces, LSAs, routes), so the panes do not care which router answered.
   - `ospfd`: the JSON socket API. Location `host` or `container: <name>`.
   - `frr`: `vtysh -c "... json"` through `docker exec`.
@@ -71,17 +76,20 @@ Mac browser ── QEMU forward 127.0.0.1:8082 ──► console container (VM)
 | Timer table on the ospfd API: every armed timer with its owner and next fire time | Exact timers view |
 | Field offsets in the packet and LSA decoder: name, value, byte offset, length, bit mask | Bit level decoder |
 | Streaming endpoint on the simulator web API | Live simulator events |
+| SPF triggers carry the LSA instance, its source and arrival time; runs carry a number, start, end, FIB done and the route diff (capped); LSAs and routes link back to the run they triggered or that changed them | SPF runs pane, convergence chain |
+| ospf-cli: `show ospf log` timing columns, `show ospf log run N`, SPF links in route and database detail; IOS forms too | Same insight without the console |
+| Compose and lab template: per node configs mounted read-write from a lab folder, not baked in the image or read only | Save to lab |
 | Socket on a volume in the containerized ospfd, documented | Console reaches it |
 | systemd unit for native ospfd | Lifecycle and journal logs |
 
 ## Phases
 
-0. **UX.** Clickable mockups of the main screens: map, inspector, simulator, decoder, timers, then terminals, LSDB diff, timeline. Iterate until agreed.
-1. **Skeleton.** Repo, backend with Docker driver and lab file, front end shell with docking layout, node list, health, terminals. Auth gate in place.
+0. **UX.** Clickable mockups of the main screens: map, inspector, simulator, decoder, timers, LSDB diff, then SPF runs, config workbench, terminals, timeline. Iterate until agreed.
+1. **Skeleton.** Repo, backend with Docker driver and lab folder (the compose change comes first), front end shell with docking layout, node list, health, terminals. Auth gate in place.
 2. **Live OSPF views.** ospfd, FRR and simulator drivers, normalized tables, live map. ospfd event subscription.
-3. **Config workbench.** ospfd, FRR, simulator YAML.
+3. **Config workbench.** ospfd, FRR, simulator YAML. Startup vs running diff, save to lab, git history.
 4. **Observability.** Timeline, log streaming and search, capture and decoder with field offsets, recording.
-5. **Timers and analysis.** Timer API and timers view, LSDB and route diffs, SPF tree, convergence timing.
+5. **Timers and analysis.** Timer API and timers view, SPF observability in ospfd and the SPF runs pane, LSDB and route diffs, SPF tree, convergence timing.
 6. **Scenarios.** Script format, runner, assertions, reports.
 7. **Generality.** Containerlab import, generic driver, cEOS.
 
