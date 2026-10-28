@@ -31,14 +31,15 @@ ospfv2 stays standard library only. The console has its own gems and Node packag
 1. **Lab map.** Containers, segments, addresses, adjacencies colored by state. The simulated area shows as a cloud behind `sim` that expands into its routers. Click anything to inspect it.
 2. **Device inspector.** Overview, neighbors, interfaces, LSDB, OSPF routes, kernel routes, configuration. The same tables for ospfd, FRR and the simulator.
 3. **Terminals.** xterm.js tabs and splits: a shell in any node, `vtysh` on FRR, `ospf-cli` on ospfd.
-4. **LSDB explorer.** The databases of all routers side by side, differences highlighted: missing LSAs, older sequence numbers, checksum mismatches.
-5. **Packet decoder.** Wireshark style: packet list, field tree, hex dump. Selecting a field highlights its bytes; flag fields show each bit (Options, router LSA V/E/B, DD I/M/MS). Packet and LSA Fletcher checksums are verified. An LSA instance can be followed through flood, ack and retransmit. Optional cross check with `tshark`. Save as pcap.
-6. **Timers.** One lane per timer, per device, interface and neighbor, scrolling with time: hello, dead, wait, retransmit, inactivity, LSA refresh, MinLSInterval, MinLSArrival, MaxAge, SPF delay and hold, delayed ack. Exact for ospfd, measured from captures for FRR and the simulator. Checks flag hello or dead mismatch, near expiries, retransmit pile ups and SPF throttling.
-7. **Timeline.** One correlated event stream across devices: state changes, floods, SPF runs, link flaps, commits. Scrub back in time.
-8. **Recording.** Start, act, stop. The bundle holds logs, pcap, events and before and after snapshots, and replays in the timeline.
-9. **Config workbench.** ospfd candidate, compare, commit, history, rollback. FRR running configuration. Simulator YAML with `check` validation and apply.
-10. **Scenarios.** Short scripts with assertions: flap link 3 five times, wait for Full, expect 293 routes, measure convergence. Results kept as reports.
-11. **Lab lifecycle.** Up, down, restart a node, health, start order handled (the simulator Full before ospfd).
+4. **Simulator workbench.** The simulated topology drawn as routers and links, like the demo dashboard. Click a link to take it down or up, a router to inspect it. Refresh one LSA or all, flush, flap, aging on or off, add or withdraw externals. A log shows what each action originated and when frr and ospfd installed it.
+5. **LSDB explorer.** The databases of all routers side by side, differences highlighted: missing LSAs, older sequence numbers, checksum mismatches.
+6. **Packet decoder.** Wireshark style: packet list, field tree, hex dump. Selecting a field highlights its bytes; flag fields show each bit (Options, router LSA V/E/B, DD I/M/MS). Packet and LSA Fletcher checksums are verified. An LSA instance can be followed through flood, ack and retransmit. Optional cross check with `tshark`. Save as pcap.
+7. **Timers.** One lane per timer, per device, interface and neighbor, scrolling with time: hello, dead, wait, retransmit, inactivity, LSA refresh, MinLSInterval, MinLSArrival, MaxAge, SPF delay and hold, delayed ack. Exact for ospfd, measured from captures for FRR and the simulator. Checks flag hello or dead mismatch, near expiries, retransmit pile ups and SPF throttling.
+8. **Timeline.** One correlated event stream across devices: state changes, floods, SPF runs, link flaps, commits. Scrub back in time.
+9. **Recording.** Start, act, stop. The bundle holds logs, pcap, events and before and after snapshots, and replays in the timeline.
+10. **Config workbench.** ospfd candidate, compare, commit, history, rollback. FRR running configuration. Simulator YAML with `check` validation and apply.
+11. **Scenarios.** Short scripts with assertions: flap link 3 five times, wait for Full, expect 293 routes, measure convergence. Results kept as reports.
+12. **Lab lifecycle.** Up, down, restart a node, health, start order handled (the simulator Full before ospfd).
 
 ## Architecture
 
@@ -75,7 +76,7 @@ Mac browser ── QEMU forward 127.0.0.1:8082 ──► console container (VM)
 
 ## Phases
 
-0. **UX.** Clickable mockups of the main screens: map, inspector, decoder, timers, then terminals, LSDB diff, timeline. Iterate until agreed.
+0. **UX.** Clickable mockups of the main screens: map, inspector, simulator, decoder, timers, then terminals, LSDB diff, timeline. Iterate until agreed.
 1. **Skeleton.** Repo, backend with Docker driver and lab file, front end shell with docking layout, node list, health, terminals. Auth gate in place.
 2. **Live OSPF views.** ospfd, FRR and simulator drivers, normalized tables, live map. ospfd event subscription.
 3. **Config workbench.** ospfd, FRR, simulator YAML.
