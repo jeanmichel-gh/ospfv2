@@ -1,5 +1,9 @@
 === Unreleased
 
+* test/lab/lab_test.sh: the compose router lab end to end, from a fresh
+  lab folder: adjacencies, routes, saving configurations back to the lab
+  folder with the right owner, monitor and the event API. CI runs it
+
 * ospfd event stream: events.subscribe on the management API streams
   protocol events as JSON lines, each with a sequence number, a kind and
   structured data (neighbor, interface, dr, drop, spf, routes, lsa,

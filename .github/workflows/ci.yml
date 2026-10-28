@@ -46,3 +46,17 @@ jobs:
       - uses: actions/checkout@v4
       - run: docker build --target test .
       - run: docker build -t ospfv2 . && docker run --rm ospfv2 check /app/examples/grid.yml
+
+  # The router lab from docker-compose.yml, end to end, as in the user
+  # guide: a lab folder from "ospfv2 lab new", sim, frr and ospfd up,
+  # routes installed, configurations saved back to the lab folder with
+  # the right owner, and ospfd's event stream. Same script as in the VM.
+  lab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+      - run: test/lab/lab_test.sh
