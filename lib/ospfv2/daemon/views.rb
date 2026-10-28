@@ -61,7 +61,7 @@ module OSPFv2
                     ls_id: Core::Addr.to_s(l.ls_id), advr: Core::Addr.to_s(l.advr),
                     seq: format('0x%08x', l.seq & 0xffff_ffff), age: l.age, options: format('0x%02x', l.options),
                     checksum: format('0x%04x', l.checksum), length: l.length, self: l.advr == r.router_id }
-            row[:detail] = body(l) if detail
+            row[:detail] = l.detail if detail
             row
           end
         end
@@ -188,30 +188,6 @@ module OSPFv2
       def state_name(i)
         { down: 'Down', loopback: 'Loopback', waiting: 'Waiting', point_to_point: 'PtToPt',
           dr_other: 'DROther', backup: 'BDR', dr: 'DR' }.fetch(i.state, i.state.to_s)
-      end
-
-      def body(l)
-        case l.type
-        when 1
-          flags, links = l.router_body
-          { flags: { b: flags[0] == 1, e: flags[1] == 1, v: flags[2] == 1 },
-            links: links.map { |k| { type: k.type_name, id: Core::Addr.to_s(k.id), data: Core::Addr.to_s(k.data), metric: k.metric } } }
-        when 2
-          mask, routers = l.network_body
-          { mask: Core::Addr.to_s(mask), attached: routers.map { |x| Core::Addr.to_s(x) } }
-        when 3, 4, 5
-          b = l.body
-          mask, metric = b.unpack('NN')
-          d = { mask: Core::Addr.to_s(mask), metric: metric & 0xff_ffff }
-          if l.type == 5 && b.bytesize >= 16
-            _, _, fwd, tag = b.unpack('NNNN')
-            d.merge!(external_type: metric >> 31 == 1 ? 2 : 1, forwarding: Core::Addr.to_s(fwd), tag: tag)
-          end
-          d
-        else {}
-        end
-      rescue Core::Lsa::Error => e
-        { error: e.message }
       end
     end
   end
