@@ -117,7 +117,9 @@ cd ~ && git clone https://github.com/jeanmichel-gh/routescope.git
 
 ## Start everything after a VM boot
 
-The lab containers do not restart by themselves. routescope does: Docker starts it again at boot. Start the simulator and FRR, wait until they are Full, then ospfd:
+The lab containers do not restart by themselves. routescope does: Docker starts it again at boot. The quickest way: open http://localhost:8082, click the lab name in the header, and Start. routescope serves every lab in `~/labs` and runs compose labs from `~/ospfv2`.
+
+From the shell instead: start the simulator and FRR, wait until they are Full, then ospfd:
 
 ```sh
 # in the VM
@@ -205,13 +207,18 @@ cd ~/ospfv2 && docker build -t ospfv2 . && docker compose --profile bird build b
 docker pull quay.io/frrouting/frr:10.2.1
 ```
 
-Make it, deploy it, point routescope at it:
+Make it:
 
 ```sh
 # in the VM
 cd ~/ospfv2 && bin/ospfv2 lab new ~/labs/ospf-ring --containerlab
+```
+
+Then start it from routescope: click the lab name in the header, pick ospf-ring, Start. Stop the compose lab first if you want only one running; the two can run side by side. From the shell instead:
+
+```sh
+# in the VM
 cd ~/labs/ospf-ring && sudo containerlab deploy -t ospf-ring.clab.yml
-cd ~/routescope && LAB=~/labs/ospf-ring docker compose up -d
 ```
 
 Look at it, fail a link by hand, take it down:
@@ -222,7 +229,13 @@ docker exec clab-ospf-ring-ospfd ospf-cli -c 'show ospf neighbor'
 docker exec clab-ospf-ring-frr ip link set eth2 down; sleep 10; docker exec clab-ospf-ring-ospfd ip route get 2.2.2.2
 docker exec clab-ospf-ring-frr ip link set eth2 up
 cd ~/labs/ospf-ring && sudo containerlab destroy -t ospf-ring.clab.yml
-cd ~/routescope && LAB=~/labs/ospf-lab docker compose up -d     # back to the compose lab
+```
+
+routescope finds a new lab folder in `~/labs` within seconds; open it from the Labs panel. Labs somewhere else, or ospfv2 checked out somewhere else:
+
+```sh
+# in the VM
+cd ~/routescope && LABS=~/work/labs OSPFV2=~/src/ospfv2 docker compose up -d
 ```
 
 ## Check
