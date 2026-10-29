@@ -82,7 +82,7 @@ module OSPFv2
           @sim.stop if @sim.running?
           json(200, running: @sim.running?)
         else
-          if method == 'POST' && (m = path.match(%r{\A/api/links/(\d+)/(up|down|toggle|flap)\z}))
+          if method == 'POST' && (m = path.match(%r{\A/api/links/(\d+)/(up|down|toggle|flap|metric)\z}))
             link_action(m[1].to_i, m[2], body)
           else
             json(404, error: "no route for #{method} #{path}")
@@ -104,6 +104,8 @@ module OSPFv2
             when 'flap'
               p = JSON.parse(body.empty? ? '{}' : body)
               @sim.flap(id, count: (p['count'] || 3).to_i.clamp(1, 1000), interval: (p['interval'] || 5).to_f.clamp(0.5, 3600))
+            when 'metric'
+              @sim.set_metric(id, JSON.parse(body.empty? ? '{}' : body).fetch('metric') { raise ArgumentError, 'metric is required' })
             end
         json(200, l.to_h)
       end
