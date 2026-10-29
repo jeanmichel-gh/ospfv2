@@ -238,6 +238,28 @@ routescope finds a new lab folder in `~/labs` within seconds; open it from the L
 cd ~/routescope && LABS=~/work/labs OSPFV2=~/src/ospfv2 docker compose up -d
 ```
 
+## The SR Linux lab
+
+Nokia SR Linux, a vendor router, free from Nokia: the simulated area behind it on a LAN, and ospfd on a point-to-point link behind it. It needs about 2 GB of memory while running, and its image has an ARM64 build. Pull the image and make the lab once:
+
+```sh
+# in the VM
+docker pull ghcr.io/nokia/srlinux:26.3.1
+cd ~/ospfv2 && bin/ospfv2 lab new ~/labs/ospf-srl --srlinux
+```
+
+Then start it from routescope's lab menu. It boots in about a minute. Look at it from the shell:
+
+```sh
+# in the VM
+docker exec clab-ospf-srl-srl sr_cli show network-instance default protocols ospf neighbor
+docker exec clab-ospf-srl-srl sr_cli show network-instance default route-table
+docker exec -it clab-ospf-srl-srl sr_cli                    # its CLI; quit to leave
+docker exec clab-ospf-srl-ospfd ospf-cli -c 'show ospf neighbor'
+```
+
+Its configuration is `~/labs/ospf-srl/srl/config.cli`: `set` lines applied when it boots. Its ports are `ethernet-1/1` and `ethernet-1/2` in its CLI, `e1-1` and `e1-2` for Linux and routescope's link faults.
+
 ## Check
 
 ```sh
