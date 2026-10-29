@@ -14,6 +14,9 @@
 #                                      the same simulator against FRRouting ospfd,
 #                                      then: docker compose exec frr vtysh -c "show ip ospf neighbor"
 #
+#   docker compose --profile bird up -d bird
+#                                      BIRD 2 as a fourth router (10.99.0.40).
+#
 #   docker compose up -d ospfd         ospfd as a third router, once the simulator
 #                                      is Full. Its socket is on the ospfd-run volume:
 #                                      docker compose exec ospfd ospf-cli
@@ -113,6 +116,22 @@ services:
       - ospfd-run:/run/ospfv2
     entrypoint: ["ospfd"]
     command: []
+
+  # BIRD 2, a fourth router: docker compose --profile bird up -d bird
+  bird:
+    hostname: bird
+    profiles: [bird]
+    build: { context: docker/bird }
+    image: ospfv2-bird:latest
+    cap_add: [NET_ADMIN, NET_RAW]
+    networks:
+      ospflab:
+        ipv4_address: 10.99.0.40
+    volumes:
+      - type: bind
+        source: ${LAB:-./examples/lab}/bird
+        target: /etc/bird
+        bind: { create_host_path: false }
 
 networks:
   ospflab:

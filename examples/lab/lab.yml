@@ -35,6 +35,13 @@ nodes:
     address: 10.99.0.20
     config: peer/peer.yml
 
+  - name: bird
+    kind: bird
+    service: bird
+    profiles: [bird]
+    address: 10.99.0.40
+    config: bird/bird.conf
+
   - name: ospfd
     kind: ospfd
     service: ospfd
