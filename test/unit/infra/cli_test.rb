@@ -128,6 +128,31 @@ class TestCLI < Test::Unit::TestCase
     end
   end
 
+  def test_lab_new_bgp_labs
+    { '--bgp' => ['bgp-ibgp', %w[r1 r2 r3], %w[r1/frr.conf r1/daemons r2/frr.conf r3/bird.conf]],
+      '--ospf-bgp' => ['ospf-bgp', %w[sim ospfd asbr r1 r2 r3], %w[sim/sim.yml ospfd/ospfd.conf asbr/frr.conf asbr/daemons r1/frr.conf r2/frr.conf r3/bird.conf]] }
+      .each do |flag, (name, nodes, files)|
+      Dir.mktmpdir do |d|
+        dir = File.join(d, name)
+        rc, out, = run_cli('lab', 'new', dir, '--no-git', flag)
+        assert_equal 0, rc, flag
+        assert_match(/sudo containerlab deploy -t #{name}.clab.yml/, out)
+        files.each { |f| assert File.file?(File.join(dir, f)), "#{flag}: missing #{f}" }
+        topo = YAML.safe_load(File.read(File.join(dir, "#{name}.clab.yml")))
+        assert_equal nodes, topo['topology']['nodes'].keys, flag
+        frr = File.read(File.join(dir, 'r1/daemons'))
+        assert_match(/^bgpd=yes/, frr)
+        assert_match(/^staticd=yes/, frr, 'for the blackhole routes it advertises')
+        assert_equal 0, run_cli('check', File.join(dir, 'sim/sim.yml'))[0] if nodes.include?('sim')
+      end
+    end
+  end
+
+  def test_the_ospf_bgp_lab_keeps_its_lsdb_small
+    t = OSPFv2::Topology.load(File.join(OSPFv2::CLI::OSPF_BGP_TEMPLATE, 'sim/sim.yml'))
+    assert_equal 9, t.routers.size - 1, 'a 3x3 grid and the edge router'
+  end
+
   def test_lab_new_containerlab
     Dir.mktmpdir do |d|
       dir = File.join(d, 'ring')

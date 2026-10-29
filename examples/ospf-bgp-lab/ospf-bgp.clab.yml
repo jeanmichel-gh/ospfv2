@@ -1,0 +1,88 @@
+# Two AS domains. AS 65000 runs OSPF: the simulated area (a 3x3 grid)
+# behind the simulator, ospfd, and asbr (FRR), which redistributes OSPF
+# into BGP. AS 65001 is three iBGP speakers, full mesh: r1 and r2 (FRR),
+# r3 (BIRD). asbr and r1 peer by eBGP; r1 gives AS 65000's routes to r2
+# and r3 with itself as next hop.
+#
+#   AS 65000 (OSPF area 0)                     AS 65001 (iBGP)
+#
+#   sim 1.1.1.1 --LAN 10.99.0.0/24-- asbr 2.2.2.2 --eBGP 10.1.100.0/30-- r1 10.255.1.1
+#   (3x3 grid behind)                 |                                  /  \
+#                       10.0.23.0/30  |                       10.1.12.0/30  10.1.13.0/30
+#                                 ospfd 3.3.3.3                         r2 ---- r3
+#                                                                  10.255.1.2  10.255.1.3 (BIRD)
+#
+# Images: ospfv2:latest and ospfv2-bird:latest from ~/ospfv2
+# (docker build -t ospfv2 . && docker compose --profile bird build bird),
+# and FRR (docker pull quay.io/frrouting/frr:10.2.1).
+# Start it from routescope's lab menu, or in this folder:
+#   sudo containerlab deploy -t ospf-bgp.clab.yml
+name: ospf-bgp
+
+topology:
+  nodes:
+    sim:
+      kind: linux
+      image: ospfv2:latest
+      binds: [sim:/lab]
+      labels: { routescope.protocols: ospf }
+      # Its address before it starts: containerlab wires eth1 just after.
+      entrypoint: sh
+      cmd: >-
+        -c "until ip link show eth1 >/dev/null 2>&1; do sleep 0.2; done;
+        ip addr add 10.99.0.10/24 dev eth1;
+        exec ospfv2 run /lab/sim.yml --web 0.0.0.0:8080 --log /tmp/ospfv2.log"
+    ospfd:
+      kind: linux
+      image: ospfv2:latest
+      binds: [ospfd:/etc/ospfv2]
+      labels: { routescope.protocols: ospf }
+      entrypoint: ospfd
+      cmd: ""
+      exec:
+        - ip addr add 10.0.23.2/30 dev eth1
+        - ip addr add 3.3.3.3/32 dev lo
+    asbr:
+      kind: linux
+      image: quay.io/frrouting/frr:10.2.1
+      binds: [asbr:/etc/frr]
+      labels: { routescope.protocols: "ospf,bgp" }
+      # frr.conf has them too; FRR can miss them on links wired after it starts.
+      exec:
+        - sh -c "ip addr add 10.99.0.20/24 dev eth1 2>/dev/null || true"
+        - sh -c "ip addr add 10.0.23.1/30 dev eth2 2>/dev/null || true"
+        - sh -c "ip addr add 10.1.100.1/30 dev eth3 2>/dev/null || true"
+    r1:
+      kind: linux
+      image: quay.io/frrouting/frr:10.2.1
+      binds: [r1:/etc/frr]
+      labels: { routescope.protocols: bgp }
+      exec:
+        - sh -c "ip addr add 10.1.12.1/30 dev eth1 2>/dev/null || true"
+        - sh -c "ip addr add 10.1.13.1/30 dev eth2 2>/dev/null || true"
+        - sh -c "ip addr add 10.1.100.2/30 dev eth3 2>/dev/null || true"
+    r2:
+      kind: linux
+      image: quay.io/frrouting/frr:10.2.1
+      binds: [r2:/etc/frr]
+      labels: { routescope.protocols: bgp }
+      exec:
+        - sh -c "ip addr add 10.1.12.2/30 dev eth1 2>/dev/null || true"
+        - sh -c "ip addr add 10.1.23.1/30 dev eth2 2>/dev/null || true"
+    r3:
+      kind: linux
+      image: ospfv2-bird:latest
+      binds: [r3:/etc/bird]
+      labels: { routescope.protocols: bgp }
+      exec:
+        - ip addr add 10.1.23.2/30 dev eth1
+        - ip addr add 10.1.13.2/30 dev eth2
+        - ip addr add 10.255.1.3/32 dev lo
+  # The LAN at 1500: the simulator says 1500 in its database descriptions.
+  links:
+    - { endpoints: ["sim:eth1", "asbr:eth1"], mtu: 1500 }
+    - { endpoints: ["asbr:eth2", "ospfd:eth1"] }
+    - { endpoints: ["asbr:eth3", "r1:eth3"] }
+    - { endpoints: ["r1:eth1", "r2:eth1"] }
+    - { endpoints: ["r2:eth2", "r3:eth1"] }
+    - { endpoints: ["r3:eth2", "r1:eth2"] }

@@ -75,6 +75,21 @@ jobs:
       - run: docker pull -q quay.io/frrouting/frr:10.2.1
       - run: test/lab/clab_test.sh
 
+  # The BGP labs: three iBGP speakers in one AS (FRR, FRR, BIRD), then an
+  # OSPF domain redistributed into BGP and carried into that AS.
+  bgp:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+      - run: bash -c "$(curl -sL https://get.containerlab.dev)"
+      - run: docker pull -q quay.io/frrouting/frr:10.2.1
+      - run: test/lab/bgp_test.sh ibgp
+      - run: SKIP_BUILD= test/lab/bgp_test.sh ospf-bgp
+
   # Nokia SR Linux in a containerlab lab: the simulator and ospfd Full with
   # it, the simulated area's routes on ospfd through it. Its answers to a
   # few commands are kept as annotations, for routescope's driver.

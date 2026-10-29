@@ -175,11 +175,24 @@ module OSPFv2
     LAB_TEMPLATE = File.expand_path('../../examples/lab', __dir__)
     CLAB_TEMPLATE = File.expand_path('../../examples/clab-lab', __dir__)
     SRL_TEMPLATE = File.expand_path('../../examples/srl-lab', __dir__)
+    BGP_TEMPLATE = File.expand_path('../../examples/bgp-lab', __dir__)
+    OSPF_BGP_TEMPLATE = File.expand_path('../../examples/ospf-bgp-lab', __dir__)
+
+    # The containerlab templates: their topology file, and what they need
+    # first (images), for the message after lab new.
+    CLAB_LABS = {
+      clab: ['ospf-ring.clab.yml', 'images ospfv2 and ospfv2-bird first'],
+      srl: ['ospf-srl.clab.yml', 'image ospfv2 first, and SR Linux: docker pull ghcr.io/nokia/srlinux:26.3.1'],
+      bgp: ['bgp-ibgp.clab.yml', 'images FRR and ospfv2-bird first'],
+      ospf_bgp: ['ospf-bgp.clab.yml', 'images ospfv2, ospfv2-bird and FRR first']
+    }.freeze
 
     # Copies the router lab template into a new folder and makes it a git
     # repository, so saved configurations have history. --containerlab
     # copies the containerlab lab instead: a ring of point-to-point links.
-    # --srlinux copies the containerlab lab with Nokia SR Linux.
+    # --srlinux copies the containerlab lab with Nokia SR Linux. --bgp:
+    # three iBGP speakers in one AS. --ospf-bgp: an OSPF domain whose
+    # routes reach another AS by BGP.
     def cmd_lab(argv)
       sub = argv.shift
       raise ArgumentError, "lab needs a subcommand: lab new DIR" unless sub == 'new'
@@ -189,9 +202,12 @@ module OSPFv2
         o.on('--no-git') { git = false }
         o.on('--containerlab') { kind = :clab }
         o.on('--srlinux') { kind = :srl }
+        o.on('--bgp') { kind = :bgp }
+        o.on('--ospf-bgp') { kind = :ospf_bgp }
       end.parse!(argv)
       template, from = { compose: [LAB_TEMPLATE, 'examples/lab'], clab: [CLAB_TEMPLATE, 'examples/clab-lab'],
-                         srl: [SRL_TEMPLATE, 'examples/srl-lab'] }.fetch(kind)
+                         srl: [SRL_TEMPLATE, 'examples/srl-lab'], bgp: [BGP_TEMPLATE, 'examples/bgp-lab'],
+                         ospf_bgp: [OSPF_BGP_TEMPLATE, 'examples/ospf-bgp-lab'] }.fetch(kind)
       dir = argv.shift or raise ArgumentError, 'lab new needs a folder, for example: ospfv2 lab new ~/labs/ospf-lab'
       dir = File.expand_path(dir)
       raise ArgumentError, "#{dir} exists and is not empty" if File.exist?(dir) && !(File.directory?(dir) && Dir.empty?(dir))
@@ -204,26 +220,21 @@ module OSPFv2
       end
       @out.puts "lab created in #{dir}"
       @out.puts(lab_git_init(dir, from)) if git
-      @out.puts(case kind
-                when :clab then <<~CLAB
-                  
-                  Start it from routescope's Labs panel, or with containerlab
-                  (images ospfv2 and ospfv2-bird first):
-                    cd #{dir} && sudo containerlab deploy -t ospf-ring.clab.yml
-                CLAB
-                when :srl then <<~SRL
-                  
-                  Start it from routescope's Labs panel, or with containerlab
-                  (image ospfv2 first, and SR Linux: docker pull ghcr.io/nokia/srlinux:26.3.1):
-                    cd #{dir} && sudo containerlab deploy -t ospf-srl.clab.yml
-                SRL
-                else <<~TXT
-                  
-                  Use it from the ospfv2 folder:
-                    export LAB=#{dir}
-                    docker compose --profile frr up -d sim frr
-                TXT
-                end)
+      if (topo, needs = CLAB_LABS[kind])
+        @out.puts <<~CLAB
+
+          Start it from routescope's Labs panel, or with containerlab
+          (#{needs}):
+            cd #{dir} && sudo containerlab deploy -t #{topo}
+        CLAB
+      else
+        @out.puts <<~TXT
+
+          Use it from the ospfv2 folder:
+            export LAB=#{dir}
+            docker compose --profile frr up -d sim frr
+        TXT
+      end
       0
     end
 
