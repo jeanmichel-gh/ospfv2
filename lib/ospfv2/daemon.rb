@@ -488,7 +488,8 @@ module OSPFv2
     LIVE = %i[auth cost].freeze
 
     def same_except_live?(applied, want, link)
-      applied[:address] == link.address && applied.except(:address, *LIVE) == want.except(*LIVE)
+      applied[:address] == link.address && applied[:link_mtu] == link.mtu &&
+        applied.except(:address, :link_mtu, *LIVE) == want.except(*LIVE)
     end
 
     def update_live(name, want)
@@ -502,17 +503,21 @@ module OSPFv2
         iface.cost = want[:cost] || Core::Interface::DEFAULTS[:cost]
         log(:info, "interface #{name}: cost #{iface.cost}")
       end
-      @applied[name] = want.merge(address: have[:address])
+      @applied[name] = want.merge(address: have[:address], link_mtu: have[:link_mtu])
     end
 
+    # A configured mtu wins; otherwise the kernel's, so DD packets say
+    # what the link really carries (a containerlab veth is 9500). The DD
+    # field is 16 bits, so a loopback's 65536 says 65535.
     def add(name, want, link)
       opts = want.except(:area)
+      opts[:mtu] ||= [link.mtu, 65_535].min if link.mtu && link.mtu >= 576
       ip = link.address.split('/').first
       transport = opts[:passive] ? nil : @transport.call(name, ip)
       @instance.add_interface(name: name, address: link.address, area: want[:area], transport: transport, **opts)
-      @applied[name] = want.merge(address: link.address)
+      @applied[name] = want.merge(address: link.address, link_mtu: link.mtu)
       @pending.delete(name)
-      log(:info, "interface #{name}: running OSPF on #{link.address} in area #{want[:area]}")
+      log(:info, "interface #{name}: running OSPF on #{link.address} in area #{want[:area]}, MTU #{@instance.interfaces[name].mtu}")
     rescue StandardError => e
       # add_interface undoes itself; make sure, then retry later.
       @instance.remove_interface(name) if @instance.interfaces.key?(name)

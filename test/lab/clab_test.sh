@@ -85,6 +85,7 @@ step "routes"
 wait_for 90 "ospfd installs the simulated area's routes (250 or more)" ospfd_routes
 wait_for 60 "bird has them too" bird_routes
 check "ospfd reaches FRR's loopback straight over eth1" ospfd_via 2.2.2.2 10.0.23.1
+check "ospfd takes the ring's MTU from the kernel" sh -c "docker exec clab-$NAME-ospfd ospf-cli -c 'show ospf interface detail' | grep -q 'MTU: 9500'"
 
 step "a link fails: ospfd goes round by BIRD"
 docker exec clab-$NAME-frr ip link set eth2 down

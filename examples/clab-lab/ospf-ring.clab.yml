@@ -52,10 +52,11 @@ topology:
         - ip addr add 10.0.34.2/30 dev eth1
         - ip addr add 10.0.24.2/30 dev eth2
         - ip addr add 4.4.4.4/32 dev lo
-  # MTU 1500, not containerlab's 9500: ospfd puts 1500 in its database
-  # descriptions, and a neighbor saying more would stop the exchange.
+  # The ring keeps containerlab's MTU, 9500; every router reads it from
+  # the kernel. The LAN is 1500: the simulator always says 1500, and a
+  # neighbor saying more would stop the database exchange.
   links:
     - { endpoints: ["sim:eth1", "frr:eth1"], mtu: 1500 }
-    - { endpoints: ["frr:eth2", "ospfd:eth1"], mtu: 1500 }
-    - { endpoints: ["ospfd:eth2", "bird:eth1"], mtu: 1500 }
-    - { endpoints: ["bird:eth2", "frr:eth3"], mtu: 1500 }
+    - { endpoints: ["frr:eth2", "ospfd:eth1"] }
+    - { endpoints: ["ospfd:eth2", "bird:eth1"] }
+    - { endpoints: ["bird:eth2", "frr:eth3"] }
