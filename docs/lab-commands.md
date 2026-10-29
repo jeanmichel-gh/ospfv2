@@ -282,105 +282,37 @@ cd ~/routescope && docker compose logs --tail 50
 
 ## Query the lab from the shell
 
-Through routescope's API, the same way for every lab (compose or containerlab) and every router (FRR, ospfd, BIRD, SR Linux, the simulator). Paste the helpers once per shell, then any block below. `L` is the lab's name as the lab menu shows it; a lab that is not running answers with its error (`routescope: sim is not running`).
-
-```sh
-# in the VM: the helpers
-rs() { curl -s --max-time 60 "localhost:8082/api/$1"; }
-py() { python3 -c "import json, sys
-t = sys.stdin.read()
-if not t.strip(): sys.exit('routescope: no answer (is it up? curl -s localhost:8082/api/health)')
-d = json.loads(t)
-if isinstance(d, dict) and 'error' in d: sys.exit('routescope: ' + d['error'])
-$1"; }
-L=ospf-lab
-```
-
-The labs, and which run:
+routescope's `tools/shell.sh` gives the shell commands that ask routescope about the labs, the same way for every lab (compose or containerlab) and every router. Load them once per shell, or for good from `~/.bashrc`:
 
 ```sh
 # in the VM
-rs labs | py 'for l in d: print(l["id"], l.get("runtime",""), l.get("state",""), (l.get("job") or {}).get("action",""))'
+source ~/routescope/tools/shell.sh
+grep -q routescope/tools/shell.sh ~/.bashrc || echo 'source ~/routescope/tools/shell.sh' >> ~/.bashrc
+rs_help
 ```
 
-Every node, its router id and its neighbors:
+The lab is the last argument; without it, `RS_LAB` if set, else the first running lab.
 
 ```sh
 # in the VM
-rs labs/$L/nodes | py '
-for n in d:
-    o = n.get("ospf") or {}
-    print(n["name"], n["kind"], n["health"], o.get("router_id") or "", n.get("reason") or "")
-    for x in o.get("neighbors", []): print("   ", x["router_id"], x.get("address") or "", x["state"], x.get("role") or "")'
+rs_labs                          # the labs, and which run
+rs_nodes                         # nodes, router ids, neighbors
+rs_table frr neighbors           # or interfaces, lsdb, routes
+rs_route ospfd 10.255.0.1/32     # the route count, and one route
+rs_lsdb frr                      # LSAs by type
+rs_links                         # the simulator's links and metrics
+rs_link 1                        # one simulated link, as its list and its map have it
+rs_compare                       # what differs between the routers ("missing" matters)
+rs_job ospf-srl                  # the last start or stop, with its output
+rs_audit                         # what was done, newest first
+rs_old_images                    # lab containers still on an old image
 ```
 
-One node's table: `neighbors`, `interfaces`, `lsdb` or `routes`.
+Any other question: `rs PATH` is routescope's JSON for `/api/PATH`, and `py CODE` runs Python on it as `d`. routescope's `docs/shell.md` has more.
 
 ```sh
 # in the VM
-N=frr; T=neighbors
-rs labs/$L/nodes/$N/tables/$T | py '
-print(len(d["rows"]), "rows")
-for r in d["rows"][:5]: print(" ", r)'
-```
-
-How many routes a node has, and one of them; its LSAs by type:
-
-```sh
-# in the VM
-N=frr; P=10.255.0.1/32
-rs labs/$L/nodes/$N/tables/routes | py "r = d['rows']; print(len(r), 'routes'); print([x for x in r if x['prefix'] == '$P'])"
-rs labs/$L/nodes/$N/tables/lsdb | py 'from collections import Counter; print(Counter(r["type_name"] for r in d["rows"]))'
-```
-
-The simulator's links: their metric, up or down, and its neighbor:
-
-```sh
-# in the VM
-rs labs/$L/nodes/sim/area | py '
-down = [l for l in d["links"] if not l["up"]]
-print(len(d["links"]), "links,", len(down), "down; neighbor", (d.get("neighbor") or {}).get("state"))
-for l in d["links"][:10]: print("  #%s %s metric %s %s" % (l["id"], l["name"], l["metric"], "up" if l["up"] else "DOWN"))'
-```
-
-One simulated link, as its list says it and as its map draws it (both should show the same metric):
-
-```sh
-# in the VM
-ID=1
-rs labs/$L/nodes/sim/area | py "print('link', [l for l in d['links'] if l['id'] == $ID]); print('map ', [e for e in d['edges'] if e.get('id') == $ID])"
-```
-
-The routers compared: LSAs and routes, and what differs:
-
-```sh
-# in the VM
-rs labs/$L/compare/lsdb | py '
-print("lsdb", d["counts"])
-for l in [x for x in d["lsas"] if x["status"] != "same"][:10]: print("  ", l["key"], l["status"], "; ".join(l["reasons"]))'
-rs labs/$L/compare/routes | py '
-print("routes", d["counts"])
-for r in [x for x in d["routes"] if x["status"] == "missing"][:10]: print("  ", r["prefix"], "; ".join(r["reasons"]))'
-```
-
-Routes "differ" by cost and next hop between routers; that is normal. "missing" is not.
-
-The last start or stop of a lab, with what it printed:
-
-```sh
-# in the VM
-rs labs/$L/lifecycle | py '
-j = d.get("job") or {}
-print(d["state"], "running:", ", ".join(d["up"]))
-print(j.get("action"), j.get("state"), j.get("error") or "")
-print("\n".join(j.get("output", [])[-20:]))'
-```
-
-What was done to the labs, newest first:
-
-```sh
-# in the VM
-rs labs/$L/audit | py 'for a in d[:10]: print(a["time"], a["user"], a["action"], {k: v for k, v in a.items() if k not in ("time", "user", "action")})'
+rs labs/ospf-lab/nodes/frr/tables/interfaces | py 'for i in d["rows"]: print(i["name"], i["address"], i["state"])'
 ```
 
 ### Straight to a router
@@ -394,19 +326,6 @@ docker exec ospfv2-ospfd-1 ospf-cli -c 'show ospf neighbor'
 docker exec ospfv2-bird-1 birdc show ospf neighbors
 docker exec clab-ospf-srl-srl sr_cli show network-instance default protocols ospf neighbor
 docker exec clab-ospf-ring-sim ruby -rnet/http -e 'puts Net::HTTP.get(URI("http://127.0.0.1:8080/api/state"))' | head -c 400; echo
-```
-
-### A lab container on an old image
-
-A rebuilt image reaches a lab only when its containers are made again (Stop and Start the lab). A container older than its image runs the old code:
-
-```sh
-# in the VM
-for c in $(docker ps --format '{{.Names}}' | grep -E '^(ospfv2-|clab-)'); do
-  img=$(docker inspect -f '{{.Config.Image}}' "$c")
-  [ "$(docker inspect -f '{{.Image}}' "$c")" = "$(docker image inspect -f '{{.Id}}' "$img" 2>/dev/null)" ] && s=current || s=OLD
-  echo "$c  $img  $s"
-done
 ```
 
 ## Use the routers
