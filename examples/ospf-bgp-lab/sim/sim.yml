@@ -1,0 +1,20 @@
+# The simulator in the OSPF and BGP lab: on 10.99.0.0/24 with the ASBR,
+# the DR. A 3x3 grid and a few prefixes, to keep the LSDB small.
+simulator:
+  router_id: 1.1.1.1
+  interface: 10.99.0.10/24
+  hello_interval: 2
+grid:
+  columns: 3
+  rows: 3
+  metric: 10
+routers:
+  - name: edge
+    id: 10.0.0.1
+    loopback: 10.255.0.1
+    summaries:
+      - { prefix: 30.0.0.0/24, count: 10 }
+    externals:
+      - { prefix: 50.0.0.0/24, count: 10, metric: 20, type: 2 }
+links:
+  - { from: r3c3, to: edge, metric: 5 }

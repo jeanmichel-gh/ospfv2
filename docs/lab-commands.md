@@ -260,6 +260,32 @@ docker exec clab-ospf-srl-ospfd ospf-cli -c 'show ospf neighbor'
 
 Its configuration is `~/labs/ospf-srl/srl/config.cli`: `set` lines applied when it boots. Its ports are `ethernet-1/1` and `ethernet-1/2` in its CLI, `e1-1` and `e1-2` for Linux and routescope's link faults.
 
+## The BGP labs
+
+Two containerlab labs with BGP, from FRR and BIRD images (FRR: `docker pull quay.io/frrouting/frr:10.2.1`; BIRD and ospfv2: built in `~/ospfv2` as above).
+
+**bgp-ibgp**: three BGP speakers in AS 65001, peering with one another (iBGP, full mesh) over a triangle of links. r1 and r2 run FRR, r3 runs BIRD. Each advertises its loopback (10.255.1.N) and a /24 (192.168.N.0/24).
+
+**ospf-bgp**: two AS domains. AS 65000 runs OSPF: the simulator (a 3x3 grid, about 30 LSAs), ospfd, and asbr (FRR), which redistributes OSPF into BGP. AS 65001 is the three iBGP speakers above. asbr and r1 peer by eBGP; r1 hands AS 65000's routes to r2 and r3 with itself as next hop.
+
+```sh
+# in the VM
+cd ~/ospfv2 && bin/ospfv2 lab new ~/labs/bgp-ibgp --bgp
+cd ~/ospfv2 && bin/ospfv2 lab new ~/labs/ospf-bgp --ospf-bgp
+```
+
+Start one from routescope's lab menu. Look at them from the shell:
+
+```sh
+# in the VM
+docker exec clab-bgp-ibgp-r1 vtysh -c 'show bgp summary'
+docker exec clab-bgp-ibgp-r3 birdc show protocols
+docker exec clab-bgp-ibgp-r3 birdc show route
+docker exec clab-ospf-bgp-asbr vtysh -c 'show ip ospf neighbor'
+docker exec clab-ospf-bgp-asbr vtysh -c 'show bgp summary'
+docker exec clab-ospf-bgp-r2 vtysh -c 'show ip route bgp'
+```
+
 ## Check
 
 ```sh
