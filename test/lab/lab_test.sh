@@ -146,6 +146,7 @@ step "BIRD, a fourth router"
 "${COMPOSE[@]}" up -d --build bird
 wait_for 120 "bird Full with frr, the DR" bird_full_with_frr
 check "frr sees bird" bird_in_frr
+check "the bird shell has ps and ip" docker compose exec -T bird sh -c 'ps -e | grep -q bird && ip -br addr show eth0'
 wait_for 60 "bird computes the simulated area's routes (250 or more)" bird_routes
 echo "       $(bird_route_count) BIRD routes"
 
