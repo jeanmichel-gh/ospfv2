@@ -72,6 +72,41 @@ class TestSimulator < Test::Unit::TestCase
     assert_equal 2, @sim.events.count { |e| e.kind == :lsdb }
   end
 
+  def metric(rid, nbr) = p2p_links(rlsa(rid)).find { |l| l.link_id.to_ip == nbr }&.metric&.to_i
+  def stub_metric(rid, net) = rlsa(rid).links.find { |l| l.router_link_type.to_i == 3 && l.link_id.to_ip == net }&.metric&.to_i
+
+  def test_set_metric
+    link = @sim.link('r1c1--r1c2')
+    net = link.lsdb_link.network.to_s
+    seq = rlsa('0.1.0.1').sequence_number.to_I
+    assert_same link, @sim.set_metric('r1c1--r1c2', 25)
+    assert_equal [25, 25, 25, 25], [metric('0.1.0.1', '0.1.0.2'), metric('0.1.0.2', '0.1.0.1'), stub_metric('0.1.0.1', net), stub_metric('0.1.0.2', net)]
+    assert_equal 1, p2p_links(rlsa('0.1.0.1')).count { |l| l.link_id.to_ip == '0.1.0.2' }, 'replaced, not added'
+    assert_equal seq + 1, rlsa('0.1.0.1').sequence_number.to_I
+    assert_equal 25, link.to_h[:metric]
+    assert_equal 25, @sim.snapshot[:graph][:edges].find { _1[:id] == link.id }[:metric]
+    assert_match(/link r1c1--r1c2 metric 10 to 25: re-originated 2 LSAs/, @sim.events.last.text)
+    @sim.set_metric(link.id, 25)
+    assert_equal seq + 1, rlsa('0.1.0.1').sequence_number.to_I, 'the same metric changes nothing'
+    # A down link keeps its new metric for when it comes back.
+    @sim.link_down(link.id)
+    @sim.set_metric(link.id, 40)
+    refute rlsa('0.1.0.1').has_link?(1, '0.1.0.2')
+    @sim.link_up(link.id)
+    assert_equal 40, metric('0.1.0.1', '0.1.0.2')
+    assert_raise_message(/from 1 to 65535/) { @sim.set_metric(link.id, 0) }
+    assert_raise_message(/a number/) { @sim.set_metric(link.id, 'x') }
+  end
+
+  def test_metric_survives_a_flush
+    @sim.set_metric('r1c1--r1c2', 30)
+    @sim.flush_all
+    @sim.ls_db.all.dup.each { |l| @sim.ls_db.ls_ack(l) }
+    @sim.refresh_all
+    assert_equal [30, 30], [metric('0.1.0.1', '0.1.0.2'), metric('0.1.0.2', '0.1.0.1')]
+    assert_equal 10, metric('0.1.0.1', '0.2.0.1'), 'the others as in the topology'
+  end
+
   def test_link_down_is_idempotent
     @sim.link_down(1)
     seq = rlsa('0.1.0.1').sequence_number.to_I

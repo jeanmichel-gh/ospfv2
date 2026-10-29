@@ -68,6 +68,9 @@ class TestWebServer < Test::Unit::TestCase
     status, _, body = post('/api/links/99/down')
     assert_equal 400, status
     assert_match(/no such link/, body)
+    assert_equal 25, JSON.parse(post('/api/links/1/metric', '{"metric":25}')[2])['metric']
+    assert_equal 400, post('/api/links/1/metric', '{"metric":0}')[0]
+    assert_equal 400, post('/api/links/1/metric', '{}')[0]
   end
 
   def test_events_since

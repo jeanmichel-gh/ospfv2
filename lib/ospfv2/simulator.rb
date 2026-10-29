@@ -28,7 +28,10 @@ module OSPFv2
         @spec = spec
         @lsdb_link = lsdb_link
         @up = spec.up?
+        @metric = spec.metric
       end
+
+      attr_accessor :metric
 
       def name = spec.name
       def up? = @up
@@ -36,7 +39,7 @@ module OSPFv2
       def down! = (@up = false)
 
       def to_h
-        { id: id, name: name, from: spec.from, to: spec.to, metric: spec.metric, up: @up,
+        { id: id, name: name, from: spec.from, to: spec.to, metric: @metric, up: @up,
           network: lsdb_link.network_to_s }
       end
     end
@@ -116,6 +119,32 @@ module OSPFv2
       end
     end
 
+    # Sets the link's metric, both ways. An up link re-originates its two
+    # router LSAs; a down one comes back up with it.
+    def set_metric(ref, metric)
+      metric = Integer(metric, exception: false) || raise(ArgumentError, "metric #{metric.inspect}: a number")
+      raise ArgumentError, "metric #{metric}: from 1 to 65535" unless (1..65_535).cover?(metric)
+      synchronize do
+        l = find_link(ref)
+        next l if l.metric == metric
+        was = l.metric
+        l.metric = metric
+        l.lsdb_link.metric = metric
+        if l.up?
+          reoriginate relink(l), "link #{l.name} metric #{was} to #{metric}"
+        else
+          event :info, "link #{l.name} metric #{was} to #{metric}, used when it comes up"
+        end
+        l
+      end
+    end
+
+    # The link's two router LSA entries again, with its current metric.
+    def relink(l)
+      (@ls_db.link_down(l.lsdb_link) + @ls_db.link_up(l.lsdb_link)).uniq
+    end
+    private :relink
+
     def toggle_link(ref)
       find_link(ref).up? ? link_down(ref) : link_up(ref)
     end
@@ -173,9 +202,14 @@ module OSPFv2
     def restore
       synchronize do
         down = @links.reject(&:up?).map(&:id)
+        metrics = @links.to_h { [_1.id, _1.metric] }
         build_lsdb
         @neighbor.ls_db = @ls_db
         @links.each do |l|
+          if l.metric != metrics[l.id]
+            l.metric = l.lsdb_link.metric = metrics[l.id]
+            relink(l)
+          end
           if down.include?(l.id)
             l.down! if l.up?
             @ls_db.link_down(l.lsdb_link)
@@ -271,7 +305,7 @@ module OSPFv2
           asbr: r.asbr, networks: r.networks.size, summaries: r.summaries.size, externals: r.externals.size }
       end
       nodes << { id: 'dut', router_id: @neighbor.neighbor_router_id&.to_ip, dut: true, address: @neighbor.neighbor_ip }
-      edges = @links.map { |l| { id: l.id, from: l.spec.from, to: l.spec.to, metric: l.spec.metric, up: l.up? } }
+      edges = @links.map { |l| { id: l.id, from: l.spec.from, to: l.spec.to, metric: l.metric, up: l.up? } }
       edges << { id: 'dut', from: Topology::SIM, to: 'dut', up: @neighbor.full?, state: @neighbor.state }
       { nodes: nodes, edges: edges }
     end

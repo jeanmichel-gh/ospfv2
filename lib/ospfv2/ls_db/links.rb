@@ -87,6 +87,7 @@ module OSPFv2::LSDB
     NeighborId = Class.new(OSPFv2::Id)
 
     attr_reader :router_id, :neighbor_id, :metric
+    attr_writer :metric
 
     #TODO: :metric => [10,20] ... revisit
     #      :metric_ifa => 10, :metric_ifb=>20
