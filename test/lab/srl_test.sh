@@ -20,24 +20,24 @@ step() { STEP="$*"; echo; echo "=== $*"; }
 ok() { echo "  ok   $*"; PASSED=$((PASSED + 1)); }
 sr() { docker exec "$SRL" sr_cli "$*"; }
 cli() { docker exec clab-$NAME-ospfd ospf-cli -c "$*"; }
+# What to look at when a check fails, each part its own annotation (one
+# is cut at about 4 KB).
+diag() {
+  echo "packets on the LAN, 8 s"; docker exec clab-$NAME-sim timeout 8 ospfv2 capture -i eth1 2>&1 | cut -c1-300 | head -30
+  echo "@@sim log"; docker exec clab-$NAME-sim tail -n 30 /tmp/ospfv2.log 2>&1 | cut -c1-300
+  echo "@@srl neighbors and interfaces"; sr show network-instance default protocols ospf neighbor; sr show network-instance default protocols ospf interface
+  echo "@@srl LAN interface counters"; sr info from state network-instance default protocols ospf instance main area 0.0.0.0 interface ethernet-1/1.0 statistics
+  echo "@@ospfd"; cli 'show ospf neighbor'; cli 'show ospf interface'
+  echo "@@logs"; for n in sim srl ospfd; do echo "--- $n"; docker logs --tail 10 clab-$NAME-$n 2>&1 | cut -c1-300; done
+}
 fail() {
   echo "  FAIL $*"
-  local diag
-  diag="$( {
-    echo "--- srl neighbors"; sr show network-instance default protocols ospf neighbor
-    echo "--- srl interfaces"; sr show network-instance default protocols ospf interface
-    echo "--- srl ports"; sr show interface ethernet-1/1; sr show interface ethernet-1/2
-    echo "--- srl LAN interface counters"; sr info from state network-instance default protocols ospf instance main area 0.0.0.0 interface ethernet-1/1.0 statistics
-    echo "--- packets on the LAN, 8 s"; docker exec clab-$NAME-sim timeout 8 ospfv2 capture -i eth1 | cut -c1-400 | head -40
-    echo "--- sim log"; docker exec clab-$NAME-sim tail -n 40 /tmp/ospfv2.log
-    echo "--- srl config"; sr info network-instance default protocols ospf
-    echo "--- ospfd"; cli 'show ospf neighbor'; cli 'show ospf interface'
-    for n in sim srl ospfd; do echo "--- logs $n"; docker logs --tail 15 clab-$NAME-$n; done
-  } 2>&1 )"
-  echo "$diag"
+  local out
+  out="$(diag 2>&1 | grep -v '^[=-]\{20,\}$')"
+  echo "$out"
   if [ -n "${GITHUB_ACTIONS:-}" ]; then
     echo "::error title=SR Linux lab::failed at ${STEP}: $* (after ${PASSED} passed checks)"
-    echo "::error title=SR Linux lab state::$(echo "$diag" | tail -n 200 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+    echo "$out" | awk 'BEGIN { RS = "@@" } NF { gsub(/%/, "%25"); gsub(/\n/, "%0A"); split($0, a, "%0A"); printf "::error title=SR Linux: %s::%s\n", a[1], substr($0, 1, 3800) }'
   fi
   exit 1
 }

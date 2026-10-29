@@ -157,4 +157,30 @@ class TestNeighborNeighbor < Test::Unit::TestCase
   ensure
     n&.stop
   end
+
+  # A master whose first DD sets more than I, M and MS (SR Linux): the
+  # simulator, the slave, answers it; its DDs say E, as its hellos.
+  def test_exstart_answers_a_master_with_more_flags
+    t = CaptureTransport.new
+    n = new_neighbor(transport: t, router_id: 1, src_addr: '10.0.0.1/24')
+    n.start
+    t.inject(Hello.new(router_id: 2, netmask: '255.255.255.0'), '10.0.0.2')
+    sleep 0.2
+    hello = Hello.new(router_id: 2, netmask: '255.255.255.0')
+    hello.neighbors = 1
+    t.inject(hello, '10.0.0.2')
+    sleep 0.2
+    assert_equal :exstart, n.state
+    first = t.packets(DatabaseDescription).last
+    assert_equal 2, first.options.to_i, 'E, as in our hellos'
+    master = DatabaseDescription.new(router_id: 2, imms: 7, dd_sequence_number: 4711)
+    master.instance_variable_set(:@imms, 0x0f) # as parsed off the wire: the constructor takes 0..7
+    t.inject(master, '10.0.0.2')
+    sleep 0.2
+    assert_equal :exchange, n.state
+    reply = t.packets(DatabaseDescription).last
+    assert_equal [4711, 0, 2], [reply.seqn, reply.imms & 5, reply.options.to_i], 'the slave: same sequence, no I or MS'
+  ensure
+    n&.stop
+  end
 end

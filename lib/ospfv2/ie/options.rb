@@ -128,7 +128,7 @@ module OSPFv2
       elsif arg.is_a?(Integer) and (0..255) === arg
         @options = arg
       elsif arg.is_a?(self.class)
-        set(arg.to_hash)
+        @options = arg.to_i
       else
         raise ArgumentError, "Invalid argument", caller
       end
