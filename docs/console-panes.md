@@ -184,7 +184,7 @@ Start, act, stop. The bundle holds logs, pcap, events and before and after snaps
 
 Short scripts with assertions: flap link 3 five times, wait for Full, expect 293 routes, converge in under 1 s, change exactly 4 routes. Results kept as reports.
 
-**Open.** Script format: Ruby DSL or YAML.
+**Decisions.** YAML files in the lab folder, `scenarios/`, kept in its git. A run is a recording with a report. A Ruby form may come later and produce the same steps; YAML stays the stored format. Format: routescope `docs/scenarios.md`.
 
 ## 14. Lab lifecycle (top bar, not mocked)
 

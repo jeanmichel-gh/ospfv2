@@ -120,5 +120,3 @@ Each phase ends usable on its own.
 ## Open questions
 
 - License for routescope. None while the repo is private.
-- Scenario script format: Ruby DSL or YAML.
-- How long recordings are kept, and where.

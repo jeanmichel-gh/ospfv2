@@ -1,0 +1,26 @@
+# A scenario for routescope's Scenarios panel (routescope docs/scenarios.md).
+name: Lose the edge router
+description: >
+  The link to edge goes down: its 50 summaries and 200 externals become
+  unreachable on ospfd, then come back when the link does. Measures how
+  long each takes.
+capture: [frr]
+timeout: 180
+
+steps:
+  - expect: { route: { node: ospfd, prefix: 50.0.0.0/24, present: true } }
+    within: 60
+  - sim: link.down
+    link: r5c5--edge
+  - expect: { route: { node: ospfd, prefix: 50.0.0.0/24, present: false } }
+    within: 30
+    measure: withdrawn
+  - expect: { route: { node: frr, prefix: 50.0.0.0/24, present: false } }
+    within: 10
+  - sim: link.up
+    link: r5c5--edge
+  - expect: { route: { node: ospfd, prefix: 50.0.0.0/24, present: true } }
+    within: 30
+    measure: restored
+  - expect: converged
+    within: 30

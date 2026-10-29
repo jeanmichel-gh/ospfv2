@@ -1,0 +1,29 @@
+# A scenario for routescope's Scenarios panel (routescope docs/scenarios.md).
+name: Flap a link and converge
+description: >
+  r1c1--r1c2, next to the simulator, goes down and up three times.
+  FRR and ospfd end with the same LSAs and routes as before.
+capture: [frr]
+timeout: 180
+
+steps:
+  - expect: { neighbors: { node: ospfd, full: 1 } }
+    within: 60
+  - expect: converged
+    within: 30
+  - expect: { routes: { node: ospfd, count: { min: 290 } } }
+
+  - repeat: 3
+    steps:
+      - sim: link.down
+        link: r1c1--r1c2
+      - sleep: 4
+      - sim: link.up
+        link: r1c1--r1c2
+      - sleep: 4
+
+  - expect: converged
+    within: 30
+    measure: convergence
+  - expect: { routes: { node: ospfd, count: { min: 290 } } }
+  - expect: { spf: { node: ospfd, runs: { min: 1, max: 40 } } }

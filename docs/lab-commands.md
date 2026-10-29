@@ -237,6 +237,26 @@ Delete a recording from the Recordings panel, or by hand:
 rm -rf $LAB/recordings/RECORDING_ID
 ```
 
+## Scenarios
+
+Scenarios are YAML files in `$LAB/scenarios/`, kept in the lab's git. A new lab gets two examples. To add them to a lab made before:
+
+```sh
+# in the VM
+mkdir -p $LAB/scenarios && cp ~/ospfv2/examples/lab/scenarios/*.yml $LAB/scenarios/
+cd $LAB && git add scenarios && git commit -m 'Example scenarios'
+```
+
+Run one without the page, and read how it went:
+
+```sh
+# in the VM
+curl -s -X POST -H 'X-Routescope: 1' localhost:8082/api/labs/ospf-lab/scenarios/edge-down/run; echo
+sleep 30; curl -s localhost:8082/api/labs/ospf-lab/scenarios/runs/current | ruby -rjson -e 'r = JSON.parse($stdin.read); puts r["result"], r["measures"], r["steps"].map { "#{_1["result"]} #{_1["name"]}" }'
+```
+
+The format: routescope `docs/scenarios.md`.
+
 ## Run the tests in the VM
 
 The ospfv2 lab test makes its own lab folder and brings up its own lab, so it replaces the lab you are running. Start yours again afterwards.

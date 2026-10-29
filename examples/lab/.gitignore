@@ -5,3 +5,5 @@
 *.broken
 *.kernel
 *.rollback.*
+# routescope recordings and scenario reports
+recordings/
