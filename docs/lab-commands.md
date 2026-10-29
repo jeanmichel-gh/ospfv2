@@ -288,7 +288,9 @@ Through routescope's API, the same way for every lab (compose or containerlab) a
 # in the VM: the helpers
 rs() { curl -s --max-time 60 "localhost:8082/api/$1"; }
 py() { python3 -c "import json, sys
-d = json.load(sys.stdin)
+t = sys.stdin.read()
+if not t.strip(): sys.exit('routescope: no answer (is it up? curl -s localhost:8082/api/health)')
+d = json.loads(t)
 if isinstance(d, dict) and 'error' in d: sys.exit('routescope: ' + d['error'])
 $1"; }
 L=ospf-lab
