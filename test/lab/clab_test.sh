@@ -18,11 +18,20 @@ step() { STEP="$*"; echo; echo "=== $*"; }
 ok() { echo "  ok   $*"; PASSED=$((PASSED + 1)); }
 fail() {
   echo "  FAIL $*"
-  [ -n "${GITHUB_ACTIONS:-}" ] && echo "::error title=Containerlab lab::failed at ${STEP}: $* (after ${PASSED} passed checks)"
-  echo "--- frr"; docker exec clab-$NAME-frr vtysh -c 'show ip ospf neighbor' 2>&1 || true
-  echo "--- ospfd"; docker exec clab-$NAME-ospfd ospf-cli -c 'show ospf neighbor' 2>&1 || true
-  echo "--- bird"; docker exec clab-$NAME-bird birdc show ospf neighbors 2>&1 || true
-  for n in sim frr ospfd bird; do echo "--- logs $n"; docker logs --tail 30 clab-$NAME-$n 2>&1 || true; done
+  local diag
+  diag="$( {
+    echo "--- frr"; docker exec clab-$NAME-frr vtysh -c 'show ip ospf neighbor'
+    echo "--- ospfd"; docker exec clab-$NAME-ospfd ospf-cli -c 'show ospf neighbor'
+    docker exec clab-$NAME-ospfd ospf-cli -c 'show ospf interface'
+    echo "--- bird"; docker exec clab-$NAME-bird birdc show ospf neighbors
+    echo "--- addresses"; for n in frr ospfd bird; do docker exec clab-$NAME-$n ip -br addr; done
+    for n in sim frr ospfd bird; do echo "--- logs $n"; docker logs --tail 15 clab-$NAME-$n; done
+  } 2>&1 )"
+  echo "$diag"
+  if [ -n "${GITHUB_ACTIONS:-}" ]; then
+    echo "::error title=Containerlab lab::failed at ${STEP}: $* (after ${PASSED} passed checks)"
+    echo "::error title=Containerlab lab state::$(echo "$diag" | tail -n 120 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+  fi
   exit 1
 }
 check() { local what="$1"; shift; if "$@" >/dev/null 2>&1; then ok "$what"; else fail "$what"; fi; }
