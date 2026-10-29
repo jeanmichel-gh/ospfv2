@@ -99,5 +99,5 @@ jobs:
         run: |
           for f in "$RUNNER_TEMP"/srl-probe/*.txt; do
             [ -f "$f" ] || continue
-            echo "::notice title=SR Linux $(basename "$f" .txt)::$(head -c 3500 "$f" | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+            echo "::notice title=SR Linux $(basename "$f" .txt)::$(head -c 3800 "$f" | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
           done

@@ -94,17 +94,18 @@ check "ospfd reaches SR Linux's system0 over eth1" ospfd_via 2.2.2.2 10.0.23.1
 if [ -n "${SRL_PROBE_DIR:-}" ]; then
   step "what SR Linux answers"
   mkdir -p "$SRL_PROBE_DIR"
-  probe() { local f="$1"; shift; { echo "\$ $*"; "$@" 2>&1; } | head -c 6000 >"$SRL_PROBE_DIR/$f.txt"; echo "  $f: $(wc -l <"$SRL_PROBE_DIR/$f.txt") lines"; }
+  probe() { local f="$1"; shift; { echo "\$ $*"; "$@" 2>&1; } | head -c 12000 >"$SRL_PROBE_DIR/$f.txt"; echo "  $f: $(wc -l <"$SRL_PROBE_DIR/$f.txt") lines"; }
   OSPF='network-instance default protocols ospf instance main'
   probe 01-version sr show version
   probe 02-neighbors sr show network-instance default protocols ospf neighbor
   probe 03-neighbor-json sr "info from state $OSPF area 0.0.0.0 interface ethernet-1/1.0 neighbor * | as json"
   probe 04-interface-json sr "info from state $OSPF area 0.0.0.0 interface * | as json"
-  probe 05-routes sr show network-instance default route-table ipv4-unicast summary
-  probe 06-routes-json sr "info from state network-instance default route-table ipv4-unicast route 10.255.0.1/32 * * * | as json"
-  probe 07-lsdb-json sr "info from state $OSPF area 0.0.0.0 lsdb lsa-types lsa-type 1 | as json"
+  probe 05-routes sr show network-instance default route-table
+  probe 06-routes-json sr "info from state network-instance default route-table ipv4-unicast | as json"
+  probe 07-lsdb-json sr "info from state $OSPF area 0.0.0.0 lsdb | as json"
   probe 08-instance-json sr "info from state $OSPF | as json"
-  probe 09-jsonrpc docker exec "$SRL" bash -c "curl -s -m 5 -u 'admin:NokiaSrl1!' http://127.0.0.1/jsonrpc -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"get\",\"params\":{\"commands\":[{\"path\":\"/network-instance[name=default]/protocols/ospf/instance[name=main]/area[area-id=0.0.0.0]/interface[interface-name=ethernet-1/2.0]/neighbor\",\"datastore\":\"state\"}]}}'; echo; which curl jq python3"
+  probe 09-route-one sr "info from state network-instance default route-table ipv4-unicast route 10.255.0.1/32 id * route-type * route-owner * origin-network-instance * | as json"
+  probe 11-jsonrpc docker exec "$SRL" bash -c "curl -s -m 5 -u 'admin:NokiaSrl1!' http://127.0.0.1/jsonrpc -d '{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"get\",\"params\":{\"commands\":[{\"path\":\"/network-instance[name=default]/protocols/ospf/instance[name=main]/area[area-id=0.0.0.0]/interface[interface-name=ethernet-1/2.0]/neighbor\",\"datastore\":\"state\"}]}}'; echo; which curl jq python3"
   probe 10-config sr info flat network-instance default protocols ospf
 fi
 
