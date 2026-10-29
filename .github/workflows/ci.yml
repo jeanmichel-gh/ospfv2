@@ -74,3 +74,30 @@ jobs:
       - run: bash -c "$(curl -sL https://get.containerlab.dev)"
       - run: docker pull -q quay.io/frrouting/frr:10.2.1
       - run: test/lab/clab_test.sh
+
+  # Nokia SR Linux in a containerlab lab: the simulator and ospfd Full with
+  # it, the simulated area's routes on ospfd through it. Its answers to a
+  # few commands are kept as annotations, for routescope's driver.
+  srl:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+      - run: bash -c "$(curl -sL https://get.containerlab.dev)"
+      - name: SR Linux image
+        run: |
+          img="$(ruby -ryaml -e 'puts YAML.load_file("examples/srl-lab/ospf-srl.clab.yml").dig("topology", "nodes", "srl", "image")')"
+          docker pull -q "$img"
+          archs="$(docker manifest inspect "$img" 2>/dev/null | ruby -rjson -e 'm = JSON.parse($stdin.read); puts Array(m["manifests"]).map { _1.dig("platform", "architecture") }.compact.uniq.join(" ")' || true)"
+          echo "::notice title=SR Linux image::$img, architectures: ${archs:-one, $(docker image inspect -f '{{.Architecture}}' "$img")}"
+      - run: SRL_PROBE_DIR="$RUNNER_TEMP/srl-probe" test/lab/srl_test.sh
+      - name: what SR Linux answered
+        if: always()
+        run: |
+          for f in "$RUNNER_TEMP"/srl-probe/*.txt; do
+            [ -f "$f" ] || continue
+            echo "::notice title=SR Linux $(basename "$f" .txt)::$(head -c 3500 "$f" | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+          done

@@ -108,6 +108,26 @@ class TestCLI < Test::Unit::TestCase
     end
   end
 
+  def test_lab_new_srlinux
+    Dir.mktmpdir do |d|
+      dir = File.join(d, 'srl')
+      rc, out, = run_cli('lab', 'new', dir, '--no-git', '--srlinux')
+      assert_equal 0, rc
+      assert_match(/sudo containerlab deploy -t ospf-srl.clab.yml/, out)
+      %w[ospf-srl.clab.yml .gitignore sim/sim.yml srl/config.cli ospfd/ospfd.conf].each do |f|
+        assert File.file?(File.join(dir, f)), "missing #{f}"
+      end
+      assert_equal 0, run_cli('check', File.join(dir, 'sim/sim.yml'))[0]
+      topo = YAML.safe_load(File.read(File.join(dir, 'ospf-srl.clab.yml')))
+      assert_equal %w[sim srl ospfd], topo['topology']['nodes'].keys
+      assert_equal 'nokia_srlinux', topo.dig('topology', 'nodes', 'srl', 'kind')
+      assert_match(%r{\Aghcr\.io/nokia/srlinux:\d+\.\d+\.\d+\z}, topo.dig('topology', 'nodes', 'srl', 'image'), 'a pinned release')
+      cli = File.readlines(File.join(dir, 'srl/config.cli'), chomp: true)
+      assert(cli.all? { _1.start_with?('set / ') }, 'set lines only, no comments')
+      assert_equal [], OSPFv2::Config::Tree.new.load(File.read(File.join(dir, 'ospfd/ospfd.conf'))), 'ospfd.conf loads'
+    end
+  end
+
   def test_lab_new_containerlab
     Dir.mktmpdir do |d|
       dir = File.join(d, 'ring')

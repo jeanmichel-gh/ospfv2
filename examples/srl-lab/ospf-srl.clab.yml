@@ -1,0 +1,47 @@
+# Nokia SR Linux in the router lab: the simulated area behind it, and
+# ospfd on a point-to-point link.
+#
+#        sim 1.1.1.1 (simulated 5x5 grid behind it)
+#          | eth1  10.99.0.0/24  (broadcast, SR Linux is the DR)
+#        srl 2.2.2.2  ethernet-1/1 (e1-1)
+#          | ethernet-1/2 (e1-2)  10.0.23.0/30  point-to-point
+#        ospfd 3.3.3.3  eth1
+#
+# Images: ospfv2:latest, built in ~/ospfv2 (docker build -t ospfv2 .), and
+# SR Linux, free from Nokia (about 2 GB of memory when running):
+#   docker pull ghcr.io/nokia/srlinux:26.3.1
+# Then start it from routescope's Labs panel, or in this folder:
+#   sudo containerlab deploy -t ospf-srl.clab.yml
+name: ospf-srl
+
+topology:
+  nodes:
+    sim:
+      kind: linux
+      image: ospfv2:latest
+      binds: [sim:/lab]
+      # Its address before it starts: containerlab wires eth1 just after.
+      entrypoint: sh
+      cmd: >-
+        -c "until ip link show eth1 >/dev/null 2>&1; do sleep 0.2; done;
+        ip addr add 10.99.0.10/24 dev eth1;
+        exec ospfv2 run /lab/sim.yml --web 0.0.0.0:8080 --log /tmp/ospfv2.log"
+    srl:
+      kind: nokia_srlinux
+      image: ghcr.io/nokia/srlinux:26.3.1
+      # Set on top of containerlab's default configuration at boot: its
+      # two interfaces, system0, and OSPF. MTU 1500 on both, as the
+      # simulator and ospfd say 1500 in their database descriptions.
+      startup-config: srl/config.cli
+    ospfd:
+      kind: linux
+      image: ospfv2:latest
+      binds: [ospfd:/etc/ospfv2]
+      entrypoint: ospfd
+      cmd: ""
+      exec:
+        - ip addr add 10.0.23.2/30 dev eth1
+        - ip addr add 3.3.3.3/32 dev lo
+  links:
+    - { endpoints: ["sim:eth1", "srl:ethernet-1/1"], mtu: 1500 }
+    - { endpoints: ["srl:ethernet-1/2", "ospfd:eth1"], mtu: 1500 }

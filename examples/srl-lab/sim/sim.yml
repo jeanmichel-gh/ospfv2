@@ -1,0 +1,19 @@
+# The simulator in the SR Linux lab: on 10.99.0.0/24 with SR Linux, the DR.
+simulator:
+  router_id: 1.1.1.1
+  interface: 10.99.0.10/24
+  hello_interval: 2
+grid:
+  columns: 5
+  rows: 5
+  metric: 10
+routers:
+  - name: edge
+    id: 10.0.0.1
+    loopback: 10.255.0.1
+    summaries:
+      - { prefix: 30.0.0.0/24, count: 50 }
+    externals:
+      - { prefix: 50.0.0.0/24, count: 200, metric: 20, type: 2 }
+links:
+  - { from: r5c5, to: edge, metric: 5 }
