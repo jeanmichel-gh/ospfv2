@@ -194,6 +194,37 @@ docker compose exec bird birdc show route protocol ospf1 count
 docker compose exec bird birdc configure
 ```
 
+## The containerlab lab
+
+A second lab, on containerlab: the simulated area behind FRR, and a ring of point-to-point links between FRR, ospfd and BIRD. A link can fail and ospfd go the other way round. Install containerlab and build the images once:
+
+```sh
+# in the VM
+bash -c "$(curl -sL https://get.containerlab.dev)"
+cd ~/ospfv2 && docker build -t ospfv2 . && docker compose --profile bird build bird
+docker pull quay.io/frrouting/frr:10.2.1
+```
+
+Make it, deploy it, point routescope at it:
+
+```sh
+# in the VM
+cd ~/ospfv2 && bin/ospfv2 lab new ~/labs/ospf-ring --containerlab
+cd ~/labs/ospf-ring && sudo containerlab deploy -t ospf-ring.clab.yml
+cd ~/routescope && LAB=~/labs/ospf-ring docker compose up -d
+```
+
+Look at it, fail a link by hand, take it down:
+
+```sh
+# in the VM
+docker exec clab-ospf-ring-ospfd ospf-cli -c 'show ospf neighbor'
+docker exec clab-ospf-ring-frr ip link set eth2 down; sleep 10; docker exec clab-ospf-ring-ospfd ip route get 2.2.2.2
+docker exec clab-ospf-ring-frr ip link set eth2 up
+cd ~/labs/ospf-ring && sudo containerlab destroy -t ospf-ring.clab.yml
+cd ~/routescope && LAB=~/labs/ospf-lab docker compose up -d     # back to the compose lab
+```
+
 ## Check
 
 ```sh

@@ -60,3 +60,17 @@ jobs:
         with:
           ruby-version: '3.3'
       - run: test/lab/lab_test.sh
+
+  # The containerlab lab: "lab new --containerlab", deployed with
+  # containerlab, a link failing and ospfd going round by BIRD.
+  clab:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+      - run: bash -c "$(curl -sL https://get.containerlab.dev)"
+      - run: docker pull -q quay.io/frrouting/frr:10.2.1
+      - run: test/lab/clab_test.sh

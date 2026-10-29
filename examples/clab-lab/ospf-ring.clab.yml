@@ -1,0 +1,59 @@
+# The router lab on containerlab: the simulated area behind FRR, and a
+# ring of point-to-point links between FRR, ospfd and BIRD, so a link
+# can fail and traffic take the other way round.
+#
+#        sim 1.1.1.1 (simulated 5x5 grid behind it)
+#          | eth1  10.99.0.0/24  (broadcast, FRR is the DR)
+#        frr 2.2.2.2
+#   eth2 /           \ eth3
+#  10.0.23.0/30     10.0.24.0/30
+#   eth1 /           \ eth2
+#  ospfd 3.3.3.3 --- bird 4.4.4.4
+#      eth2  10.0.34.0/30  eth1
+#
+# Images: ospfv2:latest and ospfv2-bird:latest, built in ~/ospfv2:
+#   docker build -t ospfv2 . && docker compose --profile bird build bird
+# Then, in this folder:
+#   sudo containerlab deploy -t ospf-ring.clab.yml
+# routescope reads this folder as its lab: LAB=$PWD docker compose up -d
+name: ospf-ring
+
+topology:
+  nodes:
+    sim:
+      kind: linux
+      image: ospfv2:latest
+      binds: [sim:/lab]
+      # Its address before it starts: containerlab wires eth1 just after.
+      entrypoint: sh
+      cmd: >-
+        -c "until ip link show eth1 >/dev/null 2>&1; do sleep 0.2; done;
+        ip addr add 10.99.0.10/24 dev eth1;
+        exec ospfv2 run /lab/sim.yml --web 0.0.0.0:8080 --log /tmp/ospfv2.log"
+    frr:
+      kind: linux
+      image: quay.io/frrouting/frr:10.2.1
+      binds: [frr:/etc/frr]
+    ospfd:
+      kind: linux
+      image: ospfv2:latest
+      binds: [ospfd:/etc/ospfv2]
+      entrypoint: ospfd
+      cmd: ""
+      exec:
+        - ip addr add 10.0.23.2/30 dev eth1
+        - ip addr add 10.0.34.1/30 dev eth2
+        - ip addr add 3.3.3.3/32 dev lo
+    bird:
+      kind: linux
+      image: ospfv2-bird:latest
+      binds: [bird:/etc/bird]
+      exec:
+        - ip addr add 10.0.34.2/30 dev eth1
+        - ip addr add 10.0.24.2/30 dev eth2
+        - ip addr add 4.4.4.4/32 dev lo
+  links:
+    - endpoints: ["sim:eth1", "frr:eth1"]
+    - endpoints: ["frr:eth2", "ospfd:eth1"]
+    - endpoints: ["ospfd:eth2", "bird:eth1"]
+    - endpoints: ["bird:eth2", "frr:eth3"]
