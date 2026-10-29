@@ -29,7 +29,7 @@ ok() { echo "  ok   $*"; PASSED=$((PASSED + 1)); }
 vt() { docker exec "clab-$NAME-$1" vtysh -c "$2"; }
 bc() { docker exec "clab-$NAME-$1" birdc "${@:2}"; }
 diag() {
-  for n in $(docker ps --format '{{.Names}}' | grep "^clab-$NAME-" | sed "s/^clab-$NAME-//"); do
+  for n in $(docker ps -a --format '{{.Names}}' | grep "^clab-$NAME-" | sed "s/^clab-$NAME-//"); do
     echo "@@$n"
     case "$n" in
       r3) bc r3 show protocols; bc r3 show route count ;;
@@ -38,6 +38,7 @@ diag() {
       *) vt "$n" 'show bgp summary'; vt "$n" 'show ip ospf neighbor' ;;
     esac
     docker exec "clab-$NAME-$n" ip -br addr 2>&1 | grep -v '^lo '
+    echo "--- log"; docker logs --tail 15 "clab-$NAME-$n" 2>&1 | cut -c1-200
   done
 }
 fail() {
