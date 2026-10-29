@@ -282,13 +282,14 @@ cd ~/routescope && docker compose logs --tail 50
 
 ## Query the lab from the shell
 
-Through routescope's API, the same way for every lab (compose or containerlab) and every router (FRR, ospfd, BIRD, SR Linux, the simulator). Paste the helpers once per shell, then any block below. `L` is the lab's name as the lab menu shows it.
+Through routescope's API, the same way for every lab (compose or containerlab) and every router (FRR, ospfd, BIRD, SR Linux, the simulator). Paste the helpers once per shell, then any block below. `L` is the lab's name as the lab menu shows it; a lab that is not running answers with its error (`routescope: sim is not running`).
 
 ```sh
 # in the VM: the helpers
 rs() { curl -s --max-time 60 "localhost:8082/api/$1"; }
 py() { python3 -c "import json, sys
 d = json.load(sys.stdin)
+if isinstance(d, dict) and 'error' in d: sys.exit('routescope: ' + d['error'])
 $1"; }
 L=ospf-lab
 ```
