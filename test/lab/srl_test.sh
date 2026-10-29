@@ -27,8 +27,9 @@ fail() {
     echo "--- srl neighbors"; sr show network-instance default protocols ospf neighbor
     echo "--- srl interfaces"; sr show network-instance default protocols ospf interface
     echo "--- srl ports"; sr show interface ethernet-1/1; sr show interface ethernet-1/2
-    echo "--- srl port state"; sr info from state interface ethernet-1/1 oper-state oper-down-reason mtu
-    echo "--- srl links"; docker exec "$SRL" ip -br link
+    echo "--- srl LAN interface counters"; sr info from state network-instance default protocols ospf instance main area 0.0.0.0 interface ethernet-1/1.0 statistics
+    echo "--- packets on the LAN, 8 s"; docker exec clab-$NAME-sim timeout 8 ospfv2 capture -i eth1 | cut -c1-400 | head -40
+    echo "--- sim log"; docker exec clab-$NAME-sim tail -n 40 /tmp/ospfv2.log
     echo "--- srl config"; sr info network-instance default protocols ospf
     echo "--- ospfd"; cli 'show ospf neighbor'; cli 'show ospf interface'
     for n in sim srl ospfd; do echo "--- logs $n"; docker logs --tail 15 clab-$NAME-$n; done
@@ -36,7 +37,7 @@ fail() {
   echo "$diag"
   if [ -n "${GITHUB_ACTIONS:-}" ]; then
     echo "::error title=SR Linux lab::failed at ${STEP}: $* (after ${PASSED} passed checks)"
-    echo "::error title=SR Linux lab state::$(echo "$diag" | tail -n 120 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
+    echo "::error title=SR Linux lab state::$(echo "$diag" | tail -n 200 | sed 's/%/%25/g' | awk '{printf "%s%%0A", $0}')"
   fi
   exit 1
 }
