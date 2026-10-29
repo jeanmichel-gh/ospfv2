@@ -280,7 +280,10 @@ module OSPFv2
       @state.exchange_done(self)
     end
 
+    # A DD says the options our hellos say (RFC 2328 10.8): a router that
+    # checks them refuses a DD whose E bit differs.
     def send_dd(dd, rxmt = false)
+      dd.options = @hello.options.to_i if @hello && dd.options.to_i.zero?
       dd_rxmt_interval.cancel
       dd_rxmt_interval.start { synchronize { debug "*** re-transmitting #{dd} ***"; send_packet dd, @neighbor_ip } } if rxmt
       send_packet dd, @neighbor_ip

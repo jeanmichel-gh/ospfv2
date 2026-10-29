@@ -7,3 +7,6 @@
 *.rollback.*
 # routescope recordings and scenario reports
 recordings/
+# what containerlab writes when it deploys the lab
+clab-*/
+.*.bak

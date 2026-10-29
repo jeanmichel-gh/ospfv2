@@ -54,7 +54,9 @@ module OSPFv2
           end
         else
           debug "*** #{rcv_dd.router_id} is master ***"
-          if rcv_dd.imms == 0x7
+          # I, M and MS set; other bits of the byte (RFC 4811's R) are not
+          # for us to refuse it on.
+          if rcv_dd.imms & 0x7 == 0x7
             if @ls_db
               @ls_db.recv_dd(rcv_dd, @ls_req_list)
               dd = DatabaseDescription.new :router_id=> @router_id, :area_id=> @area_id, :ls_db => @ls_db
