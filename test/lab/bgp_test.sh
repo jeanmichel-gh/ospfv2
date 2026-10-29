@@ -127,7 +127,7 @@ wait_for 30 "r1 has r2's and r3's /24s" r1_has_24s
 wait_for 30 "r2 has r1's and r3's /24s" r2_has_24s
 wait_for 30 "r3 (BIRD) has r1's and r2's /24s" r3_has_24s
 wait_for 30 "r3's kernel goes to r2's /24 through r2" via r3 192.168.2.1 10.1.23.1
-check "r1's kernel goes to r3's loopback through r3" via r1 10.255.1.3 10.1.13.2
+wait_for 30 "r1's kernel goes to r3's loopback through r3" via r1 10.255.1.3 10.1.13.2
 
 if [ "$WHICH" = ospf-bgp ]; then
   step "AS 65000's routes in AS 65001"
