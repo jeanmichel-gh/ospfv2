@@ -135,7 +135,7 @@ if [ "$WHICH" = ospf-bgp ]; then
   wait_for 30 "r2 has it through r1 (next hop self)" frr_bgp r2 10.255.0.1/32 10.1.12.1
   wait_for 30 "r3 (BIRD) has it" bird_bgp r3 10.255.0.1/32
   wait_for 30 "r3's kernel goes there through r1" via r3 10.255.0.1 10.1.13.1
-  check "r3 has the simulated area's externals too" r3_externals
+  wait_for 30 "r3 has the simulated area's externals too" r3_externals
   wait_for 30 "asbr has AS 65001's prefixes" frr_bgp asbr 192.168.3.0/24 10.1.100.2
 fi
 
