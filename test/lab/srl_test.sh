@@ -26,6 +26,9 @@ fail() {
   diag="$( {
     echo "--- srl neighbors"; sr show network-instance default protocols ospf neighbor
     echo "--- srl interfaces"; sr show network-instance default protocols ospf interface
+    echo "--- srl ports"; sr show interface ethernet-1/1; sr show interface ethernet-1/2
+    echo "--- srl port state"; sr info from state interface ethernet-1/1 oper-state oper-down-reason mtu
+    echo "--- srl links"; docker exec "$SRL" ip -br link
     echo "--- srl config"; sr info network-instance default protocols ospf
     echo "--- ospfd"; cli 'show ospf neighbor'; cli 'show ospf interface'
     for n in sim srl ospfd; do echo "--- logs $n"; docker logs --tail 15 clab-$NAME-$n; done

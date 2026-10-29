@@ -1,8 +1,10 @@
 set / interface ethernet-1/1 admin-state enable
+set / interface ethernet-1/1 mtu 1514
 set / interface ethernet-1/1 subinterface 0 ip-mtu 1500
 set / interface ethernet-1/1 subinterface 0 ipv4 admin-state enable
 set / interface ethernet-1/1 subinterface 0 ipv4 address 10.99.0.20/24
 set / interface ethernet-1/2 admin-state enable
+set / interface ethernet-1/2 mtu 1514
 set / interface ethernet-1/2 subinterface 0 ip-mtu 1500
 set / interface ethernet-1/2 subinterface 0 ipv4 admin-state enable
 set / interface ethernet-1/2 subinterface 0 ipv4 address 10.0.23.1/30

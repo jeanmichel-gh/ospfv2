@@ -30,8 +30,9 @@ topology:
       kind: nokia_srlinux
       image: ghcr.io/nokia/srlinux:26.3.1
       # Set on top of containerlab's default configuration at boot: its
-      # two interfaces, system0, and OSPF. MTU 1500 on both, as the
-      # simulator and ospfd say 1500 in their database descriptions.
+      # two interfaces, system0, and OSPF. MTU 1500 on both (1514 with the
+      # Ethernet header), as the links are 1500 and the simulator says 1500
+      # in its database descriptions.
       startup-config: srl/config.cli
     ospfd:
       kind: linux
