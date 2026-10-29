@@ -34,7 +34,7 @@ FROM base AS runtime
 RUN mkdir -p /etc/iproute2/rt_protos.d && echo '89 ospfv2' > /etc/iproute2/rt_protos.d/ospfv2.conf
 # tcpdump for "ospfv2 capture": a console captures next to a router with
 # docker run --network container:NAME --cap-add NET_RAW ospfv2 capture.
-RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends tcpdump && rm -rf /var/lib/apt/lists/*
+RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends tcpdump iproute2 && rm -rf /var/lib/apt/lists/*
 EXPOSE 8080
 WORKDIR /work
 ENTRYPOINT ["ospfv2"]

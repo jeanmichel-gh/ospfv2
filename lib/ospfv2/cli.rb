@@ -73,6 +73,7 @@ module OSPFv2
           ospfv2 check TOPOLOGY.yml            validate and summarize
           ospfv2 init [--grid CxR]             print a starter topology
           ospfv2 lab new DIR [--no-git]        copy the router lab template to DIR
+          ospfv2 lab new DIR --containerlab    the containerlab lab: a ring of FRR, ospfd and BIRD
           ospfv2 capture [-i IFACE] [-r FILE]  OSPF packets dissected, one JSON line each
           ospfv2 -i ADDR/LEN -g CxR ...        original command line (ospfv2 -h for flags)
 
@@ -172,27 +173,37 @@ module OSPFv2
     end
 
     LAB_TEMPLATE = File.expand_path('../../examples/lab', __dir__)
+    CLAB_TEMPLATE = File.expand_path('../../examples/clab-lab', __dir__)
 
     # Copies the router lab template into a new folder and makes it a git
-    # repository, so saved configurations have history.
+    # repository, so saved configurations have history. --containerlab
+    # copies the containerlab lab instead: a ring of point-to-point links.
     def cmd_lab(argv)
       sub = argv.shift
       raise ArgumentError, "lab needs a subcommand: lab new DIR" unless sub == 'new'
       git = true
-      OptionParser.new { |o| o.on('--no-git') { git = false } }.parse!(argv)
+      clab = false
+      OptionParser.new do |o|
+        o.on('--no-git') { git = false }
+        o.on('--containerlab') { clab = true }
+      end.parse!(argv)
       dir = argv.shift or raise ArgumentError, 'lab new needs a folder, for example: ospfv2 lab new ~/labs/ospf-lab'
       dir = File.expand_path(dir)
       raise ArgumentError, "#{dir} exists and is not empty" if File.exist?(dir) && !(File.directory?(dir) && Dir.empty?(dir))
       begin
-        CLI.copy_lab(LAB_TEMPLATE, dir)
+        CLI.copy_lab(clab ? CLAB_TEMPLATE : LAB_TEMPLATE, dir)
       rescue Errno::EACCES, Errno::EPERM => e
         parent = File.dirname(dir)
         hint = File.exist?(parent) && !File.writable?(parent) ? " (#{parent} is not writable: sudo chown $USER: #{parent})" : ''
         raise ArgumentError, "cannot make the lab folder: #{e.message}#{hint}"
       end
       @out.puts "lab created in #{dir}"
-      @out.puts(lab_git_init(dir)) if git
-      @out.puts <<~TXT
+      @out.puts(lab_git_init(dir, clab ? 'examples/clab-lab' : 'examples/lab')) if git
+      @out.puts(clab ? <<~CLAB : <<~TXT)
+
+        Deploy it with containerlab (images ospfv2 and ospfv2-bird first):
+          cd #{dir} && sudo containerlab deploy -t ospf-ring.clab.yml
+      CLAB
 
         Use it from the ospfv2 folder:
           export LAB=#{dir}
@@ -220,7 +231,7 @@ module OSPFv2
       end
     end
 
-    def lab_git_init(dir)
+    def lab_git_init(dir, from = 'examples/lab')
       # The lab's commits are configuration snapshots: they carry the lab's
       # own identity, set in this repository only.
       ok = system('git', '-C', dir, 'init', '-q', out: File::NULL, err: File::NULL) &&
@@ -228,7 +239,7 @@ module OSPFv2
            system('git', '-C', dir, 'config', 'user.email', 'lab@configs', out: File::NULL, err: File::NULL) &&
            system('git', '-C', dir, 'add', '-A', out: File::NULL, err: File::NULL)
       return 'git: not available, the lab folder has no history' unless ok
-      if system('git', '-C', dir, 'commit', '-q', '-m', 'Lab created from ospfv2 examples/lab', out: File::NULL, err: File::NULL)
+      if system('git', '-C', dir, 'commit', '-q', '-m', "Lab created from ospfv2 #{from}", out: File::NULL, err: File::NULL)
         'git: repository created with a first commit'
       else
         'git: repository created; the first commit failed (set git user.name and user.email, then commit)'

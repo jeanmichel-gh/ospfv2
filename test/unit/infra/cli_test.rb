@@ -4,6 +4,7 @@ require 'json'
 require 'tmpdir'
 require 'yaml'
 require 'ospfv2/cli'
+require 'ospfv2/config/tree'
 
 class TestCLI < Test::Unit::TestCase
   EXAMPLE = File.expand_path('../../../examples/grid.yml', __dir__)
@@ -104,6 +105,24 @@ class TestCLI < Test::Unit::TestCase
       end
       refute File.exist?(File.join(dir, '.git'))
       assert_equal 0, run_cli('check', File.join(dir, 'sim/sim.yml'))[0]
+    end
+  end
+
+  def test_lab_new_containerlab
+    Dir.mktmpdir do |d|
+      dir = File.join(d, 'ring')
+      rc, out, = run_cli('lab', 'new', dir, '--no-git', '--containerlab')
+      assert_equal 0, rc
+      assert_match(/sudo containerlab deploy -t ospf-ring.clab.yml/, out)
+      %w[ospf-ring.clab.yml .gitignore sim/sim.yml frr/frr.conf frr/daemons frr/vtysh.conf ospfd/ospfd.conf bird/bird.conf].each do |f|
+        assert File.file?(File.join(dir, f)), "missing #{f}"
+      end
+      refute File.exist?(File.join(dir, 'lab.yml')), 'the topology is the lab'
+      assert_equal 0, run_cli('check', File.join(dir, 'sim/sim.yml'))[0]
+      topo = YAML.safe_load(File.read(File.join(dir, 'ospf-ring.clab.yml')))
+      assert_equal %w[sim frr ospfd bird], topo['topology']['nodes'].keys
+      assert_equal 4, topo['topology']['links'].size
+      assert_equal [], OSPFv2::Config::Tree.new.load(File.read(File.join(dir, 'ospfd/ospfd.conf'))), 'ospfd.conf loads'
     end
   end
 

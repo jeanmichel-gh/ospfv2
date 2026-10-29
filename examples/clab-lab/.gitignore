@@ -1,0 +1,9 @@
+# Files the routers write next to their configuration. The lab's git
+# history replaces their backups and rollbacks.
+*.sav
+*.tmp
+*.broken
+*.kernel
+*.rollback.*
+# routescope recordings and scenario reports
+recordings/
