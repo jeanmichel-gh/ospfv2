@@ -65,7 +65,7 @@ To make it again from the template (the old one is kept aside, nothing is delete
 ```sh
 # in the VM
 cd ~/ospfv2
-docker compose --profile frr --profile ospfd down
+docker compose --profile frr --profile ospfd --profile bird down
 cd ~/routescope && docker compose down && cd ~/ospfv2
 sudo chown $USER: ~/labs
 sudo mv ~/labs/ospf-lab ~/labs/ospf-lab.old-$(date +%Y%m%d%H%M)
@@ -90,7 +90,7 @@ git fetch origin && git switch "$ROUTESCOPE_BRANCH" && git pull --ff-only
 docker compose build
 
 cd ~/ospfv2
-docker compose --profile frr --profile ospfd down
+docker compose --profile frr --profile ospfd --profile bird down
 docker compose --profile frr up -d sim frr
 full=; for i in $(seq 45); do docker compose exec -T frr vtysh -c 'show ip ospf neighbor' </dev/null 2>/dev/null | grep -q '1\.1\.1\.1.*Full' && full=1 && break; sleep 2; done; [ "$full" ] && echo sim Full || docker compose logs --tail 40 frr
 docker compose up -d ospfd
@@ -125,6 +125,7 @@ cd ~/ospfv2
 docker compose --profile frr up -d sim frr
 full=; for i in $(seq 45); do docker compose exec -T frr vtysh -c 'show ip ospf neighbor' </dev/null 2>/dev/null | grep -q '1\.1\.1\.1.*Full' && full=1 && break; sleep 2; done; [ "$full" ] && echo sim Full || docker compose logs --tail 40 frr
 docker compose up -d ospfd
+docker compose --profile bird up -d --build bird
 cd ~/routescope && docker compose up -d
 curl -s --max-time 5 localhost:8082/api/health; echo
 ```
@@ -138,10 +139,11 @@ Everything, lab and routescope:
 ```sh
 # in the VM
 cd ~/ospfv2
-docker compose --profile frr --profile ospfd down
+docker compose --profile frr --profile ospfd --profile bird down
 docker compose --profile frr up -d sim frr
 full=; for i in $(seq 45); do docker compose exec -T frr vtysh -c 'show ip ospf neighbor' </dev/null 2>/dev/null | grep -q '1\.1\.1\.1.*Full' && full=1 && break; sleep 2; done; [ "$full" ] && echo sim Full || docker compose logs --tail 40 frr
 docker compose up -d ospfd
+docker compose --profile bird up -d --build bird
 cd ~/routescope && docker compose restart
 ```
 
@@ -152,6 +154,7 @@ One node at a time:
 docker compose restart ospfd
 docker compose restart frr
 docker compose restart sim                     # also fixes a simulator stuck in ExStart
+docker compose restart bird
 ```
 
 routescope only:
@@ -166,10 +169,30 @@ cd ~/routescope && docker compose restart
 ```sh
 # in the VM
 cd ~/routescope && docker compose down
-cd ~/ospfv2 && docker compose --profile frr --profile ospfd down
+cd ~/ospfv2 && docker compose --profile frr --profile ospfd --profile bird down
 ```
 
 `down` keeps the lab folder. Your saved configurations stay.
+
+## BIRD
+
+BIRD 2 is a fourth router on the segment, 4.4.4.4 at 10.99.0.40, priority 0 so FRR stays the DR. Its configuration is `$LAB/bird/bird.conf`. A lab made before BIRD needs the folder and the node once:
+
+```sh
+# in the VM
+cp -r ~/ospfv2/examples/lab/bird $LAB/
+grep -q 'kind: bird' $LAB/lab.yml || sed -i 's/^  - name: ospfd$/  - name: bird\n    kind: bird\n    service: bird\n    profiles: [bird]\n    address: 10.99.0.40\n    config: bird\/bird.conf\n\n  - name: ospfd/' $LAB/lab.yml
+cd $LAB && git add bird lab.yml && git commit -m 'BIRD, a fourth router'
+```
+
+Look at it, and load an edited file:
+
+```sh
+# in the VM, from ~/ospfv2
+docker compose exec bird birdc show ospf neighbors
+docker compose exec bird birdc show route protocol ospf1 count
+docker compose exec bird birdc configure
+```
 
 ## Check
 

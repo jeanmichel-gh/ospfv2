@@ -21,7 +21,7 @@ LAB="${LAB_TEST_DIR:-$(mktemp -d)}/lab"
 export LAB
 export COMPOSE_PROJECT_NAME=ospfv2
 OUT="$(mktemp -d)"
-COMPOSE=(docker compose --profile frr --profile ospfd)
+COMPOSE=(docker compose --profile frr --profile ospfd --profile bird)
 FAILED=0
 STEP=''
 
@@ -89,6 +89,11 @@ frr_full_with_sim() { vtysh 'show ip ospf neighbor' | grep -q '1.1.1.1.*Full'; }
 ospfd_full_with_frr() { cli 'show ospf neighbor' | grep -q '10.99.0.20 .*Full'; }
 route_count() { cli 'show route protocol ospf | count' | grep -o '[0-9]\+'; }
 routes_installed() { local n; n="$(route_count)"; [ "${n:-0}" -ge 250 ]; }
+birdc() { docker compose exec -T bird birdc "$@"; }
+bird_full_with_frr() { birdc show ospf neighbors | grep -Eq '^2\.2\.2\.2 .*Full/DR'; }
+bird_route_count() { birdc show route protocol ospf1 count | grep -o '^[0-9]\+' | head -1; }
+bird_routes() { local n; n="$(bird_route_count)"; [ "${n:-0}" -ge 250 ]; }
+bird_in_frr() { vtysh 'show ip ospf neighbor' | grep -q '4\.4\.4\.4'; }
 frr_conf_is_ours() { [ "$(owner_mode "$LAB/frr/frr.conf")" = "$(me) 640" ]; }
 hostname_is() { [ "$(docker compose exec -T "$1" cat /etc/hostname)" = "$1" ]; }
 toggle_link() { curl -fsS -X POST -H 'X-OSPFv2: 1' "http://localhost:8080/api/links/$1/toggle"; }
@@ -105,7 +110,8 @@ cleanup() {
     echo "--- ospf-cli: show ospf neighbor"; cli 'show ospf neighbor' 2>&1 || true
     echo "--- frr: show ip ospf neighbor"; vtysh 'show ip ospf neighbor' 2>&1 || true
     echo "--- lab folder"; ls -la "$LAB"/* 2>&1 || true; git -C "$LAB" status --short 2>&1 || true
-    for s in sim frr ospfd; do echo "--- logs $s (last 40)"; docker compose logs --no-color --tail 40 "$s" 2>&1 || true; done
+    echo "--- bird: show ospf neighbors"; birdc show ospf neighbors 2>&1 || true
+    for s in sim frr ospfd bird; do echo "--- logs $s (last 40)"; docker compose logs --no-color --tail 40 "$s" 2>&1 || true; done
     for f in "$OUT"/*.txt; do [ -f "$f" ] && { echo "--- $f"; cat "$f"; }; done
   fi
   if [ -z "${KEEP_LAB:-}" ]; then
@@ -135,6 +141,13 @@ wait_for 120 "frr Full with the simulator" frr_full_with_sim
 wait_for 120 "ospfd Full with frr" ospfd_full_with_frr
 check "hostnames are the service names" hostname_is ospfd
 check "frr too" hostname_is frr
+
+step "BIRD, a fourth router"
+"${COMPOSE[@]}" up -d --build bird
+wait_for 120 "bird Full with frr, the DR" bird_full_with_frr
+check "frr sees bird" bird_in_frr
+wait_for 60 "bird computes the simulated area's routes (250 or more)" bird_routes
+echo "       $(bird_route_count) BIRD routes"
 
 step "routes"
 wait_for 90 "ospfd installs the simulated area's routes (250 or more)" routes_installed
