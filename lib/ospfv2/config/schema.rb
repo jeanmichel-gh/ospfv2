@@ -238,7 +238,7 @@ module OSPFv2
                   leaf 'dead-interval', Schema.hint(T.range(1, 65_535), '<seconds>'), help: 'Dead interval'
                   leaf 'retransmit-interval', Schema.hint(T.range(1, 65_535), '<seconds>'), help: 'LSA retransmit interval'
                   leaf 'transit-delay', Schema.hint(T.range(1, 65_535), '<seconds>'), help: 'Transmit delay'
-                  leaf 'mtu', Schema.hint(T.range(576, 65_535), '<576..65535>'), help: 'MTU used in database description packets'
+                  leaf 'mtu', Schema.hint(T.range(576, 65_535), '<576..65535>'), help: 'MTU used in database description packets (default: the kernel interface MTU)'
                   flag 'mtu-ignore', help: 'Do not check the neighbor MTU'
                   flag 'passive', help: 'Advertise the subnet, form no adjacency'
                   flag 'disable', help: 'Keep the configuration, do not run OSPF here'

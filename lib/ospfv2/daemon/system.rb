@@ -4,14 +4,17 @@ require 'socket'
 
 module OSPFv2
   class Daemon
-    # The host's interfaces and their IPv4 addresses, from getifaddrs.
-    # Tests swap in a Hash-backed fake.
+    # The host's interfaces, their IPv4 addresses and MTUs, from
+    # getifaddrs and /sys/class/net. Tests swap in a Hash-backed fake.
     class System
-      Link = Struct.new(:name, :address, :up, :others, keyword_init: true)
+      Link = Struct.new(:name, :address, :up, :others, :mtu, keyword_init: true)
 
-      # { "eth1" => Link(address: "10.0.12.1/24", up: true, others: [...]) }
+      SYS_NET = '/sys/class/net'
+
+      # { "eth1" => Link(address: "10.0.12.1/24", up: true, others: [...], mtu: 1500) }
       # +address+ is the first IPv4 address outside 127/8 (127.0.0.1 only
-      # when there is nothing else); +others+ holds the rest.
+      # when there is nothing else); +others+ holds the rest. +mtu+ is nil
+      # where the kernel does not say.
       def links
         found = Hash.new { |h, k| h[k] = { addrs: [], up: false } }
         Socket.getifaddrs.each do |ifa|
@@ -23,8 +26,15 @@ module OSPFv2
         end
         found.to_h do |name, e|
           addrs = e[:addrs].partition { |a| !a.start_with?('127.') }.flatten
-          [name, Link.new(name: name, address: addrs.first, up: e[:up], others: addrs.drop(1))]
+          [name, Link.new(name: name, address: addrs.first, up: e[:up], others: addrs.drop(1), mtu: mtu(name))]
         end
+      end
+
+      def mtu(name)
+        return nil if name.include?('/')
+        Integer(File.read(File.join(SYS_NET, name, 'mtu')).strip)
+      rescue SystemCallError, ArgumentError
+        nil
       end
 
       STATIC_PROTOCOLS = [3, 4].freeze # RTPROT_BOOT (ip route add), RTPROT_STATIC
@@ -56,8 +66,8 @@ module OSPFv2
       def static_routes = @statics.dup
 
       # set('eth1', '10.0.0.1/24'), set('eth1', nil) to remove the address
-      def set(name, address, up: true)
-        @links[name] = System::Link.new(name: name, address: address, up: up, others: [])
+      def set(name, address, up: true, mtu: nil)
+        @links[name] = System::Link.new(name: name, address: address, up: up, others: [], mtu: mtu)
       end
 
       def remove(name) = @links.delete(name)

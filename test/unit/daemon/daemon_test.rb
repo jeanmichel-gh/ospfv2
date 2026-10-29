@@ -213,6 +213,23 @@ class TestDaemon < Test::Unit::TestCase
     assert_nil @d.instance.interfaces['eth1']
   end
 
+  # With no mtu configured, the interface says the kernel's. A configured
+  # one wins. The kernel changing it restarts the interface.
+  def test_mtu_from_the_kernel
+    @system.set('eth1', '10.0.0.1/24', mtu: 9500)
+    daemon(BASE.join("\n"))
+    assert_equal 9500, @d.instance.interfaces['eth1'].mtu
+    assert(@log.any? { _1.include?('interface eth1: running OSPF on 10.0.0.1/24 in area 0.0.0.0, MTU 9500') }, @log.join("\n"))
+    @system.set('eth1', '10.0.0.1/24', mtu: 1400)
+    @loop.advance(Daemon::RECHECK)
+    assert_equal 1400, @d.instance.interfaces['eth1'].mtu
+    commit!('set protocols ospf area 0 interface eth1 mtu 1500')
+    assert_equal 1500, @d.instance.interfaces['eth1'].mtu
+    @system.set('eth1', '10.0.0.1/24', mtu: nil)
+    commit!('delete protocols ospf area 0 interface eth1 mtu')
+    assert_equal Core::Interface::DEFAULTS[:mtu], @d.instance.interfaces['eth1'].mtu, 'the default when the kernel does not say'
+  end
+
   def test_router_id_change_restarts_ospf
     daemon(BASE.join("\n"))
     first = @d.instance
