@@ -34,6 +34,12 @@ topology:
       kind: linux
       image: quay.io/frrouting/frr:10.2.1
       binds: [frr:/etc/frr]
+      # frr.conf has these too, but FRR starts before its links exist and
+      # can miss them when they appear. Set once the links are wired.
+      exec:
+        - sh -c "ip addr add 10.99.0.20/24 dev eth1 2>/dev/null || true"
+        - sh -c "ip addr add 10.0.23.1/30 dev eth2 2>/dev/null || true"
+        - sh -c "ip addr add 10.0.24.1/30 dev eth3 2>/dev/null || true"
     ospfd:
       kind: linux
       image: ospfv2:latest
