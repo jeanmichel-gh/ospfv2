@@ -139,9 +139,11 @@ if [ "$WHICH" = isis-bgp ]; then
   wait_for 30 "asbr has level 1 routes (i1's loopback)" isis_route asbr 10.255.0.1 10.255.0.1/32
   wait_for 30 "asbr has level 2 routes (i3's loopback)" isis_route asbr 10.255.0.3 10.255.0.3/32
   wait_for 30 "i1 (level 1) reaches area 49.0002 by the attached bit's default" isis_route i1 10.255.0.3 0.0.0.0/0
+  wait_for 30 "i1's kernel goes there through asbr" via i1 10.255.0.3 10.0.14.2
   wait_for 30 "i1 has i2's /24, external at level 1" isis_route i1 172.16.2.1 172.16.2.0/24
   wait_for 30 "i3 (level 2) has asbr's default" isis_route i3 10.255.1.1 0.0.0.0/0
   wait_for 30 "i3 reaches area 49.0001 by that default too (FRR keeps level 1 out of level 2)" isis_route i3 10.255.0.1 0.0.0.0/0
+  wait_for 30 "i3's kernel goes there through asbr" via i3 10.255.0.1 10.0.34.1
   step "eBGP between the domains"
   wait_for 60 "asbr Established with r1" frr_up asbr 10.1.100.2
   wait_for 30 "r1 Established with asbr" frr_up r1 10.1.100.1

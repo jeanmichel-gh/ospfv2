@@ -47,23 +47,27 @@ topology:
       image: quay.io/frrouting/frr:10.2.1
   nodes:
     # frr.conf has the addresses too; FRR can miss them on links wired
-    # after it starts.
+    # after it starts. The IS-IS routers lose the default route Docker
+    # gives them (to the management network): theirs comes from IS-IS.
     i1:
       kind: linux
       binds: [i1:/etc/frr]
       exec:
+        - sh -c "ip route del default dev eth0 2>/dev/null || true"
         - sh -c "ip addr add 10.0.12.1/30 dev eth1 2>/dev/null || true"
         - sh -c "ip addr add 10.0.14.1/30 dev eth2 2>/dev/null || true"
     i2:
       kind: linux
       binds: [i2:/etc/frr]
       exec:
+        - sh -c "ip route del default dev eth0 2>/dev/null || true"
         - sh -c "ip addr add 10.0.12.2/30 dev eth1 2>/dev/null || true"
         - sh -c "ip addr add 10.0.24.1/30 dev eth2 2>/dev/null || true"
     i3:
       kind: linux
       binds: [i3:/etc/frr]
       exec:
+        - sh -c "ip route del default dev eth0 2>/dev/null || true"
         - sh -c "ip addr add 10.0.34.2/30 dev eth1 2>/dev/null || true"
     asbr:
       kind: linux
