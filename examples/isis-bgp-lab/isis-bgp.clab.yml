@@ -1,0 +1,109 @@
+# Two AS domains. AS 65000 runs IS-IS on FRR: i1 and i2 at level 1 in
+# area 49.0001, i3 at level 2 in area 49.0002, and asbr, level 1 and 2,
+# which joins the two areas and redistributes IS-IS into BGP. AS 65001 is
+# three iBGP speakers, full mesh: r1 and r2 (FRR), r3 (BIRD). asbr and r1
+# peer by eBGP; r1 gives AS 65000's routes to r2 and r3 with itself as
+# next hop.
+#
+#   AS 65000 (IS-IS)                           AS 65001 (iBGP)
+#
+#   i1 10.255.0.1 ---- i2 10.255.0.2
+#         \              /       level 1
+#          \            /
+#         asbr 10.255.0.4 ---eBGP 10.1.100.0/30--- r1 10.255.1.1
+#              |         level 1 and 2             /  \
+#              |                       10.1.12.0/30    10.1.13.0/30
+#         i3 10.255.0.3  level 2                 r2 ---------- r3 (BIRD)
+#                                          10.255.1.2      10.255.1.3
+#
+# Links: i1-i2 10.0.12.0/30, i1-asbr 10.0.14.0/30, i2-asbr 10.0.24.0/30,
+# i3-asbr 10.0.34.0/30. Each IS-IS router also puts 172.16.N.0/24 (a
+# static route) into IS-IS.
+#
+# Things to watch:
+# - i1 and i2 see nothing of area 49.0002: they reach it, and AS 65001,
+#   by a default route from asbr's attached bit ("show ip route" on i1).
+# - i3 sees nothing of area 49.0001 either: FRR does not carry level 1
+#   prefixes into level 2. It reaches everything by the default route
+#   asbr originates at level 2 ("default-information originate").
+# - asbr, at both levels, knows every prefix.
+# - It hands everything IS-IS knows to r1 ("redistribute isis"); the
+#   IS-IS metric becomes the MED. "isis metric 50" on asbr's eth3 and
+#   i3's prefixes come to AS 65001 with MED 60.
+# - The route map ISIS-TO-BGP in asbr/frr.conf marks area 49.0002's
+#   prefixes with community 65000:2; make it deny and they leave AS 65001.
+#
+# Images: ospfv2-bird:latest from ~/ospfv2 (docker compose --profile bird
+# build bird) and FRR (docker pull quay.io/frrouting/frr:10.2.1).
+# Start it from routescope's lab menu, or in this folder:
+#   sudo containerlab deploy -t isis-bgp.clab.yml
+name: isis-bgp
+
+topology:
+  defaults:
+    labels: { routescope.protocols: isis }
+  kinds:
+    linux:
+      image: quay.io/frrouting/frr:10.2.1
+  nodes:
+    # frr.conf has the addresses too; FRR can miss them on links wired
+    # after it starts.
+    i1:
+      kind: linux
+      binds: [i1:/etc/frr]
+      exec:
+        - sh -c "ip addr add 10.0.12.1/30 dev eth1 2>/dev/null || true"
+        - sh -c "ip addr add 10.0.14.1/30 dev eth2 2>/dev/null || true"
+    i2:
+      kind: linux
+      binds: [i2:/etc/frr]
+      exec:
+        - sh -c "ip addr add 10.0.12.2/30 dev eth1 2>/dev/null || true"
+        - sh -c "ip addr add 10.0.24.1/30 dev eth2 2>/dev/null || true"
+    i3:
+      kind: linux
+      binds: [i3:/etc/frr]
+      exec:
+        - sh -c "ip addr add 10.0.34.2/30 dev eth1 2>/dev/null || true"
+    asbr:
+      kind: linux
+      binds: [asbr:/etc/frr]
+      labels: { routescope.protocols: "isis,bgp" }
+      exec:
+        - sh -c "ip addr add 10.0.14.2/30 dev eth1 2>/dev/null || true"
+        - sh -c "ip addr add 10.0.24.2/30 dev eth2 2>/dev/null || true"
+        - sh -c "ip addr add 10.0.34.1/30 dev eth3 2>/dev/null || true"
+        - sh -c "ip addr add 10.1.100.1/30 dev eth4 2>/dev/null || true"
+    r1:
+      kind: linux
+      binds: [r1:/etc/frr]
+      labels: { routescope.protocols: bgp }
+      exec:
+        - sh -c "ip addr add 10.1.12.1/30 dev eth1 2>/dev/null || true"
+        - sh -c "ip addr add 10.1.13.1/30 dev eth2 2>/dev/null || true"
+        - sh -c "ip addr add 10.1.100.2/30 dev eth3 2>/dev/null || true"
+    r2:
+      kind: linux
+      binds: [r2:/etc/frr]
+      labels: { routescope.protocols: bgp }
+      exec:
+        - sh -c "ip addr add 10.1.12.2/30 dev eth1 2>/dev/null || true"
+        - sh -c "ip addr add 10.1.23.1/30 dev eth2 2>/dev/null || true"
+    r3:
+      kind: linux
+      image: ospfv2-bird:latest
+      binds: [r3:/etc/bird]
+      labels: { routescope.protocols: bgp }
+      exec:
+        - ip addr add 10.1.23.2/30 dev eth1
+        - ip addr add 10.1.13.2/30 dev eth2
+        - ip addr add 10.255.1.3/32 dev lo
+  links:
+    - { endpoints: ["i1:eth1", "i2:eth1"] }
+    - { endpoints: ["i1:eth2", "asbr:eth1"] }
+    - { endpoints: ["i2:eth2", "asbr:eth2"] }
+    - { endpoints: ["i3:eth1", "asbr:eth3"] }
+    - { endpoints: ["asbr:eth4", "r1:eth3"] }
+    - { endpoints: ["r1:eth1", "r2:eth1"] }
+    - { endpoints: ["r2:eth2", "r3:eth1"] }
+    - { endpoints: ["r3:eth2", "r1:eth2"] }
