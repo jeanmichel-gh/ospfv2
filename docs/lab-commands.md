@@ -262,19 +262,27 @@ Its configuration is `~/labs/ospf-srl/srl/config.cli`: `set` lines applied when 
 
 ## The BGP labs
 
-Two containerlab labs with BGP, from FRR and BIRD images (FRR: `docker pull quay.io/frrouting/frr:10.2.1`; BIRD and ospfv2: built in `~/ospfv2` as above).
+Three containerlab labs with BGP, from FRR and BIRD images (FRR: `docker pull quay.io/frrouting/frr:10.2.1`; BIRD and ospfv2: built in `~/ospfv2` as above).
 
 **bgp-ibgp**: three BGP speakers in AS 65001, peering with one another (iBGP, full mesh) over a triangle of links. r1 and r2 run FRR, r3 runs BIRD. Each advertises its loopback (10.255.1.N) and a /24 (192.168.N.0/24).
 
 **ospf-bgp**: two AS domains. AS 65000 runs OSPF: the simulator (a 3x3 grid, about 30 LSAs), ospfd, and asbr (FRR), which redistributes OSPF into BGP. AS 65001 is the three iBGP speakers above. asbr and r1 peer by eBGP; r1 hands AS 65000's routes to r2 and r3 with itself as next hop.
 
+**isis-bgp**: the same with IS-IS in AS 65000, all on FRR. i1 and i2 are level 1 routers in area 49.0001. i3 is a level 2 router in area 49.0002. asbr is level 1 and 2: it joins the two areas and redistributes IS-IS into BGP. Each IS-IS router has a loopback (10.255.0.N) and a /24 (172.16.N.0/24). Things to watch:
+
+- i1 and i2 see nothing of area 49.0002. They get there by a default route that follows asbr's attached bit.
+- i3 sees nothing of area 49.0001: FRR does not carry level 1 prefixes into level 2. asbr gives it a default route at level 2.
+- The IS-IS metric becomes the BGP MED. Raise a metric on asbr and the MED in AS 65001 follows.
+- The route map ISIS-TO-BGP in asbr's frr.conf gives area 49.0002's prefixes community 65000:2. Make it deny and they leave AS 65001.
+
 ```sh
 # in the VM
 cd ~/ospfv2 && bin/ospfv2 lab new ~/labs/bgp-ibgp --bgp
 cd ~/ospfv2 && bin/ospfv2 lab new ~/labs/ospf-bgp --ospf-bgp
+cd ~/ospfv2 && bin/ospfv2 lab new ~/labs/isis-bgp --isis-bgp
 ```
 
-Start one from routescope's lab menu. Look at them from the shell:
+The labs reuse the names r1, r2 and r3, so run one at a time. Start one from routescope's lab menu. Look at them from the shell:
 
 ```sh
 # in the VM
@@ -284,6 +292,26 @@ docker exec clab-bgp-ibgp-r3 birdc show route
 docker exec clab-ospf-bgp-asbr vtysh -c 'show ip ospf neighbor'
 docker exec clab-ospf-bgp-asbr vtysh -c 'show bgp summary'
 docker exec clab-ospf-bgp-r2 vtysh -c 'show ip route bgp'
+```
+
+The IS-IS lab:
+
+```sh
+# in the VM
+docker exec clab-isis-bgp-asbr vtysh -c 'show isis neighbor'
+docker exec clab-isis-bgp-asbr vtysh -c 'show isis database'
+docker exec clab-isis-bgp-i1 vtysh -c 'show ip route'
+docker exec clab-isis-bgp-r2 vtysh -c 'show bgp ipv4 unicast'
+docker exec clab-isis-bgp-r3 birdc show route all 172.16.3.0/24
+```
+
+Raise the metric toward i3, and watch the MED on r2 go from 20 to 60:
+
+```sh
+# in the VM
+docker exec clab-isis-bgp-asbr vtysh -c 'configure' -c 'interface eth3' -c 'isis metric 50'
+docker exec clab-isis-bgp-r2 vtysh -c 'show bgp ipv4 unicast 10.255.0.3/32'
+docker exec clab-isis-bgp-asbr vtysh -c 'configure' -c 'interface eth3' -c 'no isis metric 50'
 ```
 
 ## Check

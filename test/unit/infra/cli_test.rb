@@ -130,7 +130,8 @@ class TestCLI < Test::Unit::TestCase
 
   def test_lab_new_bgp_labs
     { '--bgp' => ['bgp-ibgp', %w[r1 r2 r3], %w[r1/frr.conf r1/daemons r2/frr.conf r3/bird.conf]],
-      '--ospf-bgp' => ['ospf-bgp', %w[sim ospfd asbr r1 r2 r3], %w[sim/sim.yml ospfd/ospfd.conf asbr/frr.conf asbr/daemons r1/frr.conf r2/frr.conf r3/bird.conf]] }
+      '--ospf-bgp' => ['ospf-bgp', %w[sim ospfd asbr r1 r2 r3], %w[sim/sim.yml ospfd/ospfd.conf asbr/frr.conf asbr/daemons r1/frr.conf r2/frr.conf r3/bird.conf]],
+      '--isis-bgp' => ['isis-bgp', %w[i1 i2 i3 asbr r1 r2 r3], %w[i1/frr.conf i1/daemons asbr/frr.conf r1/frr.conf r3/bird.conf]] }
       .each do |flag, (name, nodes, files)|
       Dir.mktmpdir do |d|
         dir = File.join(d, name)
@@ -146,6 +147,16 @@ class TestCLI < Test::Unit::TestCase
         assert_equal 0, run_cli('check', File.join(dir, 'sim/sim.yml'))[0] if nodes.include?('sim')
       end
     end
+  end
+
+  def test_the_isis_bgp_lab_runs_isisd_not_ospfd
+    %w[i1 i2 i3 asbr].each do |n|
+      d = File.read(File.join(OSPFv2::CLI::ISIS_BGP_TEMPLATE, n, 'daemons'))
+      assert_match(/^isisd=yes/, d, n)
+      assert_match(/^ospfd=no/, d, n)
+      assert_match(/^router isis LAB/, File.read(File.join(OSPFv2::CLI::ISIS_BGP_TEMPLATE, n, 'frr.conf')), n)
+    end
+    assert_match(/^bgpd=yes/, File.read(File.join(OSPFv2::CLI::ISIS_BGP_TEMPLATE, 'asbr/daemons')))
   end
 
   def test_the_ospf_bgp_lab_keeps_its_lsdb_small

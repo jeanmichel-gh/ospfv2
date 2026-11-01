@@ -74,6 +74,10 @@ module OSPFv2
           ospfv2 init [--grid CxR]             print a starter topology
           ospfv2 lab new DIR [--no-git]        copy the router lab template to DIR
           ospfv2 lab new DIR --containerlab    the containerlab lab: a ring of FRR, ospfd and BIRD
+          ospfv2 lab new DIR --srlinux         the same with Nokia SR Linux
+          ospfv2 lab new DIR --bgp             three iBGP speakers (FRR, BIRD) in one AS
+          ospfv2 lab new DIR --ospf-bgp        an OSPF domain redistributed into BGP
+          ospfv2 lab new DIR --isis-bgp        an IS-IS domain redistributed into BGP
           ospfv2 capture [-i IFACE] [-r FILE]  OSPF packets dissected, one JSON line each
           ospfv2 -i ADDR/LEN -g CxR ...        original command line (ospfv2 -h for flags)
 
@@ -177,6 +181,7 @@ module OSPFv2
     SRL_TEMPLATE = File.expand_path('../../examples/srl-lab', __dir__)
     BGP_TEMPLATE = File.expand_path('../../examples/bgp-lab', __dir__)
     OSPF_BGP_TEMPLATE = File.expand_path('../../examples/ospf-bgp-lab', __dir__)
+    ISIS_BGP_TEMPLATE = File.expand_path('../../examples/isis-bgp-lab', __dir__)
 
     # The containerlab templates: their topology file, and what they need
     # first (images), for the message after lab new.
@@ -184,7 +189,8 @@ module OSPFv2
       clab: ['ospf-ring.clab.yml', 'images ospfv2 and ospfv2-bird first'],
       srl: ['ospf-srl.clab.yml', 'image ospfv2 first, and SR Linux: docker pull ghcr.io/nokia/srlinux:26.3.1'],
       bgp: ['bgp-ibgp.clab.yml', 'images FRR and ospfv2-bird first'],
-      ospf_bgp: ['ospf-bgp.clab.yml', 'images ospfv2, ospfv2-bird and FRR first']
+      ospf_bgp: ['ospf-bgp.clab.yml', 'images ospfv2, ospfv2-bird and FRR first'],
+      isis_bgp: ['isis-bgp.clab.yml', 'images FRR and ospfv2-bird first']
     }.freeze
 
     # Copies the router lab template into a new folder and makes it a git
@@ -192,7 +198,7 @@ module OSPFv2
     # copies the containerlab lab instead: a ring of point-to-point links.
     # --srlinux copies the containerlab lab with Nokia SR Linux. --bgp:
     # three iBGP speakers in one AS. --ospf-bgp: an OSPF domain whose
-    # routes reach another AS by BGP.
+    # routes reach another AS by BGP. --isis-bgp: the same with IS-IS.
     def cmd_lab(argv)
       sub = argv.shift
       raise ArgumentError, "lab needs a subcommand: lab new DIR" unless sub == 'new'
@@ -204,10 +210,12 @@ module OSPFv2
         o.on('--srlinux') { kind = :srl }
         o.on('--bgp') { kind = :bgp }
         o.on('--ospf-bgp') { kind = :ospf_bgp }
+        o.on('--isis-bgp') { kind = :isis_bgp }
       end.parse!(argv)
       template, from = { compose: [LAB_TEMPLATE, 'examples/lab'], clab: [CLAB_TEMPLATE, 'examples/clab-lab'],
                          srl: [SRL_TEMPLATE, 'examples/srl-lab'], bgp: [BGP_TEMPLATE, 'examples/bgp-lab'],
-                         ospf_bgp: [OSPF_BGP_TEMPLATE, 'examples/ospf-bgp-lab'] }.fetch(kind)
+                         ospf_bgp: [OSPF_BGP_TEMPLATE, 'examples/ospf-bgp-lab'],
+                         isis_bgp: [ISIS_BGP_TEMPLATE, 'examples/isis-bgp-lab'] }.fetch(kind)
       dir = argv.shift or raise ArgumentError, 'lab new needs a folder, for example: ospfv2 lab new ~/labs/ospf-lab'
       dir = File.expand_path(dir)
       raise ArgumentError, "#{dir} exists and is not empty" if File.exist?(dir) && !(File.directory?(dir) && Dir.empty?(dir))
