@@ -337,18 +337,6 @@ docker exec clab-ospf-bgp-r1 ip link set eth3 up; sleep 25
 rs_bgp_peers ospf-bgp
 ```
 
-**bgp4r-lab**, bgp4r's own lab for routescope, lives in bgp4r under `lab/routescope/bgp4r-lab`: two bgp4r injectors, a bgp4rd router, FRR and BIRD. Build its images and start it from a bgp4r checkout:
-
-```sh
-# in the VM
-cd ~/bgp4r && git pull
-docker build --target lab-node -t bgp4r-lab:latest .
-docker build -f lab/routescope/bgp4r-lab/Dockerfile.bird -t bgp4r-bird:latest lab/routescope/bgp4r-lab
-ruby -I. exe/bgp4r lab new ~/labs/bgp4r-lab bgp4r-lab
-```
-
-Then start it from routescope's lab menu. Its scenarios (in the lab's `scenarios/`) put routes on the wire, since the injectors start silent.
-
 ## Check
 
 ```sh
