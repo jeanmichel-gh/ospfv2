@@ -314,6 +314,41 @@ docker exec clab-isis-bgp-r2 vtysh -c 'show bgp ipv4 unicast 10.255.0.3/32'
 docker exec clab-isis-bgp-asbr vtysh -c 'configure' -c 'interface eth3' -c 'no isis metric 50'
 ```
 
+### BGP in routescope
+
+routescope shows a BGP group in the top bar for a lab with BGP: RIB (every router's table side by side), Peers (every session, both ends, flaps) and Best path (one prefix on one router, and why the best won). The same from the shell, once `tools/shell.sh` is loaded (see "Query the lab from the shell"):
+
+```sh
+# in the VM
+rs_bgp_rib ospf-bgp
+rs_bgp_rib 10.255.0.0/24 ospf-bgp
+rs_bgp_peers ospf-bgp
+rs_bgp_drained ospf-bgp
+```
+
+BGP does not converge, so there is no compare for it. `rs_bgp_drained` says whether each speaker is done: its sessions up and nothing left to receive or send. BIRD gives no queues, so it is drained when its sessions are up.
+
+Flap r1's session to asbr and watch it counted twice, by FRR and by routescope:
+
+```sh
+# in the VM
+docker exec clab-ospf-bgp-r1 ip link set eth3 down; sleep 15
+docker exec clab-ospf-bgp-r1 ip link set eth3 up; sleep 25
+rs_bgp_peers ospf-bgp
+```
+
+**bgp4r-lab**, bgp4r's own lab for routescope, lives in bgp4r under `lab/routescope/bgp4r-lab`: two bgp4r injectors, a bgp4rd router, FRR and BIRD. Build its images and start it from a bgp4r checkout:
+
+```sh
+# in the VM
+cd ~/bgp4r && git pull
+docker build --target lab-node -t bgp4r-lab:latest .
+docker build -f lab/routescope/bgp4r-lab/Dockerfile.bird -t bgp4r-bird:latest lab/routescope/bgp4r-lab
+ruby -I. exe/bgp4r lab new ~/labs/bgp4r-lab bgp4r-lab
+```
+
+Then start it from routescope's lab menu. Its scenarios (in the lab's `scenarios/`) put routes on the wire, since the injectors start silent.
+
 ## Check
 
 ```sh
