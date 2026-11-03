@@ -565,6 +565,32 @@ routescope's end-to-end test, against the running lab and routescope:
 cd ~/routescope && ROUTESCOPE_URL=http://127.0.0.1:8082 ruby test/e2e/lab_test.rb
 ```
 
+## routescope's CI runner
+
+routescope is private and its free GitHub minutes run out, so its CI runs on a machine of ours. Use a second VM, a clone of this one: the CI jobs rebuild the `ospfv2` images and bring up labs with the same names as yours. routescope's `docs/ci.md` has the details.
+
+Get a token: github.com/jeanmichel-gh/routescope, Settings, Actions, Runners, New self-hosted runner. It lasts an hour. Then:
+
+```sh
+# in the second VM
+cd ~/routescope && git pull
+tools/ci-runner.sh PASTE_THE_TOKEN_HERE
+```
+
+It checks Docker, git and passwordless sudo first, then installs and starts the runner as a service. Watch it work:
+
+```sh
+# in the second VM
+journalctl -u 'actions.runner.*' -f
+```
+
+Stop it:
+
+```sh
+# in the second VM
+cd ~/actions-runner && sudo ./svc.sh stop
+```
+
 ## Troubleshooting
 
 Blocks we used to find out what was wrong. Each one only looks; none changes anything unless it says so. Paste the whole output when asking for help.
