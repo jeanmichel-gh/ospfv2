@@ -661,6 +661,6 @@ Capture both ends. Each DD from 10.99.0.10 must go to the DR (10.99.0.20).
 
 ```sh
 # in the VM
-docker exec ospfv2-sim-1 tcpdump -ni eth0 -c 20 'ip proto 89 and not dst 224.0.0.5'
+docker exec ospfv2-sim-1 tcpdump -Z root -ni eth0 -c 20 'ip proto 89 and not dst 224.0.0.5'
 ```
 
