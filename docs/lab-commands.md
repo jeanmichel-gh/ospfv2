@@ -693,6 +693,23 @@ curl -s -X POST -H 'X-Routescope: 1' -H 'Content-Type: application/json' -d '{"l
 | compose: `bind source path does not exist` | `LAB` names a folder that does not exist | `bin/ospfv2 lab new $LAB` |
 | The page hangs, `curl` to 8082 hangs | routescope cannot load the lab and restarts | `docker compose logs` in `~/routescope`; health says why |
 | The wait for Full never ends | FRR stopped | `docker compose logs --tail 40 frr` |
-| Simulator loops between ExStart and Exchange | ospfd came up before the simulator was Full | `docker compose restart sim` |
+| Simulator loops between ExStart and Exchange, FRR stays in ExStart | Fixed: the simulator sent its DDs to whichever router last said hello, not to the DR | Update ospfv2 and rebuild sim. To check, see "Where do the simulator's DDs go" |
 | `git` in the lab folder: permission denied on `frr/frr.conf` | FRR saved it moments ago | Wait 2 seconds; its start script gives it back |
 | Lab commit failed: needs `user.name` | A lab folder made before `lab new` set its identity | `cd $LAB && git config user.name lab && git config user.email lab@configs` |
+
+### Where do the simulator's DDs go
+
+FRR's side of a stuck adjacency: it resends its first DD and never logs the simulator's answer.
+
+```sh
+# in the VM
+docker logs --tail 60 ospfv2-frr-1 2>&1 | grep 'DD\]'
+```
+
+Capture both ends. Each DD from 10.99.0.10 must go to the DR (10.99.0.20).
+
+```sh
+# in the VM
+docker exec ospfv2-sim-1 tcpdump -ni eth0 -c 20 'ip proto 89 and not dst 224.0.0.5'
+```
+
