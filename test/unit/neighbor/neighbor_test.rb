@@ -158,6 +158,46 @@ class TestNeighborNeighbor < Test::Unit::TestCase
     n&.stop
   end
 
+  # A broadcast segment with the DR (FRR) and two more DROthers (BIRD,
+  # ospfd): their hellos must not retarget the simulator's DDs, which go
+  # to the DR only. The lab used to send its slave DD to whichever router
+  # had just said hello, and FRR waited in ExStart for ever.
+  def test_dd_goes_to_the_dr_on_a_shared_segment
+    t = CaptureTransport.new
+    n = new_neighbor(transport: t, router_id: 1, src_addr: '10.0.0.1/24')
+    n.start
+    hello = ->(rid, *nbrs) do
+      h = Hello.new(router_id: rid, netmask: '255.255.255.0', designated_router_id: '10.0.0.2')
+      nbrs.each { |x| h.neighbors = x }
+      h
+    end
+    t.inject(hello.(4, 2, 3), '10.0.0.4')
+    t.inject(hello.(2, 1, 3, 4), '10.0.0.2')
+    t.inject(hello.(3, 1, 2, 4), '10.0.0.3')
+    t.inject(hello.(4, 1, 2, 3), '10.0.0.4')
+    t.inject(hello.(2, 1, 3, 4), '10.0.0.2')
+    t.inject(hello.(3, 1, 2, 4), '10.0.0.3')
+    sleep 0.2
+    assert_equal :exstart, n.state
+    assert_equal '10.0.0.2', n.neighbor_ip
+    assert_equal 2, n.neighbor_router_id.to_i
+    dds = t.sent.select { |p, _| p.is_a?(DatabaseDescription) }
+    assert dds.any?
+    assert_equal ['10.0.0.2'], dds.map(&:last).uniq
+    t.sent.clear
+    master = DatabaseDescription.new(router_id: 2, area_id: 0, imms: 7, dd_sequence_number: 1000)
+    t.inject(master, '10.0.0.2')
+    t.inject(hello.(4, 1, 2, 3), '10.0.0.4')
+    sleep 0.2
+    assert_equal :exchange, n.state
+    reply, dest = t.sent.find { |p, _| p.is_a?(DatabaseDescription) }
+    assert_equal '10.0.0.2', dest
+    assert_equal 1000, reply.seqn
+    [2, 3, 4].each { |r| assert n.hello.has_neighbor?(r), "router #{r} still sees us 2-Way" }
+  ensure
+    n&.stop
+  end
+
   # A master whose first DD sets more than I, M and MS (SR Linux): the
   # simulator, the slave, answers it; its DDs say E, as its hellos.
   def test_exstart_answers_a_master_with_more_flags

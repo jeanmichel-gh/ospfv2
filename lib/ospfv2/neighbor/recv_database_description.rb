@@ -23,8 +23,12 @@
 module OSPFv2
   class Neighbor
 
-    def recv_database_description(rcv_dd, *args)
-      
+    def recv_database_description(rcv_dd, from = nil, *args)
+      unless from_peer?(from)
+        debug "*** DD from #{from} ignored: our adjacency is with #{@neighbor_ip} ***"
+        return
+      end
+
       case state
       when :exstart
         
