@@ -314,6 +314,29 @@ docker exec clab-isis-bgp-r2 vtysh -c 'show bgp ipv4 unicast 10.255.0.3/32'
 docker exec clab-isis-bgp-asbr vtysh -c 'configure' -c 'interface eth3' -c 'no isis metric 50'
 ```
 
+### BGP in routescope
+
+routescope shows a BGP group in the top bar for a lab with BGP: RIB (every router's table side by side), Peers (every session, both ends, flaps) and Best path (one prefix on one router, and why the best won). The same from the shell, once `tools/shell.sh` is loaded (see "Query the lab from the shell"):
+
+```sh
+# in the VM
+rs_bgp_rib ospf-bgp
+rs_bgp_rib 10.255.0.0/24 ospf-bgp
+rs_bgp_peers ospf-bgp
+rs_bgp_drained ospf-bgp
+```
+
+BGP does not converge, so there is no compare for it. `rs_bgp_drained` says whether each speaker is done: its sessions up and nothing left to receive or send. BIRD gives no queues, so it is drained when its sessions are up.
+
+Flap r1's session to asbr and watch it counted twice, by FRR and by routescope:
+
+```sh
+# in the VM
+docker exec clab-ospf-bgp-r1 ip link set eth3 down; sleep 15
+docker exec clab-ospf-bgp-r1 ip link set eth3 up; sleep 25
+rs_bgp_peers ospf-bgp
+```
+
 ## Check
 
 ```sh
@@ -540,6 +563,32 @@ routescope's end-to-end test, against the running lab and routescope:
 ```sh
 # in the VM
 cd ~/routescope && ROUTESCOPE_URL=http://127.0.0.1:8082 ruby test/e2e/lab_test.rb
+```
+
+## routescope's CI runner
+
+routescope is private and its free GitHub minutes run out, so its CI runs on a machine of ours. Use a second VM, a clone of this one: the CI jobs rebuild the `ospfv2` images and bring up labs with the same names as yours. routescope's `docs/ci.md` has the details.
+
+Get a token: github.com/jeanmichel-gh/routescope, Settings, Actions, Runners, New self-hosted runner. It lasts an hour. Then:
+
+```sh
+# in the second VM
+cd ~/routescope && git pull
+tools/ci-runner.sh PASTE_THE_TOKEN_HERE
+```
+
+It checks Docker, git and passwordless sudo first, then installs and starts the runner as a service. Watch it work:
+
+```sh
+# in the second VM
+journalctl -u 'actions.runner.*' -f
+```
+
+Stop it:
+
+```sh
+# in the second VM
+cd ~/actions-runner && sudo ./svc.sh stop
 ```
 
 ## Troubleshooting
