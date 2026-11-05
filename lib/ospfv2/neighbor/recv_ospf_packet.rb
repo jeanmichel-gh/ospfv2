@@ -35,9 +35,33 @@ module OSPFv2
         log :drop, "hello from #{from} rejected: #{errs.join(', ')}"
         return
       end
+      unless adjacency_peer?(hello, from)
+        # Another router on the segment: list it in our hellos so it sees
+        # 2-Way, but it does not drive our single adjacency.
+        @hello.add_router_id hello
+        return
+      end
       @neighbor_ip = from
       @neighbor_router_id = hello.router_id
       @state.recv_hello self, hello, from
+    end
+
+    # The simulator keeps one adjacency. On a broadcast segment with more
+    # routers it must be with the DR (we are a DROther, RFC 2328 10.4), and
+    # every other router's hello must leave it alone: a hello from anyone
+    # used to retarget our DD packets to that router.
+    def adjacency_peer?(hello, from)
+      return true if point_to_point? || @neighbor_ip.nil? || from == @neighbor_ip
+      dr = hello.designated_router_id.to_ip
+      return false unless dr == from # only the DR itself can take the adjacency over
+      debug "*** #{from} is DR, moving the adjacency from #{@neighbor_ip} ***"
+      cancel_adjacency_timers
+      new_state NeighborState::Init.new, "DR is #{from}" unless in_state?(:down, :attempt, :init)
+      true
+    end
+
+    def from_peer?(from)
+      from.nil? || @neighbor_ip.nil? || from == @neighbor_ip
     end
 
     def recv_link_state_request(ls_request, from, *)
