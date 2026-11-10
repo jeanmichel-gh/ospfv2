@@ -208,6 +208,15 @@ module OSPFv2
       @loop.call { @pending.dup }
     end
 
+    # Whether the running configuration puts an interface in area +id+ (a
+    # 32-bit number), up or not. Call it on the loop.
+    def configured_area?(id)
+      Array(@desired&.values).any? do |want|
+        a = want[:area].to_s
+        (a.match?(/\A\d+\z/) ? a.to_i : Core::Addr.to_i(a)) == id
+      end
+    end
+
     # ---- operational state, for Daemon::Views ----
 
     def views = Views.new(self)

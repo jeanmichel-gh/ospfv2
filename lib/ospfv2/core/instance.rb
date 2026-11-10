@@ -930,6 +930,9 @@ module OSPFv2
           @deferred.delete(key)&.cancel
         end
         @areas.delete(area.id)
+        # The SPF run below tells readers about the areas left; this one
+        # is gone, so it is told here.
+        topology_changed(area) if @running && !@computing
         @spf.trigger(:area, area.id_s) if @running
       end
 

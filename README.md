@@ -354,7 +354,7 @@ lines to the candidate; `config.replace` makes them the whole candidate, like Ju
 `show.topology` gives one area's LSDB as nodes, links and prefixes, with whether the
 last SPF run reached each node: `{"area": "0.0.0.1"}`, or `{"scope": "as"}` for the AS
 external LSAs by ASBR. It is what a BGP-LS Producer reads (RFC 9552); a LAN is a node
-named `DR:address`. `docs/design/ospf-topology.md` has its fields. Read it again after
+named `DR:address`. A configured area with no interface up has no nodes. `docs/design/ospf-topology.md` has its fields. Read it again after
 a `topology` event for that area or scope.
 
 `events.subscribe` turns the connection into a stream of events, one per line, with a

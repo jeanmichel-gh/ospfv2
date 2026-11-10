@@ -136,7 +136,12 @@ module OSPFv2
               r.as_lsdb.live, reachable: ->(asbr) { asbr == r.router_id || t.routers.keys.any? { |rid, _| rid == asbr } }
             ))
           end
-          a = r.areas[id] or raise ArgumentError, "not in area #{Core::Addr.to_s(id)}; areas: #{r.areas.values.map(&:id_s).join(', ')}"
+          a = r.areas[id]
+          # Configured, but no interface of it is up: the instance has
+          # dropped the area, so it holds nothing of it.
+          next { area: Core::Addr.to_s(id) }.merge(base, nodes: []) if a.nil? && @daemon.configured_area?(id)
+          raise ArgumentError, "not in area #{Core::Addr.to_s(id)}; areas: #{r.areas.values.map(&:id_s).join(', ')}" unless a
+
           { area: a.id_s }.merge(base, nodes: Core::LsdbTopology.area(a.lsdb.live, reached: t.reached[id]))
         end
       end
