@@ -491,4 +491,46 @@ class TestCoreSpf < Test::Unit::TestCase
     warn format('grid SPF %.1f ms', ms) if ENV['SPF_BENCH']
     assert_operator ms, :<, limit, format('SPF took %.1f ms', ms)
   end
+
+  # ---- what SPF reached, per area (for show.topology) ----
+
+  def ids(list) = list.map { |x| Addr.to_s(x) }
+
+  def test_reached_is_the_tree_with_the_root
+    t = spf(square, square_ifaces)
+    assert_equal({ routers: %w[1.1.1.1 2.2.2.2 3.3.3.3 4.4.4.4], networks: [] },
+                 t.reached[0].transform_values { ids(_1) })
+    assert t.reached?(0, A['1.1.1.1'])
+  end
+
+  def test_reached_has_a_lan_as_its_dr_address
+    t = spf(lan, lan_ifaces)
+    assert_equal %w[1.1.1.1 2.2.2.2 3.3.3.3], ids(t.reached[0][:routers])
+    assert_equal %w[10.0.0.2], ids(t.reached[0][:networks])
+  end
+
+  # R5 lists R1, but R1 does not list R5: no two-way link, not reached.
+  def test_a_router_cut_off_is_not_reached
+    t = spf(square + [rtr('5.5.5.5', p2p(5, 1) + [loopback(5)])], square_ifaces)
+    refute t.reached?(0, A['5.5.5.5'])
+    assert t.reached?(0, A['4.4.4.4'])
+    refute t.reached?(1, A['4.4.4.4']), 'not an area of ours'
+  end
+
+  # Area 0: R1 -- R2. Area 1: R1 -- R3. R1 is in both trees.
+  def test_reached_is_per_area
+    a0 = Spf::Area.new(id: 0, lsas: [rtr('1.1.1.1', p2p(1, 2), flags: 1), rtr('2.2.2.2', p2p(2, 1))],
+                       interfaces: [iface('eth1', 1, 2)])
+    a1 = Spf::Area.new(id: 1, lsas: [rtr('1.1.1.1', p2p(1, 3), flags: 1), rtr('3.3.3.3', p2p(3, 1))],
+                       interfaces: [iface('eth2', 1, 3)])
+    t = Spf.run(router_id: '1.1.1.1', areas: [a0, a1])
+    assert_equal %w[1.1.1.1 2.2.2.2], ids(t.reached[0][:routers])
+    assert_equal %w[1.1.1.1 3.3.3.3], ids(t.reached[1][:routers])
+  end
+
+  def test_an_area_without_our_router_lsa_has_no_tree
+    t = spf(square.drop(1), square_ifaces)
+    assert_nil t.reached[0]
+    assert_equal({}, Spf::Table.empty.reached)
+  end
 end

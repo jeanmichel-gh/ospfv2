@@ -228,4 +228,63 @@ class TestDaemonApi < Test::Unit::TestCase
     assert t.join(2), 'subscribe returns on :stop'
     assert_equal %w[a b], got
   end
+
+  # ---- show.topology and the topology event ----
+
+  def configure_lo
+    call('config.load', 'lines' => ['set routing-options router-id 1.1.1.1',
+                                    'set protocols ospf area 0 interface lo passive'])
+    assert call('config.commit')[:result][:ok]
+    @loop.advance(1) # our router-LSA, and the first SPF run
+    @daemon.instance
+  end
+
+  def test_show_topology_of_an_area_and_the_as
+    r = configure_lo
+    a0 = r.areas[0]
+    # 2.2.2.2 lists us, we do not list it: in the LSDB, not reached.
+    a0.lsdb.install(Core::Lsa.router(advr: '2.2.2.2', seq: 1, links: [{ type: 1, id: '1.1.1.1', data: '10.0.0.2', metric: 5 }]))
+    r.as_lsdb.install(Core::Lsa.build(type: 5, ls_id: '192.0.2.0', advr: '2.2.2.2', seq: 1,
+                                      body: [0xffff_ff00, 0x8000_0014, 0, 0].pack('NNNN')))
+    r.compute_routes
+    t = call('show.topology', 'area' => '0.0.0.0')[:result]
+    assert_equal ['0.0.0.0', '1.1.1.1', r.spf_log.last.n], t.values_at(:area, :router_id, :run)
+    assert_equal [['1.1.1.1', true], ['2.2.2.2', false]], t[:nodes].map { [_1[:id], _1[:reachable]] }
+    assert_equal [{ prefix: '1.1.1.1/32', metric: 10, route_type: 'intra' }], t[:nodes][0][:prefixes]
+    assert_equal t, call('show.topology', 'area' => '0')[:result], 'a number is an area too'
+    as = call('show.topology', 'scope' => 'as')[:result]
+    assert_equal 'as', as[:scope]
+    assert_equal [['2.2.2.2', false, '192.0.2.0/24', 'external_2']],
+                 as[:nodes].map { [_1[:id], _1[:reachable], _1[:prefixes][0][:prefix], _1[:prefixes][0][:route_type]] }
+    assert_include call('api.info')[:result][:methods], 'show.topology'
+  end
+
+  def test_show_topology_errors
+    assert_match(/not configured/, call('show.topology', 'area' => '0')[:error])
+    configure_lo
+    assert_match(/not in area 0\.0\.0\.1; areas: 0\.0\.0\.0/, call('show.topology', 'area' => '0.0.0.1')[:error])
+    assert_match(/missing area/, call('show.topology')[:error])
+    assert_match(/not both/, call('show.topology', 'area' => '0', 'scope' => 'as')[:error])
+    assert_match(/unknown scope/, call('show.topology', 'scope' => 'area')[:error])
+    assert_match(/dotted quad/, call('show.topology', 'area' => 'zero')[:error])
+  end
+
+  def test_topology_events_after_spf_and_after_our_own_summaries
+    r = configure_lo
+    sub, = @daemon.events.subscribe(kinds: %w[topology])
+    r.compute_routes
+    got = []
+    while (e = sub.pop(timeout: 0)) do got << e[:data] end
+    assert_equal [{ area: '0.0.0.0', run: r.spf.runs }, { scope: 'as', run: r.spf.runs }], got
+    # Our own type 3 and type 5 run no SPF, and still tell readers.
+    runs = r.spf.runs
+    r.areas[0].lsdb.install(Core::Lsa.build(type: 3, ls_id: '10.9.0.0', advr: '1.1.1.1', seq: 1, body: [0xffff_0000, 1].pack('NN')))
+    r.as_lsdb.install(Core::Lsa.build(type: 5, ls_id: '192.0.2.0', advr: '1.1.1.1', seq: 1,
+                                      body: [0xffff_ff00, 1, 0, 0].pack('NNNN')))
+    got = []
+    while (e = sub.pop(timeout: 0)) do got << e[:data] end
+    assert_equal [{ area: '0.0.0.0', run: runs }, { scope: 'as', run: runs }], got
+    assert_nil r.spf.next_run_in, 'no SPF scheduled for them'
+    assert_include call('api.info')[:result][:event_kinds], 'topology'
+  end
 end
