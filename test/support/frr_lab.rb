@@ -19,6 +19,45 @@ class FrrLab
   FRR = '/usr/lib/frr'
   ROOT = File.expand_path('../..', __dir__)
 
+  # Where the kernel lists the AppArmor profiles it has loaded, one per
+  # line: "ospfd (enforce)". Readable by root, which these tests are.
+  APPARMOR_PROFILES = '/sys/kernel/security/apparmor/profiles'
+
+  # The FRR daemons among +daemons+ that an enforced AppArmor profile
+  # confines. Ubuntu 26.04's apparmor package ships one for ospfd (and
+  # ospf6d, isisd): it lets ospfd write only /run/frr/ospfd.pid and the
+  # like, so the pid file of a pathspace, /run/frr/NAME/ospfd.pid, is
+  # denied and ospfd exits at start.
+  def self.apparmor_enforced(daemons, profiles = nil)
+    profiles ||= begin
+      File.read(APPARMOR_PROFILES)
+    rescue Errno::ENOENT, Errno::EACCES
+      ''
+    end
+    daemons.select { |d| profiles.match?(/^(#{Regexp.escape(d)}|#{Regexp.escape("#{FRR}/#{d}")}) \(enforce\)$/) }
+  end
+
+  # Starts an FRR +daemon+ in +ns+ under +pathspace+, its output in
+  # +log+. A daemon that fails raises with that output, and says so when
+  # an enforced AppArmor profile is the likely reason. The output goes to
+  # a file, not a pipe: a daemon started with -d keeps a pipe open.
+  def self.start_daemon(ns, daemon, pathspace, conf, pid_file, log)
+    cmd = "ip netns exec #{ns} #{FRR}/#{daemon} -N #{pathspace} -d -f #{conf} -i #{pid_file}"
+    return if system("#{cmd} > #{log} 2>&1")
+
+    raise failure_message(cmd, daemon, File.exist?(log) ? File.read(log) : '', apparmor_enforced([daemon]))
+  end
+
+  def self.failure_message(cmd, daemon, output, enforced)
+    msg = +"failed: #{cmd}"
+    msg << "\n#{output.strip}" unless output.strip.empty?
+    unless enforced.empty?
+      msg << "\nAppArmor enforces a profile for #{daemon}, which denies its pid file under a pathspace. " \
+             "Unload it for these tests: sudo apparmor_parser -R /etc/apparmor.d/#{daemon}"
+    end
+    msg
+  end
+
   def self.available?
     return [false, 'set OSPFV2_FRR=1 to run the FRR interop tests'] unless ENV['OSPFV2_FRR'] == '1'
     return [false, 'needs root for network namespaces'] unless Process.uid.zero?
@@ -174,7 +213,7 @@ class FrrLab
     CONF
     sh "chown -R frr:frr #{@run} #{@etc}"
     %w[zebra ospfd].each do |d|
-      sh "ip netns exec #{@frr_ns} #{FRR}/#{d} -N #{@name} -d -f #{conf} -i #{@run}/#{d}.pid > /dev/null 2>&1"
+      FrrLab.start_daemon(@frr_ns, d, @name, conf, "#{@run}/#{d}.pid", File.join(@dir, "frr-#{d}.log"))
     end
   end
 

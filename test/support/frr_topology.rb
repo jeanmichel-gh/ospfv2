@@ -24,7 +24,7 @@ class FrrTopology
   ROOT = FrrLab::ROOT
 
   Router = Struct.new(:name, :kind, :router_id, :loopback_area, :extra, :frr_extra, :dummies, :links, :fib,
-                      :externals, :areas, :virtual_links, keyword_init: true)
+                      :externals, :areas, :virtual_links, :spf, keyword_init: true)
   Link = Struct.new(:ifname, :peer, :address, :prefix_len, :p2p, :area, :cost, keyword_init: true)
 
   attr_reader :routers, :dir
@@ -47,10 +47,14 @@ class FrrTopology
   # externals: [{ prefix:, metric:, type:, tag: }] to advertise
   # areas: { '0.0.0.1' => { stub: {} } }
   # virtual_links: [{ neighbor: '2.2.2.2', transit_area: '0.0.0.1' }]
-  def core(name, router_id, loopback_area: 0, fib: false, externals: nil, dummies: {}, areas: nil, virtual_links: nil)
+  # spf: the core's RFC 8405 timers in seconds (Core::SpfScheduler::DEFAULTS
+  # keys), for a test that times a failure and must not wait out the 5 s
+  # long delay.
+  def core(name, router_id, loopback_area: 0, fib: false, externals: nil, dummies: {}, areas: nil, virtual_links: nil,
+           spf: nil)
     @routers[name] = Router.new(name: name, kind: :core, router_id: router_id, loopback_area: loopback_area,
                                 extra: [], frr_extra: [], dummies: dummies, links: [], fib: fib, externals: externals,
-                                areas: areas, virtual_links: virtual_links)
+                                areas: areas, virtual_links: virtual_links, spf: spf)
   end
 
   # Joins a and b on +subnet+; a gets the first host address, b the second.
@@ -194,7 +198,7 @@ class FrrTopology
     File.write(conf, "#{lines.join("\n")}\n")
     sh "chown -R frr:frr #{run} #{etc}"
     %w[zebra ospfd].each do |d|
-      sh "ip netns exec #{ns(r.name)} #{FRR}/#{d} -N #{pathspace(r.name)} -d -f #{conf} -i #{run}/#{d}.pid > /dev/null 2>&1"
+      FrrLab.start_daemon(ns(r.name), d, pathspace(r.name), conf, "#{run}/#{d}.pid", File.join(@dir, "#{r.name}-frr-#{d}.log"))
     end
   end
 
@@ -206,7 +210,7 @@ class FrrTopology
     ifaces << { name: 'lo', address: "#{r.router_id}/32", passive: true, area: OSPFv2::Core::Addr.to_s(r.loopback_area) }
     cfg = File.join(@dir, "#{r.name}.json")
     File.write(cfg, JSON.generate(router_id: r.router_id, interfaces: ifaces, fib: r.fib, externals: r.externals,
-                                  areas: r.areas, virtual_links: r.virtual_links))
+                                  areas: r.areas, virtual_links: r.virtual_links, spf: r.spf))
     @pids[r.name] = Process.spawn('ip', 'netns', 'exec', ns(r.name), RbConfig.ruby, "-I#{ROOT}/lib",
                                   "#{ROOT}/test/support/core_runner.rb", cfg, state_file(r.name),
                                   %i[out err] => [File.join(@dir, "#{r.name}.log"), 'a'])

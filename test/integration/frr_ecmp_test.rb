@@ -19,7 +19,15 @@ class TestFrrEcmp < Test::Unit::TestCase
     ok, why = FrrLab.available?
     omit(why) unless ok
     @t = FrrTopology.new("ecmp#{Process.pid % 1000}")
-    @t.core('r1', '1.1.1.1', fib: true)
+    # Short SPF back-off. FRR floods its new LSA as soon as its end of
+    # the link goes down; that SPF run keeps both paths (r2 still links
+    # back to r1 over the other cable), and it puts the RFC 8405
+    # scheduler in its long delay. The dead interval ends 4 s later, and
+    # with the default 5 s long delay the path goes at about 9 s: 9.1 s
+    # on CI. This test is about the kernel's multipath route, not SPF
+    # pacing, so the long delay is 1 s and the scheduler is quiet again
+    # after 2 s. With the defaults, the worst case is about 9 s.
+    @t.core('r1', '1.1.1.1', fib: true, spf: { long: 1.0, holddown: 2.0 })
     @t.frr('r2', '2.2.2.2')
     @t.link('r1', 'r2', '10.0.12.0/30', p2p: true)
     @t.link('r1', 'r2', '10.0.12.4/30', p2p: true)
@@ -40,10 +48,13 @@ class TestFrrEcmp < Test::Unit::TestCase
     assert @t.wait_for(10) { ping }
 
     t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+    down_at = Time.now.utc.iso8601(3)
     @t.run_in('r2', 'ip', 'link', 'set', 'r1a', 'down')
     assert @t.wait_for(15) { hops == [%w[10.0.12.6 r2b]] }, kernel_route
     took = Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0
-    assert_operator took, :<, 8, format('failover took %.1f s', took)
+    assert_operator took, :<, 8, format("failover took %.1f s, down at %s\nSPF runs: %s\n%s", took, down_at,
+                                         JSON.pretty_generate(@t.core_state('r1')['spf']),
+                                         @t.core_log('r1').lines.last(8).join)
     assert ping, 'traffic on the remaining path'
 
     @t.run_in('r2', 'ip', 'link', 'set', 'r1a', 'up')
