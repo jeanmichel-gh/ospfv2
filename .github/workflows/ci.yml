@@ -31,6 +31,23 @@ jobs:
           ruby-version: '3.3'
           bundler-cache: true
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq frr iproute2
+      # ubuntu-latest moved from 24.04 to 26.04 between 6 and 9 November
+      # 2026. 26.04 ships an AppArmor profile for ospfd that allows only
+      # FRR's default paths, so the lab's ospfd cannot write its pid file
+      # under its pathspace and every interop test fails (see
+      # FrrLab.apparmor_enforced). The runner is thrown away after the
+      # job, so unload the profile, which is the way round it FrrLab's own
+      # message gives. 24.04 has no profile and this does nothing there.
+      # isis's CI does the same for isisd (isis #67).
+      - name: Unload the ospfd AppArmor profile
+        run: |
+          if [ -f /etc/apparmor.d/ospfd ]; then
+            sudo apparmor_parser -R /etc/apparmor.d/ospfd
+            echo "ospfd profile unloaded"
+          else
+            echo "no ospfd profile"
+          fi
+          sudo grep '^ospfd ' /sys/kernel/security/apparmor/profiles || echo "ospfd not confined"
       - run: sudo -E env "PATH=$PATH" OSPFV2_FRR=1 bundle exec ruby -Ilib -Itest test/integration/frr_interop_test.rb
       - run: sudo -E env "PATH=$PATH" OSPFV2_FRR=1 bundle exec ruby -Ilib -Itest test/integration/frr_spf_test.rb
       - run: sudo -E env "PATH=$PATH" OSPFV2_FRR=1 bundle exec ruby -Ilib -Itest test/integration/frr_abr_test.rb

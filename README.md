@@ -454,6 +454,14 @@ test/lab/lab_test.sh                # the compose router lab end to end (Docker,
 CI runs the unit tests on Ruby 3.2 to 4.0, the FRR interop tests in network
 namespaces, the image build, and `test/lab/lab_test.sh`.
 
+The FRR interop tests need root and `OSPFV2_FRR=1`. On Ubuntu 26.04, AppArmor confines
+FRR's ospfd to its default paths and the tests use their own; unload the profile until
+the next reboot first:
+
+```sh
+sudo apparmor_parser -R /etc/apparmor.d/ospfd
+```
+
 `REVIEW.md` describes the code base, what changed in the 2026 refresh and what is
 worth rewriting next.
 

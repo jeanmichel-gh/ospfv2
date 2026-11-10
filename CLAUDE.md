@@ -220,7 +220,7 @@ bundle exec rake test:unit
 ```
 
 It needs no root and no network, and takes about 20 seconds. Measured
-2026-11-07 on Ruby 3.3.8: 641 tests, 6913 assertions, all passing, with
+2026-11-10 on Ruby 3.3.8: 644 tests, 6921 assertions, all passing, with
 one omission (a test that needs root). Copy counts out of a run, never
 work them out.
 
@@ -239,6 +239,27 @@ The FRR tests need root, iproute2 and FRR, and run only with
 of them omitted, on the same day. The lab scripts replace a lab you
 are running; start yours again afterwards. CI runs every tier, in
 `.github/workflows/ci.yml`.
+
+**AppArmor confines FRR's ospfd on newer Ubuntu.** Ubuntu's `apparmor`
+package ships `/etc/apparmor.d/ospfd` (26.04 does, 24.04 does not). It
+allows only FRR's default paths, such as `/run/frr/ospfd.pid`, and the
+FRR tests run ospfd in a pathspace, `/run/frr/<name>/`. So ospfd exits
+with `Can't create pid lock file ... (Permission denied)` and every FRR
+test fails; zebra has no profile, so zebra starts and ospfd does not.
+`FrrLab.start_daemon` puts the daemon's output and the profile in its
+error. CI's `ubuntu-latest` became 26.04 between 6 and 9 November 2026,
+so the `interop-frr` job unloads the profile before the tests; the
+runner is thrown away after the job. isis does the same for isisd. On a
+machine of yours:
+
+```sh
+sudo grep '^ospfd ' /sys/kernel/security/apparmor/profiles   # ospfd (enforce)
+sudo apparmor_parser -R /etc/apparmor.d/ospfd                # unload until reboot
+sudo apparmor_parser -r /etc/apparmor.d/ospfd                # load it again
+```
+
+The tests do not unload it for you: a test should not change a host's
+security settings.
 
 * New behaviour needs a test. A fix needs a test that failed before it.
 * Test the core on the fake clock. Some simulator tests wait on real

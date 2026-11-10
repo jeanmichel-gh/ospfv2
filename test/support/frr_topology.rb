@@ -194,7 +194,7 @@ class FrrTopology
     File.write(conf, "#{lines.join("\n")}\n")
     sh "chown -R frr:frr #{run} #{etc}"
     %w[zebra ospfd].each do |d|
-      sh "ip netns exec #{ns(r.name)} #{FRR}/#{d} -N #{pathspace(r.name)} -d -f #{conf} -i #{run}/#{d}.pid > /dev/null 2>&1"
+      FrrLab.start_daemon(ns(r.name), d, pathspace(r.name), conf, "#{run}/#{d}.pid", File.join(@dir, "#{r.name}-frr-#{d}.log"))
     end
   end
 
