@@ -12,7 +12,7 @@ class TestDaemonApi < Test::Unit::TestCase
   def setup
     @dir = Dir.mktmpdir('ospfd-api')
     @loop = EventLoop.new(clock: Clock::Fake.new, on_error: ->(e) { raise e })
-    system = Daemon::FakeSystem.new
+    system = @system = Daemon::FakeSystem.new
     system.set('lo', '1.1.1.1/32')
     @daemon = Daemon.new(config_path: File.join(@dir, 'ospfd.conf'), loop: @loop, system: system)
     @daemon.start
@@ -267,6 +267,32 @@ class TestDaemonApi < Test::Unit::TestCase
     assert_match(/not both/, call('show.topology', 'area' => '0', 'scope' => 'as')[:error])
     assert_match(/unknown scope/, call('show.topology', 'scope' => 'area')[:error])
     assert_match(/dotted quad/, call('show.topology', 'area' => 'zero')[:error])
+  end
+
+  # An area that is configured but has no interface up is not in the
+  # instance: Instance#drop_area forgets it. It answers an empty topology,
+  # not an error, so a reader asking for every configured area, such as a
+  # BGP-LS Producer, still reads the others, and withdraws this one's.
+  def test_show_topology_of_a_configured_area_with_no_interface_up
+    @system.set('eth2', '10.1.23.1/24')
+    call('config.load', 'lines' => ['set routing-options router-id 1.1.1.1',
+                                    'set protocols ospf area 0 interface lo passive',
+                                    'set protocols ospf area 0.0.0.1 interface eth2 passive'])
+    assert call('config.commit')[:result][:ok]
+    @loop.advance(1)
+    r = @daemon.instance
+    assert_equal %w[0.0.0.0 0.0.0.1], r.areas.values.map(&:id_s)
+    assert_equal ['1.1.1.1'], call('show.topology', 'area' => '0.0.0.1')[:result][:nodes].map { _1[:id] }
+    sub, = @daemon.events.subscribe(kinds: %w[topology])
+    @system.set('eth2', '10.1.23.1/24', up: false)
+    @loop.advance(Daemon::RECHECK)
+    assert_equal %w[0.0.0.0], r.areas.values.map(&:id_s), 'the area went with its last interface'
+    t = call('show.topology', 'area' => '0.0.0.1')[:result]
+    assert_equal ['0.0.0.1', '1.1.1.1', []], t.values_at(:area, :router_id, :nodes)
+    got = []
+    while (e = sub.pop(timeout: 0)) do got << e[:data] end
+    assert_include got.map { _1[:area] }, '0.0.0.1', 'readers hear that the area changed'
+    assert_match(/not in area 0\.0\.0\.2/, call('show.topology', 'area' => '0.0.0.2')[:error], 'an area not configured is still an error')
   end
 
   def test_topology_events_after_spf_and_after_our_own_summaries

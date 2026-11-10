@@ -125,6 +125,14 @@ ASBR that sent them:
 `reachable` is true when the ASBR is this router, or SPF has a route to
 it in some area (`Table.routers`).
 
+**An area that is configured but has no interface up** answers
+`{ "area", "router_id", "run", "nodes": [] }`, not an error. The
+daemon only keeps interfaces whose link is up, and `Instance#drop_area`
+forgets an area when its last interface goes, so the router holds
+nothing of it. An area that is not configured is still an error. (Added
+after routescope's phase 3 lab: with o2's only area 1 interface down,
+"not in area 0.0.0.1" made bgp4r's Producer stop reading every area.)
+
 ### ospf-cli
 
 Both forms, as every show command:
@@ -147,7 +155,9 @@ So a new event kind, `topology`, with `{ area }` or `{ scope: "as" }`:
 
 - after each SPF run, once per area it computed and once for the AS;
 - after any change to the LSDB that SPF does not run for: this
-  router's own Type 3, 4, 5 and 7 LSAs.
+  router's own Type 3, 4, 5 and 7 LSAs;
+- when an area is dropped because its last interface went down. The
+  SPF run after it covers only the areas left.
 
 A reader subscribes with `events.subscribe { kinds: ["topology"] }` and
 re-reads what the event names. `api.info` lists the kind, as every
@@ -182,7 +192,9 @@ One: ospfv2 `claude/bgp-ls-ospf`. This spec first. Then:
   - Type 4 and virtual links left out;
   - `scope: "as"` with an E1 and an E2, forwarding and tag;
   - an `area` this router is not in, a missing parameter, both given:
-    errors.
+    errors;
+  - an area configured with no interface up: no nodes, and a
+    `topology` event when it is dropped.
 - The `topology` event: after an SPF run, per area; after this router
   re-originates a Type 3 with no SPF run.
 - The CLI's two forms parse and print.

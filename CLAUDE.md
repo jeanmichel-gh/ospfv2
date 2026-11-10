@@ -222,7 +222,7 @@ bundle exec rake test:unit
 ```
 
 It needs no root and no network, and takes about 20 seconds. Measured
-2026-11-10 on Ruby 3.3.8: 663 tests, 6985 assertions, all passing, with
+2026-11-10 on Ruby 3.3.8: 664 tests, 6992 assertions, all passing, with
 one omission (a test that needs root). Copy counts out of a run, never
 work them out.
 
