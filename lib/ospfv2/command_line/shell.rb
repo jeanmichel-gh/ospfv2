@@ -31,6 +31,7 @@ module OSPFv2
           show ospf overview          show ip ospf
           show ospf route             show ip ospf route          show ip route ospf
           show ospf log (SPF runs)    show ip ospf statistics
+          show ospf topology area 0   show ip ospf topology external
           show ospf events            show ip ospf events
           show ospf statistics        show ip ospf traffic
           show configuration
@@ -197,6 +198,7 @@ module OSPFv2
         method = "show.#{a[:view] == :spf_run ? :spf : a[:view]}"
         params = a[:view] == :database ? { detail: a[:detail] || a[:style] == :ios } : {}
         params = { run: args.first.to_i } if a[:view] == :spf_run
+        params = a[:scope] ? { scope: a[:scope] } : { area: args.first } if a[:view] == :topology
         data = @client.call(method, params)
         router_id = needs_router_id?(a) ? @client.call('show.overview')['router_id'] : nil
         text = Format.render(a[:view], a[:style], data, detail: a[:detail], type: a[:type], router_id: router_id)

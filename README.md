@@ -323,6 +323,7 @@ Junos forms print Junos style, IOS forms print IOS style.
 | `show ospf events` | `show ip ospf events` |
 | `show ospf statistics` (packets) | `show ip ospf traffic` |
 | `show ospf timers` | `show ip ospf timers` |
+| `show ospf topology area AREA\|external` (the LSDB as nodes) | `show ip ospf topology area AREA\|external` |
 | `clear ospf neighbor [ROUTER-ID]` | `clear ip ospf process` |
 | `monitor ospf events [KIND]` (live, Ctrl-C stops) | `monitor ip ospf events` |
 | `show configuration` | |
@@ -343,12 +344,18 @@ request and one reply per line.
 
 `api.info` returns ospfd's version, the API version, the methods and the event kinds.
 The methods: `show.overview`, `show.neighbors`, `show.interfaces`, `show.database`,
-`show.routes`, `show.fib`, `show.spf`, `show.log`, `show.statistics`, `show.timers`,
-`show.configuration`, `config.load`, `config.replace`, `config.compare`, `config.changed`,
+`show.routes`, `show.fib`, `show.spf`, `show.topology`, `show.log`, `show.statistics`,
+`show.timers`, `show.configuration`, `config.load`, `config.replace`, `config.compare`, `config.changed`,
 `config.commit`, `config.discard`, `config.rollback`, `config.history`,
 `clear.neighbors`, `events.subscribe` and `events.unsubscribe`. `config.load` adds set
 lines to the candidate; `config.replace` makes them the whole candidate, like Junos
 `load override` (a console restoring a saved file uses it).
+
+`show.topology` gives one area's LSDB as nodes, links and prefixes, with whether the
+last SPF run reached each node: `{"area": "0.0.0.1"}`, or `{"scope": "as"}` for the AS
+external LSAs by ASBR. It is what a BGP-LS Producer reads (RFC 9552); a LAN is a node
+named `DR:address`. `docs/design/ospf-topology.md` has its fields. Read it again after
+a `topology` event for that area or scope.
 
 `events.subscribe` turns the connection into a stream of events, one per line, with a
 keepalive line every 15 seconds when nothing happens. Use a second connection for
@@ -376,6 +383,7 @@ time, a level, a kind, a message and, for most kinds, structured `data`:
 | `spf` | Every SPF run | `duration_ms`, `routes`, `added`, `changed`, `removed`, `reasons`, `prefixes` (the first 50, `+`, `~` or `-` in front) |
 | `routes` | An SPF run changed routes | `added`, `changed`, `removed` |
 | `spf_skipped` | SPF skipped a bad LSA | `why` |
+| `topology` | After each SPF run, once per area and once for the AS; after a change to our own summaries and externals, which run no SPF | `area` or `scope` (`as`), `run` |
 | `lsa` | One of our LSAs is flushed, or an LSA reaches MaxAge | `change`, `lsa_type`, `ls_id`, `advr`, `seq` |
 | `router` | The router starts or stops | `state`, `router_id` |
 | `virtual_link` | A virtual link comes up or goes down | `to`, `neighbor_id`, `cost` |

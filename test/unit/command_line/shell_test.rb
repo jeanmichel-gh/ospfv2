@@ -260,4 +260,24 @@ class TestCommandLineShell < Test::Unit::TestCase
     assert_match(/spf\s+Spf events/, @sh.execute('monitor ospf events ?'))
     assert_match(/monitor ospf events/, @sh.execute('help'))
   end
+
+  def test_topology
+    configured
+    # The LAN's network-LSA comes after the last SPF run; reachable is
+    # what the next run says, in up to 5 s of back-off.
+    @loop.advance(30)
+    out = @sh.execute('show ospf topology area 0')
+    puts out if ENV['SHOW_OUTPUT']
+    assert_match(/\AOSPF topology, area 0\.0\.0\.0, router 1\.1\.1\.1, SPF run \d+$/, out)
+    assert_match(/^1\.1\.1\.1 +router +yes/, out)
+    assert_match(/^2\.2\.2\.2 +router +yes/, out)
+    assert_match(/^\d+\.\d+\.\d+\.\d+:10\.0\.0\.\d +network +yes +DR /, out)
+    assert_match(%r{^  prefix   10\.0\.0\.0/24 +intra +metric 0$}, out)
+    assert_equal out, @sh.execute('show ip ospf topology area 0.0.0.0')
+    json = JSON.parse(@sh.execute('show ospf topology area 0 | display json'))
+    assert_equal 3, json['nodes'].size
+    assert_match(/AS external LSAs.*\n\n.*\n\(no nodes\)/, @sh.execute('sh ip os top ext'))
+    assert_match(/not in area 0\.0\.0\.1/, @sh.execute('show ospf topology area 1'))
+    assert_match(/syntax error/, @sh.execute('show ospf topology area x'))
+  end
 end

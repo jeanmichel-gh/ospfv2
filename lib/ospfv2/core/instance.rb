@@ -11,6 +11,7 @@ require_relative 'interface'
 require_relative 'area'
 require_relative 'virtual_link'
 require_relative 'spf'
+require_relative 'lsdb_topology'
 require_relative 'spf_scheduler'
 
 module OSPFv2
@@ -99,7 +100,7 @@ module OSPFv2
 
       def area(id)
         id = Addr.to_i(id.is_a?(Integer) ? id : id.to_s)
-        @areas[id] ||= Area.new(self, id).tap { |a| a.lsdb.on_change = method(:lsdb_changed) }
+        @areas[id] ||= Area.new(self, id).tap { |a| a.lsdb.on_change = ->(lsa, old) { lsdb_changed(lsa, old, a) } }
       end
 
       def add_interface(name:, address:, area: 0, transport: nil, **opts)
@@ -488,6 +489,9 @@ module OSPFv2
         t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
         table = Spf.run(router_id: @router_id, areas: spf_areas, externals: @as_lsdb.live, max_paths: @max_paths)
         @stats[:spf_runs] += 1
+        # Our summaries and externals that this run re-originates are told
+        # in the topology events at its end, not one by one.
+        @computing = true
         prev = @route_table
         replace_routes(table, reasons, Process.clock_gettime(Process::CLOCK_MONOTONIC) - t0, started: started)
         update_virtual_links(table)
@@ -503,7 +507,21 @@ module OSPFv2
         # Warn once per bad LSA, not on every run.
         (table.stats[:skipped] - @spf_skipped).each { |why| log(:warn, nil, "SPF skipped #{why}", kind: :spf_skipped, why: why.to_s) }
         @spf_skipped = table.stats[:skipped]
+        @computing = false
+        @areas.each_value { |a| topology_changed(a) }
+        topology_changed(nil)
         table
+      ensure
+        @computing = false
+      end
+
+      # Tells readers of show.topology to read again: one area (or the AS
+      # scope, +area+ nil). After each SPF run, and after a change to our
+      # own summaries and externals, which run no SPF.
+      def topology_changed(area)
+        where = area ? { area: area.id_s } : { scope: 'as' }
+        publish(:info, "topology #{area ? "area #{area.id_s}" : 'AS scope'} changed", kind: :topology,
+                                                                                      run: @spf.runs, **where)
       end
 
       def origination_signature(table)
@@ -800,10 +818,14 @@ module OSPFv2
         @translating.key?(area.id)
       end
 
-      def lsdb_changed(lsa, _old)
+      def lsdb_changed(lsa, _old, area = nil)
         return unless @running
-        # SPF never uses our own summaries and externals: no run for them.
-        return if lsa.advr == @router_id && [3, 4, 5, 7].include?(lsa.type)
+        # SPF never uses our own summaries and externals: no run for them,
+        # but show.topology lists them.
+        if lsa.advr == @router_id && [3, 4, 5, 7].include?(lsa.type)
+          topology_changed(area) unless @computing
+          return
+        end
         @spf.trigger(lsa.type_name, lsa.type == 1 ? Addr.to_s(lsa.advr) : "#{Addr.to_s(lsa.ls_id)} from #{Addr.to_s(lsa.advr)}",
                      lsa: lsa.instance_fields.merge(type: lsa.type, age: lsa.age), source: @arrival || { source: 'unknown' })
       end

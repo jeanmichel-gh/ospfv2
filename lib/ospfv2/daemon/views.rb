@@ -119,6 +119,28 @@ module OSPFv2
         end
       end
 
+      # One area's LSDB as nodes, links and prefixes, with whether the
+      # last SPF reached each node; or, with scope "as", the AS external
+      # LSAs by ASBR. For a BGP-LS Producer (docs/design/ospf-topology.md).
+      def topology(area: nil, scope: nil)
+        raise ArgumentError, 'give area or scope "as", not both' if area && scope
+        raise ArgumentError, 'missing area (or scope "as")' unless area || scope
+        raise ArgumentError, "unknown scope #{scope.inspect}; the one scope is \"as\"" if scope && scope != 'as'
+        id = area && area_id(area)
+        on_loop do |r|
+          raise ArgumentError, 'not configured' unless r
+          t = r.route_table
+          base = { router_id: r.router_id_s, run: r.spf_log.last&.n }
+          if scope
+            next { scope: 'as' }.merge(base, nodes: Core::LsdbTopology.as(
+              r.as_lsdb.live, reachable: ->(asbr) { asbr == r.router_id || t.routers.keys.any? { |rid, _| rid == asbr } }
+            ))
+          end
+          a = r.areas[id] or raise ArgumentError, "not in area #{Core::Addr.to_s(id)}; areas: #{r.areas.values.map(&:id_s).join(', ')}"
+          { area: a.id_s }.merge(base, nodes: Core::LsdbTopology.area(a.lsdb.live, reached: t.reached[id]))
+        end
+      end
+
       NEAR_MAXAGE = 300 # seconds: LSAs this close to MaxAge are listed
       NEAR_MAXAGE_MAX = 50
 
@@ -199,7 +221,13 @@ module OSPFv2
         end
       end
 
-      def ago(time) = (@daemon.loop.clock.wall - time).floor
+      # An area id given as a dotted quad or a number.
+      def area_id(value)
+        value = value.to_i if value.is_a?(String) && value.match?(/\A\d+\z/)
+        Core::Addr.to_i(value)
+      end
+
+            def ago(time) = (@daemon.loop.clock.wall - time).floor
 
       def fib_hops(route) = route.next_hops.map { |i, g| { interface: i, gateway: g && Core::Addr.to_s(g) } }
 

@@ -63,6 +63,7 @@ infra/               shared by both modes: event loop, clocks, scheduler,
                      Loopback for tests), constants, the old Timer
 core/                the router. instance.rb is one router; interface,
                      neighbor, area, virtual_link, lsdb, spf,
+                     lsdb_topology (the LSDB as nodes, for BGP-LS),
                      spf_scheduler (RFC 8405), auth, and wire.rb, the
                      packet codec; lsa.rb holds LSAs as raw bytes
 fib.rb, fib/         routes into the kernel: Manager decides, a backend
@@ -155,6 +156,7 @@ others the code cites:
 | 3509 | what makes an area border router | `core/spf.rb`, `core/instance.rb` |
 | 5709 | HMAC-SHA authentication | `core/auth.rb` |
 | 8405 | SPF back-off | `core/spf_scheduler.rb` |
+| 9552 | BGP-LS: the LSDB as nodes for a Producer | `core/lsdb_topology.rb` |
 | 5250 | opaque LSAs | `lsa/opaque.rb`, dissector |
 | 3630 | TE LSAs | `lsa/traffic_engineering.rb`, `lsa/tlv/` |
 | 4915 | multi-topology metrics | `ie/`, `lsa/external.rb` |
@@ -220,7 +222,7 @@ bundle exec rake test:unit
 ```
 
 It needs no root and no network, and takes about 20 seconds. Measured
-2026-11-10 on Ruby 3.3.8: 644 tests, 6921 assertions, all passing, with
+2026-11-10 on Ruby 3.3.8: 663 tests, 6985 assertions, all passing, with
 one omission (a test that needs root). Copy counts out of a run, never
 work them out.
 

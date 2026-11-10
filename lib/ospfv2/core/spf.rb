@@ -17,6 +17,7 @@ module OSPFv2
     #   )
     #   table.routes   # => { [prefix, len] => Spf::Route }
     #   table.routers  # => ABRs and ASBRs, { [router_id, area] => Spf::Route }
+    #   table.reached  # => { area => { routers: [ids], networks: [DR addresses] } }
     #
     # Covered: intra-area routes (16.1) with the two-way check, next hops
     # (16.1.1) and equal-cost multipath; inter-area routes (16.2);
@@ -86,8 +87,19 @@ module OSPFv2
         end
       end
 
-      Table = Struct.new(:routes, :routers, :stats, keyword_init: true) do
-        def self.empty = new(routes: {}, routers: {}, stats: { vertices: 0, areas: 0, skipped: [] })
+      # +reached+: for each area whose tree was built, the vertices in it,
+      # the root included: router ids, and network-LSAs by the DR's
+      # interface address (their LS ID). A BGP-LS Producer withdraws what
+      # SPF did not reach (RFC 9552 section 5.9).
+      Table = Struct.new(:routes, :routers, :stats, :reached, keyword_init: true) do
+        def initialize(routes:, routers:, stats:, reached: {})
+          super
+        end
+
+        def self.empty = new(routes: {}, routers: {}, stats: { vertices: 0, areas: 0, skipped: [] }, reached: {})
+
+        # Whether the last run reached router +id+ (Integer) in +area+.
+        def reached?(area, id) = reached.dig(area, :routers)&.include?(id) == true
       end
 
       # What changed between two route tables: Routes added and removed,
@@ -162,6 +174,7 @@ module OSPFv2
           @routers = {}
           @stats = { vertices: 0, areas: areas.size, skipped: [] }
           @bodies = {}.compare_by_identity
+          @reached = {}
         end
 
         def run
@@ -180,7 +193,7 @@ module OSPFv2
           external
           @routes.each_value { |r| finish(r) }
           @routers.each_value { |r| finish(r) }
-          Table.new(routes: @routes, routers: @routers, stats: @stats)
+          Table.new(routes: @routes, routers: @routers, stats: @stats, reached: @reached)
         end
 
         private
@@ -229,6 +242,9 @@ module OSPFv2
             break unless v
           end
           @stats[:vertices] += tree.size
+          kinds = tree.keys.group_by(&:first)
+          @reached[area.id] = { routers: kinds.fetch(:router, []).map(&:last).sort,
+                                networks: kinds.fetch(:network, []).map(&:last).sort }
           @backbone_routers = tree.count { |id, _| id[0] == :router } - 1 if area.id.zero?
           # TransitCapability: a router in the tree sets the V bit (16.1).
           @transit_capable[area.id] = tree.each_value.any? do |x|

@@ -31,10 +31,11 @@ module OSPFv2
       }.freeze
 
       # Kinds of events ospfd streams (Daemon::Events::KINDS).
-      EVENT_KINDS = %w[neighbor interface dr drop spf spf_skipped routes lsa router virtual_link commit log].freeze
+      EVENT_KINDS = %w[neighbor interface dr drop spf spf_skipped routes topology lsa router virtual_link commit log].freeze
 
       ROUTER_ID = { name: '<router-id>', match: /\A\d{1,3}(\.\d{1,3}){3}\z/ }.freeze
       NUMBER = { name: '<number>', match: /\A\d+\z/ }.freeze
+      AREA_ID = { name: '<area-id>', match: /\A(\d+|\d{1,3}(\.\d{1,3}){3})\z/ }.freeze
       TEXT = { name: '<text>', match: /./ }.freeze
 
       attr_reader :root
@@ -151,6 +152,12 @@ module OSPFv2
             cmd 'events', 'Recent protocol events', action: { view: :log, style: :junos }
             cmd 'statistics', 'Packet counters per interface', action: { view: :statistics, style: :junos }
             cmd 'timers', 'Every timer: what it belongs to, when it fires', action: { view: :timers, style: :junos }
+            cmd 'topology', 'The LSDB as nodes, links and prefixes, as SPF reached them' do
+              cmd 'area', 'One area' do
+                arg AREA_ID, 'Area id, dotted quad or number', action: { view: :topology, style: :junos }
+              end
+              cmd 'external', 'AS external LSAs, by ASBR', action: { view: :topology, style: :junos, scope: 'as' }
+            end
           end
           cmd 'ip', 'IP information (IOS style)' do
             cmd 'ospf', 'OSPF process', action: { view: :overview, style: :ios } do
@@ -169,6 +176,12 @@ module OSPFv2
               cmd 'statistics', 'SPF runs', action: { view: :spf, style: :ios }
               cmd 'traffic', 'Packet counters per interface', action: { view: :statistics, style: :ios }
               cmd 'timers', 'Every timer: what it belongs to, when it fires', action: { view: :timers, style: :ios }
+              cmd 'topology', 'The LSDB as nodes, links and prefixes, as SPF reached them' do
+                cmd 'area', 'One area' do
+                  arg AREA_ID, 'Area id, dotted quad or number', action: { view: :topology, style: :ios }
+                end
+                cmd 'external', 'AS external LSAs, by ASBR', action: { view: :topology, style: :ios, scope: 'as' }
+              end
               cmd 'events', 'Recent protocol events', action: { view: :log, style: :ios }
             end
             cmd 'route', 'IP routing table' do

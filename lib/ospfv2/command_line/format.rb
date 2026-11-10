@@ -34,6 +34,7 @@ module OSPFv2
         when :spf then style == :ios ? ios_spf(data, router_id) : junos_spf(data)
         when :spf_run then spf_run(data)
         when :timers then timers(data)
+        when :topology then topology(data)
         else data.to_s
         end
       end
@@ -147,6 +148,32 @@ module OSPFv2
 
       def ios_if_state(i)
         { 'DROther' => 'DROTH', 'PtToPt' => 'P2P', 'Waiting' => 'WAIT', 'Down' => 'DOWN' }.fetch(i['state_name'], i['state_name'])
+      end
+
+      # ---- topology ----
+
+      # show ospf topology: a line per node, then its neighbors and
+      # prefixes. The same in both styles: neither Junos nor IOS has it.
+      def topology(t)
+        where = t['scope'] == 'as' ? 'AS external LSAs' : "area #{t['area']}"
+        out = ["OSPF topology, #{where}, router #{t['router_id']}, SPF run #{t['run'] || '-'}", '']
+        w = [24, 8, 10, 0]
+        out << row(%w[Node Kind Reachable Flags], w)
+        (t['nodes'] || []).each do |n|
+          flags = [n['abr'] ? 'B' : nil, n['asbr'] ? 'E' : nil, n['dr'] ? "DR #{n['dr']}" : nil].compact.join(' ')
+          out << row([n['id'], n['kind'], n['reachable'] ? 'yes' : 'no', flags], w)
+          (n['neighbors'] || []).each do |x|
+            addr = x['address'] && "#{x['address']} -> #{x['remote_address'] || '?'}"
+            out << "  neighbor #{row([x['id'], x['type'] || '', "metric #{x['metric']}", addr], [24, 8, 12, 0])}"
+          end
+          (n['prefixes'] || []).each do |x|
+            fwd = x['forwarding'] && x['forwarding'] != '0.0.0.0' ? "forwarding #{x['forwarding']}" : nil
+            tag = x['tag'].to_i.positive? ? "tag #{x['tag']}" : nil
+            out << "  prefix   #{row([x['prefix'], x['route_type'], "metric #{x['metric']}", [fwd, tag].compact.join(' ')], [24, 10, 12, 0])}"
+          end
+        end
+        out << '(no nodes)' if (t['nodes'] || []).empty?
+        out.join("\n")
       end
 
       # ---- database ----
