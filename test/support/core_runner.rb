@@ -48,7 +48,7 @@ end
 
 loop_ = OSPFv2::EventLoop.new.start
 router = OSPFv2::Core::Instance.new(
-  router_id: config.fetch(:router_id), loop: loop_,
+  router_id: config.fetch(:router_id), loop: loop_, spf: config[:spf] || {},
   logger: ->(level, msg) { warn "#{level} #{msg}" unless level == :debug }
 )
 router.area_options = (config[:areas] || {}).to_h do |id, o|
@@ -109,6 +109,13 @@ until stop
       end,
       lsas: router.areas.values.to_h { |a| [a.id_s, a.lsdb.live.map { |l| l.bytes.unpack1('H*') }] },
       fib: fib && { holding: fib.holding?, failed: fib.failed.size },
+      # The last SPF runs: when one was asked for, when it ran, and which
+      # RFC 8405 delay it waited (initial, short, long). A test that
+      # times a failover says where its seconds went with these.
+      spf: router.spf_log.last(5).map do |r|
+        { n: r.n, delay: r.delay, triggered_at: r.triggered_at&.utc&.iso8601(3), time: r.time.utc.iso8601(3),
+          reasons: r.reasons.first(3).map(&:to_s) }
+      end,
       externals: router.as_lsdb.live.map { |l| l.bytes.unpack1('H*') }
     }
   end
