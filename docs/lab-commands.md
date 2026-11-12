@@ -10,7 +10,8 @@ Paths used here:
 | --- | --- |
 | ospfv2 repo | `~/ospfv2` in the VM |
 | routescope repo | `~/routescope` in the VM |
-| Your lab folder | `~/labs/ospf-lab` in the VM |
+| Your lab folder | `~/labs/ospfv2/ospf-lab` in the VM |
+| The labs, as ospfv2 ships them | `~/ospfv2/routescope/labs/<lab>` |
 | VM files | `~/vms/ospflab` on the Mac |
 
 ## The VM
@@ -41,13 +42,25 @@ ssh ospflab sudo poweroff
 sleep 5; ~/vms/ospflab/start.sh
 ```
 
+## Labs come from routescope-labs
+
+The labs live in `routescope/labs/` in the repo, one ready-to-run folder each: ospf-lab, ospf-ring, ospf-srl, bgp-ibgp, ospf-bgp and isis-bgp. routescope's `routescope-labs` (`bin/routescope-labs` in the routescope repo, described in its `docs/labs.md`) copies one into `~/labs/ospfv2/<lab>` and makes it a git repository. It also updates it later and keeps your edits.
+
+```sh
+# in the VM
+routescope-labs install ospfv2/ospf-lab       # one lab
+routescope-labs list                          # every lab: installed, behind, edited
+```
+
+`bin/ospfv2 lab new DIR` still copies a lab, for one more release, and prints the `routescope-labs` line to use instead. The old paths, `examples/lab` and the others, are links to `routescope/labs/` for that release too.
+
 ## Set LAB once
 
 Compose finds your lab folder through `LAB`. Put it in `~/.bashrc` so every login has it:
 
 ```sh
 # in the VM
-grep -q 'export LAB=' ~/.bashrc || echo 'export LAB=~/labs/ospf-lab' >> ~/.bashrc
+grep -q 'export LAB=' ~/.bashrc || echo 'export LAB=~/labs/ospfv2/ospf-lab' >> ~/.bashrc
 source ~/.bashrc; echo "$LAB"
 ```
 
@@ -57,10 +70,10 @@ Make the lab folder before anything uses `LAB`. If compose runs first, Docker cr
 # in the VM
 cd ~/ospfv2
 mkdir -p ~/labs && sudo chown $USER: ~/labs
-[ -f ~/labs/ospf-lab/lab.yml ] && echo "lab folder ok" || bin/ospfv2 lab new ~/labs/ospf-lab
+[ -f ~/labs/ospfv2/ospf-lab/lab.yml ] && echo "lab folder ok" || routescope-labs install ospfv2/ospf-lab
 ```
 
-To make it again from the template (the old one is kept aside, nothing is deleted):
+To make it again from the repo (the old one is kept aside in `~/labs/.attic`, which routescope does not show; nothing is deleted):
 
 ```sh
 # in the VM
@@ -68,8 +81,9 @@ cd ~/ospfv2
 docker compose --profile frr --profile ospfd --profile bird down
 cd ~/routescope && docker compose down && cd ~/ospfv2
 sudo chown $USER: ~/labs
-sudo mv ~/labs/ospf-lab ~/labs/ospf-lab.old-$(date +%Y%m%d%H%M)
-bin/ospfv2 lab new ~/labs/ospf-lab
+mkdir -p ~/labs/.attic
+sudo mv ~/labs/ospfv2/ospf-lab ~/labs/.attic/ospf-lab.old-$(date +%Y%m%d%H%M)
+routescope-labs install ospfv2/ospf-lab
 ```
 
 ## Get the code: a branch, or the latest
@@ -182,7 +196,7 @@ BIRD 2 is a fourth router on the segment, 4.4.4.4 at 10.99.0.40, priority 0 so F
 
 ```sh
 # in the VM
-cp -r ~/ospfv2/examples/lab/bird $LAB/
+cp -r ~/ospfv2/routescope/labs/ospf-lab/bird $LAB/
 grep -q 'kind: bird' $LAB/lab.yml || sed -i 's/^  - name: ospfd$/  - name: bird\n    kind: bird\n    service: bird\n    profiles: [bird]\n    address: 10.99.0.40\n    config: bird\/bird.conf\n\n  - name: ospfd/' $LAB/lab.yml
 cd $LAB && git add bird lab.yml && git commit -m 'BIRD, a fourth router'
 ```
@@ -211,14 +225,14 @@ Make it:
 
 ```sh
 # in the VM
-cd ~/ospfv2 && bin/ospfv2 lab new ~/labs/ospf-ring --containerlab
+routescope-labs install ospfv2/ospf-ring
 ```
 
 Then start it from routescope: click the lab name in the header, pick ospf-ring, Start. Stop the compose lab first if you want only one running; the two can run side by side. From the shell instead:
 
 ```sh
 # in the VM
-cd ~/labs/ospf-ring && sudo containerlab deploy -t ospf-ring.clab.yml
+cd ~/labs/ospfv2/ospf-ring && sudo containerlab deploy -t ospf-ring.clab.yml
 ```
 
 Look at it, fail a link by hand, take it down:
@@ -228,10 +242,10 @@ Look at it, fail a link by hand, take it down:
 docker exec clab-ospf-ring-ospfd ospf-cli -c 'show ospf neighbor'
 docker exec clab-ospf-ring-frr ip link set eth2 down; sleep 10; docker exec clab-ospf-ring-ospfd ip route get 2.2.2.2
 docker exec clab-ospf-ring-frr ip link set eth2 up
-cd ~/labs/ospf-ring && sudo containerlab destroy -t ospf-ring.clab.yml
+cd ~/labs/ospfv2/ospf-ring && sudo containerlab destroy -t ospf-ring.clab.yml
 ```
 
-routescope finds a new lab folder in `~/labs` within seconds; open it from the Labs panel. Labs somewhere else, or ospfv2 checked out somewhere else:
+routescope finds a new lab folder in `~/labs`, or one level down as in `~/labs/ospfv2/`, within seconds; open it from the Labs panel. Labs somewhere else, or ospfv2 checked out somewhere else:
 
 ```sh
 # in the VM
@@ -245,7 +259,7 @@ Nokia SR Linux, a vendor router, free from Nokia: the simulated area behind it o
 ```sh
 # in the VM
 docker pull ghcr.io/nokia/srlinux:26.3.1
-cd ~/ospfv2 && bin/ospfv2 lab new ~/labs/ospf-srl --srlinux
+routescope-labs install ospfv2/ospf-srl
 ```
 
 Then start it from routescope's lab menu. It boots in about a minute. Look at it from the shell:
@@ -258,7 +272,7 @@ docker exec -it clab-ospf-srl-srl sr_cli                    # its CLI; quit to l
 docker exec clab-ospf-srl-ospfd ospf-cli -c 'show ospf neighbor'
 ```
 
-Its configuration is `~/labs/ospf-srl/srl/config.cli`: `set` lines applied when it boots. Its ports are `ethernet-1/1` and `ethernet-1/2` in its CLI, `e1-1` and `e1-2` for Linux and routescope's link faults.
+Its configuration is `~/labs/ospfv2/ospf-srl/srl/config.cli`: `set` lines applied when it boots. Its ports are `ethernet-1/1` and `ethernet-1/2` in its CLI, `e1-1` and `e1-2` for Linux and routescope's link faults.
 
 ## The BGP labs
 
@@ -277,9 +291,9 @@ Three containerlab labs with BGP, from FRR and BIRD images (FRR: `docker pull qu
 
 ```sh
 # in the VM
-cd ~/ospfv2 && bin/ospfv2 lab new ~/labs/bgp-ibgp --bgp
-cd ~/ospfv2 && bin/ospfv2 lab new ~/labs/ospf-bgp --ospf-bgp
-cd ~/ospfv2 && bin/ospfv2 lab new ~/labs/isis-bgp --isis-bgp
+routescope-labs install ospfv2/bgp-ibgp
+routescope-labs install ospfv2/ospf-bgp
+routescope-labs install ospfv2/isis-bgp
 ```
 
 The labs reuse the names r1, r2 and r3, so run one at a time. Start one from routescope's lab menu. Look at them from the shell:
@@ -535,7 +549,7 @@ Scenarios are YAML files in `$LAB/scenarios/`, kept in the lab's git. A new lab 
 
 ```sh
 # in the VM
-mkdir -p $LAB/scenarios && cp ~/ospfv2/examples/lab/scenarios/*.yml $LAB/scenarios/
+mkdir -p $LAB/scenarios && cp ~/ospfv2/routescope/labs/ospf-lab/scenarios/*.yml $LAB/scenarios/
 cd $LAB && git add scenarios && git commit -m 'Example scenarios'
 ```
 
@@ -597,12 +611,12 @@ Blocks we used to find out what was wrong. Each one only looks; none changes any
 
 ### The lab folder
 
-Which folder compose uses, who owns it, and what is in it. Everything should belong to you, and `frr/` should hold `daemons`. A folder owned by root was made by Docker, not by `lab new`; see "Set LAB once" to make it again.
+Which folder compose uses, who owns it, and what is in it. Everything should belong to you, and `frr/` should hold `daemons`. A folder owned by root was made by Docker, not by `routescope-labs` or `lab new`; see "Set LAB once" to make it again.
 
 ```sh
 # in the VM
 echo "LAB=$LAB"
-ls -la ~/labs $LAB $LAB/frr $LAB/ospfd
+ls -la ~/labs ~/labs/ospfv2 $LAB $LAB/frr $LAB/ospfd
 cd $LAB && git status --short && git log --format='%h %an / %cn  %s' -5
 ```
 
@@ -689,8 +703,8 @@ curl -s -X POST -H 'X-Routescope: 1' -H 'Content-Type: application/json' -d '{"l
 | What you see | Why | Fix |
 | --- | --- | --- |
 | FRR stops at once: `/etc/frr/daemons does not exist` | `LAB` names a folder Docker made, empty and owned by root | Make it again: "Set LAB once" |
-| `lab new`: cannot make the lab folder | `~/labs` belongs to root | `sudo chown $USER: ~/labs` |
-| compose: `bind source path does not exist` | `LAB` names a folder that does not exist | `bin/ospfv2 lab new $LAB` |
+| `routescope-labs` or `lab new`: cannot make the lab folder | `~/labs` belongs to root | `sudo chown $USER: ~/labs` |
+| compose: `bind source path does not exist` | `LAB` names a folder that does not exist | `routescope-labs install ospfv2/ospf-lab` |
 | The page hangs, `curl` to 8082 hangs | routescope cannot load the lab and restarts | `docker compose logs` in `~/routescope`; health says why |
 | The wait for Full never ends | FRR stopped | `docker compose logs --tail 40 frr` |
 | Simulator loops between ExStart and Exchange, FRR stays in ExStart | Fixed: the simulator sent its DDs to whichever router last said hello, not to the DR | Update ospfv2 and rebuild sim. To check, see "Where do the simulator's DDs go" |

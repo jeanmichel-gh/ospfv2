@@ -488,16 +488,18 @@ docker compose --profile frr --profile ospfd down
 
 The lab's configurations live in a lab folder: one folder per node, `sim/`, `peer/`, `frr/` and `ospfd/`, and `lab.yml`, which lists the nodes. Compose mounts each node's folder read-write, so a configuration you save in the lab lands back in the folder: `commit` in ospf-cli, `write memory` in FRR's vtysh.
 
-Without `LAB`, compose uses the template in the repo, `examples/lab`, and saved changes show up in `git status` of ospfv2. Make your own copy before changing anything:
+Without `LAB`, compose uses the lab in the repo, `routescope/labs/ospf-lab`, and saved changes show up in `git status` of ospfv2. Make your own copy before changing anything:
 
 ```sh
 # in the VM, from ~/ospfv2
-bin/ospfv2 lab new ~/labs/ospf-lab        # copies the template, makes it a git repo
-export LAB=~/labs/ospf-lab                # add it to ~/.bashrc to keep it
+routescope-labs install ospfv2/ospf-lab   # copies the lab, makes it a git repo
+export LAB=~/labs/ospfv2/ospf-lab         # add it to ~/.bashrc to keep it
 docker compose --profile frr up -d sim frr
 ```
 
-Saved files stay yours. ospfd keeps the owner and mode of the file it replaces. FRR's `write memory` gives the file to FRR's own user; the lab's FRR start script (`examples/lab/tools/frr-start.sh` in the repo) gives it back to the folder's owner within 2 seconds, mode 640. Files the routers keep next to their configuration (`frr.conf.sav`, ospfd's rollbacks) are in the lab's `.gitignore`.
+`routescope-labs` is in the routescope repo, `bin/routescope-labs`. Until it is there, `bin/ospfv2 lab new ~/labs/ospfv2/ospf-lab` does the same, for one release.
+
+Saved files stay yours. ospfd keeps the owner and mode of the file it replaces. FRR's `write memory` gives the file to FRR's own user; the lab's FRR start script (`routescope/labs/ospf-lab/tools/frr-start.sh` in the repo) gives it back to the folder's owner within 2 seconds, mode 640. Files the routers keep next to their configuration (`frr.conf.sav`, ospfd's rollbacks) are in the lab's `.gitignore`.
 
 The lab folder is a git repository with a first commit. After changing configurations, `git -C $LAB diff` shows what changed and `git -C $LAB commit -am "what and why"` keeps it. A branch per experiment and `git checkout` to go back work as usual. Restart the nodes after switching branches, so they read the files again.
 
@@ -612,10 +614,10 @@ Within 5 seconds `ospfd` originates an external LSA for it and FRR has it too: `
 | An empty `lab.yml` folder appears in the repo | Compose started the `ospfv2` service. `rmdir lab.yml`, and name the services: `up -d sim frr`. |
 | `docker run`: the container name is already in use | A stopped container with that name exists. `docker start ospfd` to reuse it, or `docker rm ospfd` and run it again. The compose service avoids this. |
 | `git diff` in the lab folder: permission denied on `frr/frr.conf` | FRR saved it moments ago; its start script gives it back within 2 seconds. If it stays, the FRR container was started from an older compose file: `docker compose --profile frr up -d frr` recreates it. |
-| compose: `bind source path does not exist` | `LAB` names a folder that does not exist. Make it: `bin/ospfv2 lab new $LAB`. |
-| FRR stops at once: `/etc/frr/daemons does not exist` | `LAB` names a folder `ospfv2 lab new` never made, so Docker made it, empty and owned by root. Move it aside and make it: see [lab commands](lab-commands.md), Set LAB once. |
+| compose: `bind source path does not exist` | `LAB` names a folder that does not exist. Make it: `routescope-labs install ospfv2/ospf-lab`. |
+| FRR stops at once: `/etc/frr/daemons does not exist` | `LAB` names a folder `routescope-labs` never made, so Docker made it, empty and owned by root. Move it aside and make it: see [lab commands](lab-commands.md), Set LAB once. |
 | FRR stops at once: `can't open '/lab-tools/frr-start.sh'` | The compose file is older than the repo's start script. `git pull` in `~/ospfv2`, then `docker compose --profile frr up -d frr`. |
-| Configuration changes appear in `git status` of ospfv2 | `LAB` is not set, so the template in `examples/lab` is in use. Make your own lab folder: `bin/ospfv2 lab new ~/labs/ospf-lab`. |
+| Configuration changes appear in `git status` of ospfv2 | `LAB` is not set, so the lab in `routescope/labs/ospf-lab` is in use. Make your own lab folder: `routescope-labs install ospfv2/ospf-lab`. |
 
 ### Cheat sheet
 
@@ -636,8 +638,8 @@ In the VM, from `~/ospfv2`:
 # in the VM, from ~/ospfv2
 git pull && docker build -t ospfv2 .           # update code and image
 bin/ospfv2 demo --web 0.0.0.0:8080             # demo, http://localhost:8080 on the Mac
-bin/ospfv2 lab new ~/labs/ospf-lab             # your own lab folder, once
-export LAB=~/labs/ospf-lab                     # which lab folder compose uses
+routescope-labs install ospfv2/ospf-lab        # your own lab folder, once
+export LAB=~/labs/ospfv2/ospf-lab              # which lab folder compose uses
 docker compose --profile frr up -d sim frr     # the lab's neighbors
 sudo bin/ospfd -g ospf                         # router on the VM
 sudo bin/ospf-cli                              # its CLI

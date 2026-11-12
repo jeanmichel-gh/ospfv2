@@ -1,5 +1,15 @@
 === Unreleased
 
+* The labs moved to routescope/labs/<lab>, one folder per lab named for
+  it: ospf-lab, ospf-ring, ospf-srl, bgp-ibgp, ospf-bgp, isis-bgp. Each
+  has an ABOUT.md and a .gitignore for routescope's runtime state.
+  routescope-labs install ospfv2/<lab> makes a lab folder from them. The
+  examples/ paths are symlinks to them for one release
+* ospfv2 lab new copies from routescope/labs and prints the
+  routescope-labs line to use instead. It goes in the next release. It
+  now leaves out the folders its .gitignore names, such as recordings/
+  and clab-*/, and what is in *-run/ but its .gitkeep
+
 * test/lab/lab_test.sh: the compose router lab end to end, from a fresh
   lab folder: adjacencies, routes, saving configurations back to the lab
   folder with the right owner, monitor and the event API. CI runs it

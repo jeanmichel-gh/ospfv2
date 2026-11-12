@@ -7,3 +7,11 @@
 *.rollback.*
 # routescope recordings and scenario reports
 recordings/
+# what nodes write in a bind-mounted run folder; the folder itself stays,
+# so a .gitkeep is kept in it
+*-run/*
+!*-run/.gitkeep
+# what containerlab writes when it deploys the lab, and its backup of
+# the topology file
+clab-*/
+.*.clab.yml.bak

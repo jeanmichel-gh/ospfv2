@@ -95,7 +95,10 @@ test/integration/    two simulators over the in-memory segment, and the
                      FRR interop tests in network namespaces
 test/support/        the FRR namespace harness, netlink probe
 test/lab/            the lab tests, in shell: compose, clab, srl, bgp
-examples/            grid.yml, and the lab templates `lab new` copies
+examples/            grid.yml, and links from the old template paths to
+                     routescope/labs, for one release
+routescope/labs/     the labs routescope runs, one ready-to-run folder
+                     per lab, named for it; routescope-labs installs them
 docker-compose.yml   the compose lab: sim, peer, frr, ospfd, bird
 Dockerfile           one image, an entrypoint per role, a test stage
 docs/                user guide, lab commands, the routescope plan
@@ -185,11 +188,17 @@ plan and its decisions are in `docs/console-plan.md` and
 `docs/console-panes.md`.
 
 **A lab is a folder**: `lab.yml` or `NAME.clab.yml`, plus one config per
-node. `ospfv2 lab new DIR` copies a template from `examples/` and makes it
-a git repository. Flags pick the template: none for the compose lab,
-`--containerlab`, `--srlinux`, `--bgp`, `--ospf-bgp`, `--isis-bgp`.
-routescope finds a new folder in `~/labs` and runs compose labs with this
-repo's `docker-compose.yml`.
+node, an `ABOUT.md` and a `.gitignore` for runtime state. The labs live in
+`routescope/labs/<lab>/`, named for the lab: ospf-lab, ospf-ring,
+ospf-srl, bgp-ibgp, ospf-bgp, isis-bgp. Each is complete as committed; no
+step generates files. routescope's `routescope-labs install ospfv2/<lab>`
+copies one into `~/labs/ospfv2/<lab>` (routescope's
+`docs/design/labs-layout.md`). `ospfv2 lab new DIR` stays one release: it
+copies from `routescope/labs/`, makes a git repository, and prints the
+`routescope-labs` line. Flags pick the lab: none for the compose lab,
+`--containerlab`, `--srlinux`, `--bgp`, `--ospf-bgp`, `--isis-bgp`. The
+old `examples/` paths are symlinks for that release. routescope runs
+compose labs with this repo's `docker-compose.yml`.
 
 **What routescope reads from ospfv2**, one driver per node kind:
 
@@ -207,8 +216,8 @@ deprecation, so ospfv2 can always merge first without breaking the
 console. A feature that spans both is two linked pull requests, ospfv2
 first. A field that routescope reads is worth a test here.
 
-The labs hold more than OSPF. The BGP and IS-IS labs (`examples/bgp-lab`,
-`ospf-bgp-lab`, `isis-bgp-lab`) are FRR and BIRD; the bgp4r lab lives in
+The labs hold more than OSPF. The BGP and IS-IS labs
+(`routescope/labs/bgp-ibgp`, `ospf-bgp`, `isis-bgp`) are FRR and BIRD; the bgp4r lab lives in
 bgp4r's own docs. `docs/lab-commands.md` is the runbook for all of them.
 
 ## Testing

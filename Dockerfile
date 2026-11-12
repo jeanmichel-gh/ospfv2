@@ -17,6 +17,7 @@ WORKDIR /app
 COPY lib/ lib/
 COPY bin/ bin/
 COPY examples/ examples/
+COPY routescope/ routescope/
 COPY ospfv2.gemspec LICENSE.txt COPYING README.md changelog.txt ./
 ENV PATH=/app/bin:$PATH \
     RUBYOPT=--disable-did_you_mean

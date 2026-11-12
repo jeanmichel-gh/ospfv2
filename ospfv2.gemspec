@@ -25,7 +25,7 @@ Gem::Specification.new do |spec|
   spec.metadata['changelog_uri']   = "#{spec.homepage}/blob/master/changelog.txt"
   spec.metadata['rubygems_mfa_required'] = 'true'
 
-  spec.files = Dir['lib/**/*', 'bin/*', 'examples/**/*', 'LICENSE.txt', 'COPYING', 'README.md', 'changelog.txt']
+  spec.files = Dir['lib/**/*', 'bin/*', 'examples/**/*', 'routescope/labs/**/{*,.gitignore}', 'LICENSE.txt', 'COPYING', 'README.md', 'changelog.txt']
   spec.bindir        = 'bin'
   spec.executables   = %w[ospfv2 ospfd ospf-cli]
   spec.require_paths = ['lib']

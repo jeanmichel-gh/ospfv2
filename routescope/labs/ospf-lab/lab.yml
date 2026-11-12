@@ -4,8 +4,8 @@
 # configuration lands back here.
 #
 # Make your own copy before changing anything:
-#   ospfv2 lab new ~/labs/ospf-lab
-#   export LAB=~/labs/ospf-lab
+#   routescope-labs install ospfv2/ospf-lab
+#   export LAB=~/labs/ospfv2/ospf-lab
 
 name: ospf-lab
 
