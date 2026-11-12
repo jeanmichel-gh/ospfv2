@@ -424,9 +424,10 @@ to decode packets at the byte level. Next to a router of the lab:
 
 The bridge lab reads its configurations from a lab folder, one folder per node
 (`sim/`, `peer/`, `frr/`, `ospfd/`) plus `lab.yml`, mounted read-write so saved
-configurations land back in it. `LAB` selects the folder; without it, the template in
-`examples/lab` is used. `ospfv2 lab new DIR` copies the template and makes it a git
-repository, whose commits are signed `lab <lab@configs>`.
+configurations land back in it. `LAB` selects the folder; without it, the lab in
+`routescope/labs/ospf-lab` is used. routescope's `routescope-labs install ospfv2/ospf-lab`
+copies it into `~/labs/ospfv2/ospf-lab` and makes it a git repository. `ospfv2 lab new
+DIR` still does the same for one release, with commits signed `lab <lab@configs>`.
 
 The simulator containers drop every capability except `NET_RAW`. ospfd keeps Docker's
 defaults plus `NET_RAW` and `NET_ADMIN`, to write its configuration and install routes.

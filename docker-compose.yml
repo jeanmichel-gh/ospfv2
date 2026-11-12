@@ -23,11 +23,12 @@
 #
 # The lab folder holds one folder per node (sim/, peer/, frr/, ospfd/), each
 # mounted read-write, so configurations saved in the lab land back there.
-# LAB selects it; without it, the template in examples/lab is used. Make your
-# own copy before changing configurations:
+# LAB selects it; without it, the lab in routescope/labs/ospf-lab is used.
+# Make your own copy before changing configurations, with routescope's
+# command (bin/ospfv2 lab new still works for one release):
 #
-#   bin/ospfv2 lab new ~/labs/ospf-lab
-#   export LAB=~/labs/ospf-lab
+#   routescope-labs install ospfv2/ospf-lab
+#   export LAB=~/labs/ospfv2/ospf-lab
 #
 # A LAB folder that does not exist is an error (create_host_path: false),
 # not an empty folder Docker makes as root.
@@ -57,7 +58,7 @@ services:
     ports: ["8080:8080"]
     volumes:
       - type: bind
-        source: ${LAB:-./examples/lab}/sim
+        source: ${LAB:-./routescope/labs/ospf-lab}/sim
         target: /lab
         bind: { create_host_path: false }
     command: ["run", "/lab/sim.yml", "--web", "0.0.0.0:8080", "--log", "/tmp/ospfv2.log"]
@@ -72,7 +73,7 @@ services:
     ports: ["8081:8080"]
     volumes:
       - type: bind
-        source: ${LAB:-./examples/lab}/peer
+        source: ${LAB:-./routescope/labs/ospf-lab}/peer
         target: /lab
         bind: { create_host_path: false }
     command: ["run", "/lab/peer.yml", "--web", "0.0.0.0:8080", "--log", "/tmp/ospfv2.log"]
@@ -87,14 +88,14 @@ services:
         ipv4_address: 10.99.0.20
     volumes:
       - type: bind
-        source: ${LAB:-./examples/lab}/frr
+        source: ${LAB:-./routescope/labs/ospf-lab}/frr
         target: /etc/frr
         bind: { create_host_path: false }
       # The start script comes from the repo, not the lab folder, so lab
       # folders made before it existed work too.
-      - ./examples/lab/tools:/lab-tools:ro
+      - ./routescope/labs/ospf-lab/tools:/lab-tools:ro
     # FRR's own start, plus giving frr.conf back to the lab folder's owner
-    # after each write memory. See examples/lab/tools/frr-start.sh.
+    # after each write memory. See routescope/labs/ospf-lab/tools/frr-start.sh.
     entrypoint: ["/sbin/tini", "--", "sh", "/lab-tools/frr-start.sh"]
 
   ospfd:
@@ -110,7 +111,7 @@ services:
         ipv4_address: 10.99.0.30
     volumes:
       - type: bind
-        source: ${LAB:-./examples/lab}/ospfd
+        source: ${LAB:-./routescope/labs/ospf-lab}/ospfd
         target: /etc/ospfv2
         bind: { create_host_path: false }
       - ospfd-run:/run/ospfv2
@@ -129,7 +130,7 @@ services:
         ipv4_address: 10.99.0.40
     volumes:
       - type: bind
-        source: ${LAB:-./examples/lab}/bird
+        source: ${LAB:-./routescope/labs/ospf-lab}/bird
         target: /etc/bird
         bind: { create_host_path: false }
 

@@ -96,9 +96,10 @@ class TestCLI < Test::Unit::TestCase
   def test_lab_new_copies_the_template
     Dir.mktmpdir do |d|
       dir = File.join(d, 'my-lab')
-      rc, out, = run_cli('lab', 'new', dir, '--no-git')
+      rc, out, err = run_cli('lab', 'new', dir, '--no-git')
       assert_equal 0, rc
       assert_match(/lab created in #{Regexp.escape(dir)}/, out)
+      assert_match(/^  routescope-labs install ospfv2\/ospf-lab$/, err)
       assert_match(/export LAB=#{Regexp.escape(dir)}/, out)
       %w[lab.yml .gitignore tools/frr-start.sh sim/sim.yml peer/peer.yml frr/frr.conf frr/daemons frr/vtysh.conf ospfd/ospfd.conf].each do |f|
         assert File.file?(File.join(dir, f)), "missing #{f}"
@@ -135,8 +136,9 @@ class TestCLI < Test::Unit::TestCase
       .each do |flag, (name, nodes, files)|
       Dir.mktmpdir do |d|
         dir = File.join(d, name)
-        rc, out, = run_cli('lab', 'new', dir, '--no-git', flag)
+        rc, out, err = run_cli('lab', 'new', dir, '--no-git', flag)
         assert_equal 0, rc, flag
+        assert_match(/^  routescope-labs install ospfv2\/#{name}$/, err, flag)
         assert_match(/sudo containerlab deploy -t #{name}.clab.yml/, out)
         files.each { |f| assert File.file?(File.join(dir, f)), "#{flag}: missing #{f}" }
         topo = YAML.safe_load(File.read(File.join(dir, "#{name}.clab.yml")))
@@ -199,6 +201,62 @@ class TestCLI < Test::Unit::TestCase
     end
   end
 
+  def test_lab_new_leaves_out_the_folders_the_gitignore_names
+    Dir.mktmpdir do |d|
+      src = File.join(d, 'template')
+      %w[recordings clab-ring/sim sim-run r1].each { FileUtils.mkdir_p(File.join(src, _1)) }
+      File.write(File.join(src, '.gitignore'), "recordings/\n*-run/*\n!*-run/.gitkeep\nclab-*/\n.*.clab.yml.bak\n")
+      File.write(File.join(src, 'ring.clab.yml'), 'name: ring')
+      File.write(File.join(src, '.ring.clab.yml.bak'), 'name: ring')
+      File.write(File.join(src, 'notes.jsonl'), '{}')
+      File.write(File.join(src, 'sim-run/.gitkeep'), '')
+      File.write(File.join(src, 'recordings/a.json'), '{}')
+      File.write(File.join(src, 'clab-ring/sim/x'), 'x')
+      File.write(File.join(src, 'sim-run/y.sock'), 'y')
+      File.write(File.join(src, 'r1/frr.conf'), 'hostname r1')
+      File.write(File.join(src, 'r1/recordings'), 'a file, not a folder')
+      dst = File.join(d, 'lab')
+      OSPFv2::CLI.copy_lab(src, dst)
+      assert_equal %w[.gitignore notes.jsonl r1 r1/frr.conf r1/recordings ring.clab.yml sim-run sim-run/.gitkeep],
+                   Dir.glob('**/*', File::FNM_DOTMATCH, base: dst).reject { |f| File.basename(f) == '.' }.sort
+    end
+  end
+
+  # Each folder in routescope/labs is a lab as routescope reads it: its
+  # name is the lab's, it says what it is for, and git leaves out what a
+  # running lab writes.
+  def test_the_routescope_labs_are_ready_to_run
+    labs = Dir.children(OSPFv2::CLI::LABS_DIR).sort
+    assert_equal OSPFv2::CLI::LAB_NAMES.values.sort, labs
+    labs.each do |lab|
+      dir = File.join(OSPFv2::CLI::LABS_DIR, lab)
+      clab = Dir.glob('*.clab.yml', base: dir)
+      file = clab.first || 'lab.yml'
+      assert File.file?(File.join(dir, file)), "#{lab}: #{file}"
+      assert_equal lab, YAML.safe_load(File.read(File.join(dir, file)))['name'], "#{lab}: the name in #{file}"
+      assert_equal "#{lab}.clab.yml", clab.first, "#{lab}: the clab file is named for the lab" unless clab.empty?
+      assert_match(/\A# \S/, File.read(File.join(dir, 'ABOUT.md')), "#{lab}: ABOUT.md")
+      ignore = File.readlines(File.join(dir, '.gitignore'), chomp: true)
+      %w[recordings/ *-run/* !*-run/.gitkeep clab-*/ .*.clab.yml.bak *.sav *.tmp *.broken *.kernel *.rollback.*].each do |line|
+        assert_include ignore, line, "#{lab}: .gitignore"
+      end
+      assert_not_include ignore, 'notes.jsonl', "#{lab}: the lab's git keeps its notes"
+    end
+  end
+
+  # For one release, the old template paths lead to the same folders.
+  def test_the_old_example_paths_are_symlinks_to_the_labs
+    examples = File.expand_path('../../../examples', __dir__)
+    { 'lab' => 'ospf-lab', 'clab-lab' => 'ospf-ring', 'srl-lab' => 'ospf-srl', 'bgp-lab' => 'bgp-ibgp',
+      'ospf-bgp-lab' => 'ospf-bgp', 'isis-bgp-lab' => 'isis-bgp' }.each do |old, lab|
+      path = File.join(examples, old)
+      assert File.symlink?(path), old
+      assert_equal "../routescope/labs/#{lab}", File.readlink(path), old
+      assert_equal File.realpath(File.join(OSPFv2::CLI::LABS_DIR, lab)), File.realpath(path), old
+    end
+    assert File.file?(File.join(examples, 'srl-lab/ospf-srl.clab.yml')), "routescope's CI reads it"
+  end
+
   def test_lab_new_makes_a_git_repository
     omit('git not installed') unless system('git', '--version', out: File::NULL, err: File::NULL)
     Dir.mktmpdir do |d|
@@ -209,6 +267,7 @@ class TestCLI < Test::Unit::TestCase
       assert File.directory?(File.join(dir, '.git'))
       env = { 'GIT_AUTHOR_NAME' => nil, 'GIT_AUTHOR_EMAIL' => nil, 'GIT_COMMITTER_NAME' => nil, 'GIT_COMMITTER_EMAIL' => nil }
       assert_equal "lab <lab@configs>\n", IO.popen(env, ['git', '-C', dir, 'log', '-1', '--format=%an <%ae>'], &:read)
+      assert_equal "Lab created from ospfv2 routescope/labs/ospf-lab\n", IO.popen(env, ['git', '-C', dir, 'log', '-1', '--format=%s'], &:read)
     end
   end
 

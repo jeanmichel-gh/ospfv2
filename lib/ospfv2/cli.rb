@@ -72,7 +72,7 @@ module OSPFv2
           ospfv2 export TOPOLOGY.yml -f FMT    dot (Graphviz), json or yaml
           ospfv2 check TOPOLOGY.yml            validate and summarize
           ospfv2 init [--grid CxR]             print a starter topology
-          ospfv2 lab new DIR [--no-git]        copy the router lab template to DIR
+          ospfv2 lab new DIR [--no-git]        copy the router lab to DIR (for one release: use routescope-labs)
           ospfv2 lab new DIR --containerlab    the containerlab lab: a ring of FRR, ospfd and BIRD
           ospfv2 lab new DIR --srlinux         the same with Nokia SR Linux
           ospfv2 lab new DIR --bgp             three iBGP speakers (FRR, BIRD) in one AS
@@ -91,7 +91,7 @@ module OSPFv2
               --device DEV          bind the raw socket to DEV
           -d, --debug               hex dump packets in the trace
 
-        Topology files are described in README.md and examples/.
+        Topology files are described in README.md and examples/. The labs are in routescope/labs/.
       TXT
     end
 
@@ -176,12 +176,18 @@ module OSPFv2
       0
     end
 
-    LAB_TEMPLATE = File.expand_path('../../examples/lab', __dir__)
-    CLAB_TEMPLATE = File.expand_path('../../examples/clab-lab', __dir__)
-    SRL_TEMPLATE = File.expand_path('../../examples/srl-lab', __dir__)
-    BGP_TEMPLATE = File.expand_path('../../examples/bgp-lab', __dir__)
-    OSPF_BGP_TEMPLATE = File.expand_path('../../examples/ospf-bgp-lab', __dir__)
-    ISIS_BGP_TEMPLATE = File.expand_path('../../examples/isis-bgp-lab', __dir__)
+    # The labs routescope runs, one ready-to-run folder each, named for the
+    # lab. routescope-labs installs them; lab new copies them for one more
+    # release. examples/<old name> are symlinks to them for that release.
+    LABS_DIR = File.expand_path('../../routescope/labs', __dir__)
+    LAB_NAMES = { compose: 'ospf-lab', clab: 'ospf-ring', srl: 'ospf-srl', bgp: 'bgp-ibgp',
+                  ospf_bgp: 'ospf-bgp', isis_bgp: 'isis-bgp' }.freeze
+    LAB_TEMPLATE = File.join(LABS_DIR, 'ospf-lab')
+    CLAB_TEMPLATE = File.join(LABS_DIR, 'ospf-ring')
+    SRL_TEMPLATE = File.join(LABS_DIR, 'ospf-srl')
+    BGP_TEMPLATE = File.join(LABS_DIR, 'bgp-ibgp')
+    OSPF_BGP_TEMPLATE = File.join(LABS_DIR, 'ospf-bgp')
+    ISIS_BGP_TEMPLATE = File.join(LABS_DIR, 'isis-bgp')
 
     # The containerlab templates: their topology file, and what they need
     # first (images), for the message after lab new.
@@ -193,12 +199,14 @@ module OSPFv2
       isis_bgp: ['isis-bgp.clab.yml', 'images FRR and ospfv2-bird first']
     }.freeze
 
-    # Copies the router lab template into a new folder and makes it a git
-    # repository, so saved configurations have history. --containerlab
-    # copies the containerlab lab instead: a ring of point-to-point links.
-    # --srlinux copies the containerlab lab with Nokia SR Linux. --bgp:
-    # three iBGP speakers in one AS. --ospf-bgp: an OSPF domain whose
-    # routes reach another AS by BGP. --isis-bgp: the same with IS-IS.
+    # Copies the router lab from routescope/labs into a new folder and makes
+    # it a git repository, so saved configurations have history. It stays
+    # one release: routescope-labs install does this for every repository,
+    # and lab new says so. --containerlab copies the containerlab lab
+    # instead: a ring of point-to-point links. --srlinux copies the
+    # containerlab lab with Nokia SR Linux. --bgp: three iBGP speakers in
+    # one AS. --ospf-bgp: an OSPF domain whose routes reach another AS by
+    # BGP. --isis-bgp: the same with IS-IS.
     def cmd_lab(argv)
       sub = argv.shift
       raise ArgumentError, "lab needs a subcommand: lab new DIR" unless sub == 'new'
@@ -212,10 +220,9 @@ module OSPFv2
         o.on('--ospf-bgp') { kind = :ospf_bgp }
         o.on('--isis-bgp') { kind = :isis_bgp }
       end.parse!(argv)
-      template, from = { compose: [LAB_TEMPLATE, 'examples/lab'], clab: [CLAB_TEMPLATE, 'examples/clab-lab'],
-                         srl: [SRL_TEMPLATE, 'examples/srl-lab'], bgp: [BGP_TEMPLATE, 'examples/bgp-lab'],
-                         ospf_bgp: [OSPF_BGP_TEMPLATE, 'examples/ospf-bgp-lab'],
-                         isis_bgp: [ISIS_BGP_TEMPLATE, 'examples/isis-bgp-lab'] }.fetch(kind)
+      name = LAB_NAMES.fetch(kind)
+      template = File.join(LABS_DIR, name)
+      from = "routescope/labs/#{name}"
       dir = argv.shift or raise ArgumentError, 'lab new needs a folder, for example: ospfv2 lab new ~/labs/ospf-lab'
       dir = File.expand_path(dir)
       raise ArgumentError, "#{dir} exists and is not empty" if File.exist?(dir) && !(File.directory?(dir) && Dir.empty?(dir))
@@ -227,6 +234,8 @@ module OSPFv2
         raise ArgumentError, "cannot make the lab folder: #{e.message}#{hint}"
       end
       @out.puts "lab created in #{dir}"
+      @err.puts "ospfv2: lab new will be removed in the next release. Use instead:"
+      @err.puts "  routescope-labs install ospfv2/#{name}"
       @out.puts(lab_git_init(dir, from)) if git
       if (topo, needs = CLAB_LABS[kind])
         @out.puts <<~CLAB
@@ -248,13 +257,29 @@ module OSPFv2
 
     # Copies a lab folder, leaving out what its .gitignore lists: files a
     # router wrote there when the template itself was in use (no LAB set).
-    # Those can belong to root and are no part of a new lab.
+    # Those can belong to root and are no part of a new lab. A pattern that
+    # ends in / names a folder, such as recordings/ or clab-*/, and leaves
+    # out all that is in it. One that ends in /* keeps the folder and leaves
+    # out what is in it, but for what a !FOLDER/NAME line keeps, such as
+    # *-run/* and !*-run/.gitkeep.
     def self.copy_lab(src, dst)
       ignore = File.readlines(File.join(src, '.gitignore'), chomp: true).map(&:strip).reject { |l| l.empty? || l.start_with?('#') }
+      keep, ignore = ignore.partition { |pat| pat.start_with?('!') }
+      keep = keep.map { |pat| pat.delete_prefix('!') }
+      dirs, ignore = ignore.partition { |pat| pat.end_with?('/') }
+      dirs = dirs.map { |pat| pat.chomp('/') }
+      contents, names = ignore.partition { |pat| pat.end_with?('/*') }
+      contents = contents.map { |pat| pat.delete_suffix('/*') }
+      match = ->(pats, part) { pats.any? { |pat| File.fnmatch?(pat, part, File::FNM_DOTMATCH) } }
       FileUtils.mkdir_p(dst)
       Dir.glob('**/*', File::FNM_DOTMATCH, base: src).sort.each do |rel|
-        next if File.basename(rel) == '.' || ignore.any? { |pat| File.fnmatch?(pat, File.basename(rel), File::FNM_DOTMATCH) }
+        next if File.basename(rel) == '.' || match.(names, File.basename(rel))
         from = File.join(src, rel)
+        parents = rel.split('/')[0..-2]
+        next if parents.any? { |part| match.(dirs, part) } || (File.directory?(from) && match.(dirs, File.basename(rel)))
+        last = parents.last && "#{parents.last}/#{File.basename(rel)}"
+        next if last && match.(contents, parents.last) && !match.(keep, last)
+
         to = File.join(dst, rel)
         if File.directory?(from)
           FileUtils.mkdir_p(to)
@@ -265,7 +290,7 @@ module OSPFv2
       end
     end
 
-    def lab_git_init(dir, from = 'examples/lab')
+    def lab_git_init(dir, from = 'routescope/labs/ospf-lab')
       # The lab's commits are configuration snapshots: they carry the lab's
       # own identity, set in this repository only.
       ok = system('git', '-C', dir, 'init', '-q', out: File::NULL, err: File::NULL) &&

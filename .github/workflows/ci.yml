@@ -122,7 +122,7 @@ jobs:
       - run: bash -c "$(curl -sL https://get.containerlab.dev)"
       - name: SR Linux image
         run: |
-          img="$(ruby -ryaml -e 'puts YAML.load_file("examples/srl-lab/ospf-srl.clab.yml").dig("topology", "nodes", "srl", "image")')"
+          img="$(ruby -ryaml -e 'puts YAML.load_file("routescope/labs/ospf-srl/ospf-srl.clab.yml").dig("topology", "nodes", "srl", "image")')"
           docker pull -q "$img"
           archs="$(docker manifest inspect "$img" 2>/dev/null | ruby -rjson -e 'm = JSON.parse($stdin.read); puts Array(m["manifests"]).map { _1.dig("platform", "architecture") }.compact.uniq.join(" ")' || true)"
           echo "::notice title=SR Linux image::$img, architectures: ${archs:-one, $(docker image inspect -f '{{.Architecture}}' "$img")}"
