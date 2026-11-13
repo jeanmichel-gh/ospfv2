@@ -79,8 +79,9 @@ command_line/        ospf-cli: the command grammar, the shell, the
 ie/, lsa/, lsa/tlv/  the simulator's codec: typed fields, LSAs, TE TLVs
 packet/              the simulator's packets
 ls_db/               the simulator's LSDB and its grid builders
-neighbor/,           the simulator's one neighbor and its RFC 2328
-neighbor_sm/         section 10 state machine, as State objects
+neighbor/,           the simulator's Interface (one segment: hellos, flooding,
+neighbor_sm/         the DR and BDR) and its Neighbors, one per adjacency, with
+                     the RFC 2328 section 10 state machine as State objects
 topology.rb          topology files, YAML or the Ruby DSL
 simulator.rb         the simulator: builds the LSDB, applies live changes
 cli.rb               bin/ospfv2: run, demo, show, export, check, init,
@@ -361,8 +362,8 @@ them (Decisions, 2026-10-26). None is started in the simulator.
    scheduler and the injected clock; the simulator does not.
 4. Global state: the `LSDB::Link` registry, the DD sequence number
    (`packet/database_description.rb:128`), the shared aging clock.
-5. The DD paging cursor on the shared database,
-   `packet/database_description.rb:293`.
+5. Done: the DD paging cursor is each adjacency's (`Neighbor::Cursor`),
+   `docs/design/sim-dr-bdr.md`.
 6. Retransmission per neighbor and per LSA, and the LSU size from the MTU.
 7. Core extensions still global: `to_camel`, `hexlify`, `to_klass`,
    `to_shex` in `infra/ospf_common.rb`.
@@ -370,6 +371,16 @@ them (Decisions, 2026-10-26). None is started in the simulator.
    ospfd has them; the simulator has neither. TE LSAs in the topology
    file, several neighbors from one simulator, and pcap of what it sent
    are not started.
+
+### The simulator and a BDR: built
+
+Measured 2026-11-13: on a segment with a DR and a BDR, the BDR never
+reached Full with the simulator (24 of 29 runs stuck; the rest passed by
+timing). `docs/design/sim-dr-bdr.md`, approved and built: an `Interface`
+owns the segment and each adjacency is a `Neighbor`, with the DR and the
+BDR. Item 5 above is done; item 6 is done for retransmission per
+neighbor, not for the LSU size. It replaces the "start order" item in
+routescope's plan: the user guide's ExStart line was this bug.
 
 ### Noted for later, from the owner, 2026-11-13
 

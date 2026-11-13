@@ -11,17 +11,11 @@ module OSPFv2
 
     # Entry point for every received packet (called with the lock held).
     # Performs the RFC 2328 8.2 checks that matter for a simulator, then
-    # dispatches to recv_<packet_name>.
+    # dispatches to recv_<packet_name>. The Interface has checked the area
+    # and the router id, and sends a packet here only from this neighbor
+    # (docs/design/sim-dr-bdr.md).
     def receive(packet, from)
-      if packet.area_id.to_i != @area_id.to_i
-        log :drop, "#{packet.name} from #{from}: area #{packet.area_id.to_ip} != #{@area_id.to_ip}"
-        return
-      end
-      if packet.router_id.to_i == @router_id.to_i
-        log :drop, "#{packet.name} from #{from}: our own router id #{@router_id.to_ip}"
-        return
-      end
-      log :rcv, packet
+      log :rcv, packet unless packet.is_a?(Hello) # the Interface logged it
       handler = "recv_#{packet.name}"
       if respond_to?(handler)
         __send__ handler, packet, from
@@ -31,37 +25,13 @@ module OSPFv2
     end
 
     def recv_hello(hello, from, *)
-      if (errs = hello_mismatch(hello)).any?
-        log :drop, "hello from #{from} rejected: #{errs.join(', ')}"
-        return
-      end
-      unless adjacency_peer?(hello, from)
-        # Another router on the segment: list it in our hellos so it sees
-        # 2-Way, but it does not drive our single adjacency.
-        @hello.add_router_id hello
-        return
-      end
       @neighbor_ip = from
       @neighbor_router_id = hello.router_id
       @state.recv_hello self, hello, from
     end
 
-    # The simulator keeps one adjacency. On a broadcast segment with more
-    # routers it must be with the DR (we are a DROther, RFC 2328 10.4), and
-    # every other router's hello must leave it alone: a hello from anyone
-    # used to retarget our DD packets to that router.
-    def adjacency_peer?(hello, from)
-      return true if point_to_point? || @neighbor_ip.nil? || from == @neighbor_ip
-      dr = hello.designated_router_id.to_ip
-      return false unless dr == from # only the DR itself can take the adjacency over
-      debug "*** #{from} is DR, moving the adjacency from #{@neighbor_ip} ***"
-      cancel_adjacency_timers
-      new_state NeighborState::Init.new, "DR is #{from}" unless in_state?(:down, :attempt, :init)
-      true
-    end
-
     def from_peer?(from)
-      from.nil? || @neighbor_ip.nil? || from == @neighbor_ip
+      from.nil? || from == @neighbor_ip
     end
 
     def recv_link_state_request(ls_request, from, *)
@@ -88,14 +58,24 @@ module OSPFv2
         end
         new_state NeighborState::Full.new, 'loading_done' if @ls_req_list.empty? && state == :loading
       end
-      @ls_db.recv_link_state_update ls_update if @ls_db
+      return unless @ls_db
+      # Our own LSA echoed back is an ack from this neighbor only.
+      @ls_db.recv_link_state_update ls_update, implied_ack: lambda { |ours|
+        @acked[ours.key] = instance(ours)
+        @interface.ack_if_all(ours)
+      }
     end
 
+    # An ack counts for this neighbor only; the LSA's flag clears once
+    # every adjacency has acked it (RFC 2328 13.7).
     def recv_link_state_ack(ls_ack, *)
       return unless @ls_db
-      before = @ls_db.all_not_acked.size
-      ls_ack.each { |lsa| @ls_db.ls_ack lsa }
-      debug "number of lsa acked: #{before - @ls_db.all_not_acked.size}"
+      ls_ack.each do |hdr|
+        lsa = @ls_db.lookup(hdr)
+        next unless lsa && (lsa <=> hdr).zero?
+        @acked[lsa.key] = instance(lsa)
+        @interface.ack_if_all(hdr)
+      end
     end
   end
 end

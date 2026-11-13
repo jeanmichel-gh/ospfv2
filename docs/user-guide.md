@@ -379,7 +379,7 @@ Wait until FRR shows 1.1.1.1 as `Full/DROther`, about 20 seconds. The simulator'
 
 Name the two services. Without them, compose also starts the `ospfv2` service, which wants a `./lab.yml` and creates an empty folder of that name when there is none.
 
-Start `ospfd` only once the simulator is Full. The simulator handles one neighbor, and a new router's first hellos make it restart its adjacency over and over. If that happens, `docker compose restart sim` fixes it.
+`ospfd` can start before or after the simulator is Full. The simulator is adjacent to the DR and the BDR and at 2-Way with the others, so a new router's hellos leave its adjacencies alone. Measured on 2026-11-13: started in either order, or all at once, the simulator was Full in 7 to 20 seconds.
 
 ### 2a. ospfd directly on the VM
 
@@ -610,7 +610,7 @@ Within 5 seconds `ospfd` originates an external LSA for it and FRR has it too: `
 | `ospfd`: raw sockets need root or CAP_NET_RAW | Run it with `sudo`, or the container with `--cap-add NET_RAW`. |
 | `ospf-cli`: permission denied or no such socket | Use `sudo`, or start `ospfd` with `-g ospf` and log in again after joining the group. No socket means `ospfd` is not running. |
 | No neighbor, or stuck in Init | Hello timers must match: the lab's FRR uses 2 seconds. `show ospf events` shows the dropped hellos. |
-| The simulator loops between ExStart and Exchange | It was not Full before `ospfd` came up. `docker compose restart sim`. |
+| A router stays in ExStart or Exchange with the simulator | Before the simulator kept an adjacency with the BDR, the BDR waited for ever (measured 2026-11-13; `docs/design/sim-dr-bdr.md`). It does now. If it still happens, `/api/state`'s `neighbors` says which router and in what state. |
 | An empty `lab.yml` folder appears in the repo | Compose started the `ospfv2` service. `rmdir lab.yml`, and name the services: `up -d sim frr`. |
 | `docker run`: the container name is already in use | A stopped container with that name exists. `docker start ospfd` to reuse it, or `docker rm ospfd` and run it again. The compose service avoids this. |
 | `git diff` in the lab folder: permission denied on `frr/frr.conf` | FRR saved it moments ago; its start script gives it back within 2 seconds. If it stays, the FRR container was started from an older compose file: `docker compose --profile frr up -d frr` recreates it. |
