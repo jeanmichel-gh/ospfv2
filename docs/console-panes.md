@@ -4,7 +4,7 @@ What each pane of routescope, the lab console, shows, where its data comes from,
 
 The mockups are on the "Lab console mockups" canvas. Screen numbers below refer to it.
 
-Status: phase 0. Decisions are agreed unless marked open.
+Status, 2026-11-13: built through phase 6, see `console-plan.md`. Decisions are agreed unless marked open. The live status of each pane is in routescope's `CLAUDE.md`, "Where the work is going".
 
 ## Common to all panes
 
@@ -179,6 +179,8 @@ One correlated event stream across devices: state changes, floods, SPF runs, lin
 Start, act, stop. The bundle holds logs, pcap, events and before and after snapshots, and replays in the timeline. It names the lab version it ran on.
 
 **Open.** How long recordings are kept, and where.
+
+**Answered in practice, 2026-11-13.** A recording is kept in the lab folder under `recordings/`, which the lab's `.gitignore` leaves out, until someone deletes it (routescope `README.md`, `lib/routescope/recorder.rb`).
 
 ## 13. Scenarios (not mocked)
 

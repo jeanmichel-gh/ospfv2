@@ -309,6 +309,73 @@ security settings.
 * Keep this file true in the pull request that makes it false. Keep the
   README tables true too: the commands, the API methods, the event kinds.
 
+## Where the work is going
+
+A plan that spans more than one session lives here, with its status, so
+the next reader sees the direction without rebuilding it from a chat.
+**Update the status in the pull request that moves it.** Status measured
+2026-11-13 at `ccad43f`, by grepping the code. The plan across the four
+repositories (routescope, ospfv2, bgp4r, isis) is in routescope's
+`CLAUDE.md`, "Where the work is going". This section is ospfv2's part.
+
+### What routescope asked of ospfv2
+
+From `docs/console-plan.md`, "Changes needed in ospfv2", and
+`docs/console-panes.md`, "New inputs, all panes".
+
+| Change | Status | Where |
+| --- | --- | --- |
+| `events.subscribe` on the ospfd API | Done | `daemon/api.rb:20-41` |
+| Timer table, `show.timers` | Done | `daemon/api.rb:51` |
+| Decoder field offsets, lengths, masks | Done | `dissect.rb`, `ospfv2 capture` |
+| SPF triggers, runs, FIB done, route diff, back links | Done | `core/instance.rb:43-78` |
+| ospf-cli `show ospf log` timing, `show ospf log run N`, IOS forms | Done | `command_line/grammar.rb:148` |
+| Per node configs mounted read-write from a lab folder | Done | `docker-compose.yml`, `routescope/labs/ospf-lab` |
+| ospfd socket on a volume | Done | `docker-compose.yml:117`, `ospfd-run` |
+| `api.info`, version and methods | Done | `daemon/api.rb:75`. routescope does not call it yet. |
+| `show.topology` and the `topology` event | Done | `docs/design/ospf-topology.md`, #48, #49 |
+| Recorded API fixtures in `test/fixtures/api/` | Not started | No `test/fixtures/`. routescope keeps its own samples. |
+| systemd unit for a native ospfd | Not started | No unit file in the repo |
+| Simulator: link metric | Done | `web/server.rb:107` |
+| Simulator: refresh or flush one LSA | Not started | `simulator.rb:174,184` has `refresh_all` and `flush_all` only |
+| Simulator: add and withdraw externals and summaries at runtime | Not started | Only from the topology file |
+| Simulator: a streaming event endpoint | Not started | `GET /api/events` is polled with `since` |
+
+### ospf-cli
+
+* **Issue #16, `edit`, `up` and `top` in configuration mode. Not
+  started.** ospf-cli takes complete `set` statements only. The issue
+  lists what to add and the tests.
+
+### The simulator's debts, `REVIEW.md` "Worth rewriting next"
+
+These are about the simulator's older stack (`ie/`, `lsa/`, `ls_db/`,
+`neighbor/`, `infra/timer.rb`). `core/` was written new and does not have
+them (Decisions, 2026-10-26). None is started in the simulator.
+
+1. `Common#set`, the reflective constructor. Still there,
+   `infra/ospf_common.rb:170`.
+2. The DD exchange as a table of events by states, and the 2-Way state.
+   `neighbor/recv_database_description.rb` is still one conditional.
+3. Timers: one thread per timer, `infra/timer.rb`. `core/` has the
+   scheduler and the injected clock; the simulator does not.
+4. Global state: the `LSDB::Link` registry, the DD sequence number
+   (`packet/database_description.rb:128`), the shared aging clock.
+5. The DD paging cursor on the shared database,
+   `packet/database_description.rb:293`.
+6. Retransmission per neighbor and per LSA, and the LSU size from the MTU.
+7. Core extensions still global: `to_camel`, `hexlify`, `to_klass`,
+   `to_shex` in `infra/ospf_common.rb`.
+8. Features. MD5 and HMAC-SHA authentication and NSSA are in `core/`, so
+   ospfd has them; the simulator has neither. TE LSAs in the topology
+   file, several neighbors from one simulator, and pcap of what it sent
+   are not started.
+
+### Open questions
+
+* `ospf-topology.md`: whether `show.spf` should carry `reached`. Left
+  out unless someone asks.
+
 ## Decisions
 
 Architecture decisions, dated, with the premise each came from. A later
