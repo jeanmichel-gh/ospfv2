@@ -269,7 +269,11 @@ module LSDB
     #   theirs older   -> keep ours, it is still waiting for an ack
     #   we have none   -> an LSA that claims to be ours: flush it (MaxAge)
     # For anyone else's LSA: keep the newer copy, drop a MaxAge one.
-    def recv_link_state_update(link_state_update)
+    #
+    # +implied_ack+, when given, is called with our copy in place of
+    # ls_ack: the echo acks it for the neighbor that sent it only (RFC 2328
+    # 13, step 7a), which a segment with two adjacencies needs.
+    def recv_link_state_update(link_state_update, implied_ack: nil)
       link_state_update.each do |lsa|
         ours = @ls_db[lsa.key]
         if advertised_routers.has?(lsa.advertising_router)
@@ -279,7 +283,7 @@ module LSDB
             lsa.retransmit
           else
             case ours <=> lsa
-            when 0  then ls_ack(ours)
+            when 0  then implied_ack ? implied_ack.call(ours) : ls_ack(ours)
             when -1 then ours.force_refresh(lsa.sequence_number)
             end
           end

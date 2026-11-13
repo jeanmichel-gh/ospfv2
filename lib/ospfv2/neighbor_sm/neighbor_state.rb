@@ -43,18 +43,20 @@ module OSPFv2
       # Dead interval expired without a hello from the neighbor.
       def inactivity_timer(neighbor)
         neighbor.instance_eval do
-          @ls_db&.reset
+          forget_lsdb_view
           @ls_req_list = {}
           hello.remove_neighbor(@neighbor_router_id.to_i) if @neighbor_router_id
           cancel_adjacency_timers
         end
         new_state neighbor, Down.new, 'Inactivity Timer'
+        neighbor.interface.adjacency_down(neighbor)
       end
 
+      # The DR and BDR in our hello are the Interface's to set, from every
+      # router's hellos.
       def recv_hello(neighbor, rcv_hello, *)
         neighbor.instance_eval do
           hello.add_router_id rcv_hello
-          hello.designated_router_id = rcv_hello.designated_router_id.to_ip
           inactivity_timer.start { synchronize { @state.inactivity_timer(self) } }
         end
       end

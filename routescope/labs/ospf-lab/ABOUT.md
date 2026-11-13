@@ -12,6 +12,8 @@ The ospfv2 simulator floods a 5x5 grid of routers to FRR on the LAN 10.99.0.0/24
 
 It is a compose lab: `lab.yml` lists the nodes, and `docker-compose.yml` in the ospfv2 checkout runs them with `LAB` set to this folder. Each node's folder is mounted read-write, so a saved configuration lands back here.
 
+The simulator and ospfd run at priority 0, so FRR is the DR and there is no BDR. That is a choice, not a need: give ospfd a priority above 0 and it becomes the BDR, and the simulator keeps an adjacency with both (`docs/design/sim-dr-bdr.md`).
+
 Scenarios: `edge-down` takes the link to `edge` down and up and measures how long ospfd takes; `flap-converge` flaps a link next to the simulator three times.
 
 Images, built in the ospfv2 checkout: `docker build -t ospfv2 .`, and `docker compose --profile bird build bird` for BIRD. FRR is pulled.

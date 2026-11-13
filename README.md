@@ -1,6 +1,6 @@
 # ospfv2
 
-Simulate an OSPFv2 area behind a single adjacency.
+Simulate an OSPFv2 area behind one LAN or point-to-point interface.
 
 `ospfv2` brings up an OSPF neighbor with a router under test (the DUT) and floods a
 synthetic link state database behind it. Use it to load a router with thousands of
@@ -135,7 +135,7 @@ The dashboard listens on 127.0.0.1 unless you pass an address. The JSON API behi
 
 | Method | Path | |
 | --- | --- | --- |
-| GET | `/api/state` | neighbor, counts, graph, links |
+| GET | `/api/state` | neighbor (the adjacency with the DR), neighbors (every router heard, its role and our state with it), counts, graph, links |
 | GET | `/api/lsdb` | LSA rows; `/api/lsdb.txt?format=junos\|ios&verbose=1` for text |
 | GET | `/api/lsa?type=router&id=0.1.0.1&advr=0.1.0.1` | one LSA, verbose |
 | GET | `/api/events?since=N` | events after sequence N |
@@ -448,7 +448,9 @@ defaults plus `NET_RAW` and `NET_ADMIN`, to write its configuration and install 
 Supported: router, network, summary, ASBR summary, AS external and TE opaque LSAs;
 hello, DD, LS request, LS update and LS ack packets; null authentication.
 Not supported: MD5 or HMAC authentication, DR election by the simulator, NSSA, more
-than one neighbor per process. RFC 2328 and RFC 4915 (multi-topology metrics).
+than one interface per process, and the simulator as DR or BDR: it is a DROther at
+priority 0, adjacent to the DR and the BDR (RFC 2328 10.4) and at 2-Way with the
+others. RFC 2328 and RFC 4915 (multi-topology metrics).
 
 ## Development
 

@@ -186,7 +186,7 @@ module OSPFv2
         lsas = @ls_db.all_proxied
         lsas.each { |l| @flushed_seq[l.key] = l.sequence_number.to_I }
         lsas.each(&:maxage)
-        @neighbor.flood(lsas) if @neighbor.full?
+        @neighbor.flood(lsas) if @neighbor.adjacent?
         event :lsdb, "flushed #{lsas.size} LSAs. Refresh LSAs or restart the neighbor to originate them again"
         lsas
       end
@@ -222,7 +222,7 @@ module OSPFv2
         lsas.each { |l| l.force_refresh(@flushed_seq.fetch(l.key, nil)) }
         @flushed_seq.clear
         update_interface_link(@neighbor.state, flood: false)
-        @neighbor.flood(lsas) if @neighbor.full?
+        @neighbor.flood(lsas) if @neighbor.adjacent?
         event :lsdb, "restored #{lsas.size} LSAs from the topology"
         lsas
       end
@@ -267,6 +267,7 @@ module OSPFv2
           aging: aging?,
           flushed: flushed?,
           neighbor: @neighbor.to_hash,
+          neighbors: @neighbor.neighbors,
           counts: lsdb_counts,
           topology: { counts: @topology.counts, link_prefix: @topology.lsdb[:link_prefix] },
           graph: graph,
@@ -307,6 +308,10 @@ module OSPFv2
       nodes << { id: 'dut', router_id: @neighbor.neighbor_router_id&.to_ip, dut: true, address: @neighbor.neighbor_ip }
       edges = @links.map { |l| { id: l.id, from: l.spec.from, to: l.spec.to, metric: l.metric, up: l.up? } }
       edges << { id: 'dut', from: Topology::SIM, to: 'dut', up: @neighbor.full?, state: @neighbor.state }
+      if (b = @neighbor.bdr_adjacency)
+        nodes << { id: 'dut-bdr', router_id: b.neighbor_router_id&.to_ip, dut: true, address: b.neighbor_ip }
+        edges << { id: 'dut-bdr', from: Topology::SIM, to: 'dut-bdr', up: b.full?, state: b.state }
+      end
       { nodes: nodes, edges: edges }
     end
 
@@ -357,7 +362,7 @@ module OSPFv2
       lsas = Array(lsas).compact.uniq
       return [] if lsas.empty?
       lsas.each { |l| l.force_refresh(nil) }
-      @neighbor.flood(lsas) if @neighbor.full?
+      @neighbor.flood(lsas) if @neighbor.adjacent?
       event :lsdb, "#{why}: re-originated #{lsas.size} LSA#{'s' unless lsas.size == 1}"
       lsas
     end
@@ -423,10 +428,12 @@ module OSPFv2
                                network_type: s.network_type, interface: s.device,
                                transport: transport, log: @log, debug: debug)
       @neighbor.ls_db = @ls_db
-      @neighbor.on_state_change do |old, new, why|
-        event :neighbor, "#{old} -> #{new} (#{why})"
-        update_interface_link(new)
+      # @neighbor is the segment (an Interface); its state is the adjacency
+      # with the DR's. Events name each adjacency's neighbor.
+      @neighbor.on_adjacency_change do |nbr, old, new, why|
+        event :neighbor, "#{nbr.neighbor_router_id&.to_ip || nbr.neighbor_ip}: #{old} -> #{new} (#{why})"
       end
+      @neighbor.on_state_change { |_old, new, _why| update_interface_link(new) }
     end
 
     # RFC 2328 12.4.1: describe the segment towards the DUT. A stub while

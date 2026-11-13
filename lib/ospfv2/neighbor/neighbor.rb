@@ -24,15 +24,18 @@ require_relative 'neighbor_event_handler'
 
 module OSPFv2
 
-  # One OSPF adjacency, seen from the simulated router.
+  # One OSPF adjacency, seen from the simulated router: the neighbor state
+  # machine, the database exchange, the request list, the inactivity timer
+  # and the LSAs this neighbor has not acked yet. What there is one of per
+  # segment (transport, hellos, flooding, the lock) is its Interface.
+  # docs/design/sim-dr-bdr.md.
+  #
+  # Neighbor.new without +interface:+ builds an Interface, the whole
+  # simulator side of a segment, as it always has:
   #
   #   nbr = Neighbor.new router_id: '1.1.1.1', src_addr: '192.168.1.10/24'
   #   nbr.ls_db = ls_db
   #   nbr.start
-  #
-  # The neighbor sends hellos, runs the RFC 2328 neighbor state machine,
-  # exchanges the database with the router under test and keeps flooding
-  # and refreshing the LSAs of ls_db that it originates.
   class Neighbor
 
     # Writes protocol traces to an IO or a file.
@@ -50,6 +53,10 @@ module OSPFv2
       end
     end
 
+    # Where the next DD packet starts in the LSDB: the adjacency's own, so
+    # two exchanges at once do not share it (REVIEW.md item 5).
+    Cursor = Struct.new(:offset)
+
     include OSPFv2::Common
     include OSPFv2::NeighborState
     include OSPFv2
@@ -61,11 +68,7 @@ module OSPFv2
     RouterId          = Class.new(Id)
     AreaId            = Class.new(Id)
 
-    attr_reader :address, :netmask, :inactivity_timer, :hello, :dd_rxmt_interval
-    attr_reader :area_id, :neighbor_ip, :neighbor_router_id, :transport, :network_type
-    attr_writer :hello_int, :dead_int
-
-    # Options (all optional):
+    # Options (all optional) for a whole simulator side, an Interface:
     #   :router_id      our router id                       ('1.1.1.1')
     #   :src_addr       interface address, '10.0.0.1/24' or '10.0.0.1'
     #   :netmask        interface netmask when src_addr has no prefix length
@@ -73,52 +76,41 @@ module OSPFv2
     #   :hello_interval / :dead_interval  seconds            (10 / 4 x hello)
     #   :transport      a Transport, default raw IP socket on src_addr
     #   :network_type   :broadcast (default) or :p2p
-    #   :interface      device to bind the raw socket to
+    #   :interface      device to bind the raw socket to (a String)
     #   :log / :log_fname  IO or file name for traces       ($stdout)
     #   :debug          true for verbose traces
-    def initialize(arg = {})
-      @address, @netmask = split_address(arg[:src_addr] || '127.0.0.1', arg[:netmask])
-      @router_id = RouterId.new(arg[:router_id] || '1.1.1.1')
-      @area_id   = AreaId.new(arg[:area_id] || 0)
-      @hello_int = arg[:hello_interval] || arg[:hello_int]
-      @dead_int  = arg[:dead_interval]  || arg[:dead_int]
-      @interface = arg[:interface]
-      @network_type = (arg[:network_type] || :broadcast).to_sym
-      @transport = arg[:transport]
-      @debug     = arg[:debug]
-      @trace     = Trace.new(arg[:log] || arg[:log_fname] || $stdout)
-      @lock      = Monitor.new
-      @listeners = []
+    #
+    # An Interface makes its adjacencies with interface: itself and
+    # address: the neighbor's address.
+    def self.new(arg = {})
+      arg[:interface].is_a?(Interface) ? super : Interface.new(arg)
+    end
 
+    attr_reader :interface, :inactivity_timer, :dd_rxmt_interval, :neighbor_ip, :neighbor_router_id
+
+    def initialize(arg = {})
+      @interface = arg[:interface]
+      @neighbor_ip = arg[:address]
+      @neighbor_router_id = nil
+      # The packet builders here and in the states read these two.
+      @router_id = @interface.router_id
+      @area_id = @interface.area_id
       @state = NeighborState::Down.new
       @inactivity_timer = InactivityTimer.new(dead_int)
-      @periodic_hellos  = HelloTimer.new(hello_int)
       @ls_req_list = {}
+      @dd_cursor = Cursor.new(0)
+      @acked = {} # LSA key => the instance this neighbor acked
       @ls_db = nil
-      @ev = nil
-      @output = false
-      build_hello
     end
 
-    def hello_int
-      @hello_int ||= 10
+    # What the segment holds, the Interface answers.
+    %i[hello address netmask hello_int dead_int network_type transport
+       synchronize log debug debug? send_packet flood flooding_address point_to_point?
+       hello_mismatch start_ls_refresh].each do |m|
+      define_method(m) { |*a, &b| @interface.__send__(m, *a, &b) }
     end
 
-    def dead_int
-      @dead_int ||= hello_int * 4
-    end
-
-    # Every handler, timer callback and user action runs under this lock so
-    # the LSDB is never changed by two threads at once.
-    def synchronize(&block)
-      @lock.synchronize(&block)
-    end
-
-    # Called with (old_state, new_state, event) on every state change.
-    def on_state_change(&block)
-      @listeners << block
-      self
-    end
+    attr_reader :router_id, :area_id
 
     def state
       @state.class.to_s.split('::').last.downcase.to_sym
@@ -141,39 +133,20 @@ module OSPFv2
       @ls_db = val
     end
 
-    def log(ev, obj)
-      if obj.is_a?(String)
-        @trace.trace "\n#{Time.now.strftime('%H:%M:%S')} #{ev}: #{obj}"
-      else
-        s = +"\n#{Time.now.strftime('%H:%M:%S')} (#{state}) #{ev} #{obj.name.to_camel}:\n#{obj}"
-        s << "\n " << obj.encode.hexlify.join("\n ") if debug?
-        s << "\n"
-        @trace.trace s
-      end
-    end
-
-    def debug?
-      @debug || (defined?($debug) && $debug == 1)
-    end
-
-    def debug(obj)
-      log :debug, obj if debug?
-    end
-
     def clear_lsa_request_list
       @ls_req_list = {}
     end
 
-    def router_id
-      @router_id
+    def ls_request_pending
+      @ls_req_list.size
     end
 
     def change_state(new_state, event = nil)
       @num = (@num || 0) + 1
       old = state
-      log 'state change', "#{@num}# [#{event}]: #{old} -> #{new_state.class.to_s.split('::').last}"
+      log 'state change', "#{@neighbor_ip} #{@num}# [#{event}]: #{old} -> #{new_state.class.to_s.split('::').last}"
       @state = new_state
-      @listeners.each { |l| l.call(old, state, event) }
+      @interface.adjacency_changed(self, old, state, event)
     end
     alias new_state change_state
 
@@ -181,63 +154,51 @@ module OSPFv2
       @dd_sequence_number = DatabaseDescription.seqn
     end
 
+    # The Interface starts an adjacency when it decides to have one.
     def start
-      synchronize do
-        return self if @output
-        @ev ||= NeighborEventHandler.new(self)
-        @dd_rxmt_interval = RxmtIntervalTimer.new(5, @ev)
-        @periodic_rxmt    = RxmtIntervalTimer.new(5, @ev)
-        @periodic_refresh = RefreshTimer.new(60, @ev)
-        @transport ||= Transport::RawSocket.new(@address, interface: @interface)
-        @transport.start { |bytes, from| @ev.update(:ev_recv, bytes, from) }
-        @output = true
-        start_periodic_hellos
-        @state.start(self)
-      end
+      ev = @interface.ev
+      @dd_rxmt_interval = RxmtIntervalTimer.new(5, ev)
+      @periodic_rxmt    = RxmtIntervalTimer.new(5, ev)
+      @state.start(self)
       self
     end
 
-    def stop
-      synchronize do
-        [@periodic_hellos, @periodic_rxmt, @periodic_refresh, @dd_rxmt_interval, @inactivity_timer].each { |t| t&.cancel }
-        @transport&.stop
-        @output = false
-        @state.kill_nbr(self)
-      end
-      self
+    # Ends the adjacency: the Interface decided it is no longer wanted, or
+    # is stopping.
+    def kill(why = 'kill_nbr')
+      [@inactivity_timer].each { |t| t&.cancel }
+      cancel_adjacency_timers
+      @ls_req_list = {}
+      new_state NeighborState::Down.new, why unless state == :down
     end
 
     def running?
-      @output
+      @interface.running?
     end
 
-    # Sends one packet or an Array of packets. Default destination is
-    # AllSPFRouters. Was Neighbor#send, which shadowed Object#send.
-    def send_packet(packet, dest = OSPFv2::AllSPFRouters)
-      return unless @output
-      [packet].flatten.compact.each do |p|
-        log :snd, p
-        @transport.send_packet(p.encode, dest)
-      end
+    # ---- this adjacency's view of the LSDB
+
+    # The exchange will describe every LSA we hold, so each counts as
+    # acked by this neighbor; the DD cursor starts again. This is what
+    # LinkStateDatabase#reset did when there was one adjacency.
+    def reset_lsdb_view
+      @dd_cursor.offset = 0
+      @acked = @ls_db ? @ls_db.all.to_h { |l| [l.key, instance(l)] } : {}
+      @interface.recheck_acks
     end
 
-    # Where updates and acks go: on a broadcast segment the simulator is a
-    # DROther (priority 0) and talks to the DR and BDR (RFC 2328 13.3).
-    def flooding_address
-      point_to_point? ? AllSPFRouters : AllDRouters
+    def forget_lsdb_view
+      @dd_cursor.offset = 0
+      @acked = {}
     end
 
-    # Floods +lsas+ in one or more Link State Updates.
-    def flood(lsas, dest = flooding_address)
-      lsas = [lsas].flatten.compact
-      return if lsas.empty?
-      send_packet LinkStateUpdate.new_lsas(router_id: @router_id, area_id: @area_id, lsas: lsas), dest
+    def acked?(lsa)
+      @acked[lsa.key] == instance(lsa)
     end
 
-    def start_periodic_hellos
-      @periodic_hellos.cancel
-      send_packet @hello
-      @periodic_hellos.start { synchronize { send_packet @hello } }
+    # LSAs still to go to this neighbor: not acked by it.
+    def pending_lsas
+      @ls_db ? @ls_db.all_not_acked.reject { |l| acked?(l) } : []
     end
 
     def start_periodic_rxmt
@@ -247,29 +208,18 @@ module OSPFv2
         synchronize do
           unless @ls_req_list.empty?
             debug "There are #{@ls_req_list.size} LS Request to re-transmit!"
-            send_packet LinkStateRequest.new(area_id: @area_id, router_id: @router_id, requests: @ls_req_list.keys), @neighbor_ip
+            send_packet LinkStateRequest.new(area_id: area_id, router_id: router_id, requests: @ls_req_list.keys), @neighbor_ip
           end
-          if @ls_db
-            lsas = @ls_db.all_not_acked
-            debug "There are #{lsas.size} LSA to re-transmit!"
-            flood lsas
-          end
+          lsas = pending_lsas
+          debug "There are #{lsas.size} LSA to re-transmit to #{@neighbor_ip}!"
+          # RFC 2328 13.6: retransmissions go directly to the neighbor.
+          flood lsas, @neighbor_ip
         end
       end
     end
 
-    def start_ls_refresh
-      return unless @ls_db
-      debug '*** about to start periodic refresh timer ***'
-      @periodic_refresh.cancel
-      @periodic_refresh.start do
-        synchronize { @ls_db.refresh if in_state? :full, :loading, :exchange }
-      end
-      nil
-    end
-
     def cancel_adjacency_timers
-      [@periodic_refresh, @periodic_rxmt, @dd_rxmt_interval].each { |t| t&.cancel }
+      [@periodic_rxmt, @dd_rxmt_interval].each { |t| t&.cancel }
     end
 
     def negotiation_done
@@ -283,61 +233,27 @@ module OSPFv2
     # A DD says the options our hellos say (RFC 2328 10.8): a router that
     # checks them refuses a DD whose E bit differs.
     def send_dd(dd, rxmt = false)
-      dd.options = @hello.options.to_i if @hello && dd.options.to_i.zero?
+      dd.options = hello.options.to_i if hello && dd.options.to_i.zero?
       dd_rxmt_interval.cancel
       dd_rxmt_interval.start { synchronize { debug "*** re-transmitting #{dd} ***"; send_packet dd, @neighbor_ip } } if rxmt
       send_packet dd, @neighbor_ip
       @sent_dd = dd
     end
 
-    # Hello parameters that must match ours on the segment (RFC 2328 10.5).
-    def hello_mismatch(rcv)
-      errs = []
-      errs << "hello interval #{rcv.hello_interval} != #{hello_int}" if rcv.hello_interval != hello_int
-      errs << "dead interval #{rcv.router_dead_interval} != #{dead_int}" if rcv.router_dead_interval != dead_int
-      errs << "netmask #{rcv.netmask.to_ip} != #{@netmask}" if rcv.netmask.to_ip != @netmask && !point_to_point?
-      errs
-    end
-
-    def point_to_point?
-      @network_type == :p2p
-    end
-
     def to_hash
       {
-        router_id: @router_id.to_ip, area_id: @area_id.to_ip, address: @address, netmask: @netmask,
-        hello_interval: hello_int, dead_interval: dead_int, state: state, network_type: @network_type,
-        designated_router: @hello.designated_router_id.to_ip,
-        neighbor_ip: @neighbor_ip, neighbor_router_id: @neighbor_router_id&.to_ip,
+        address: @neighbor_ip, router_id: @neighbor_router_id&.to_ip, state: state,
         ls_request_pending: @ls_req_list.size
       }
     end
 
     private
 
-    def split_address(addr, netmask)
-      ip, plen = addr.to_s.split('/')
-      mask = if plen then IPAddr.new("#{ip}/#{plen}").netmask
-             elsif netmask then IPAddr.new(netmask).to_s
-             else '255.255.255.0'
-             end
-      [ip, mask]
-    end
-
-    def build_hello
-      @hello = Hello.new(
-        router_id: @router_id.to_i,
-        area_id: @area_id.to_i,
-        netmask: @netmask,
-        designated_router_id: '0.0.0.0',
-        backup_designated_router_id: '0.0.0.0',
-        hello_interval: hello_int,
-        router_dead_interval: dead_int,
-        options: 2,
-        rtr_pri: 0
-      )
+    def instance(lsa)
+      [lsa.sequence_number.to_I, lsa.maxaged?]
     end
   end
 end
 
+require_relative 'interface'
 require_relative 'recv_ospf_packet'

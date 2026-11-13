@@ -24,10 +24,7 @@ module OSPFv2
   class Neighbor
 
     def recv_database_description(rcv_dd, from = nil, *args)
-      unless from_peer?(from)
-        debug "*** DD from #{from} ignored: our adjacency is with #{@neighbor_ip} ***"
-        return
-      end
+      return unless from_peer?(from)
 
       case state
       when :exstart
@@ -45,7 +42,7 @@ module OSPFv2
             if @ls_db
               @ls_db.recv_dd(rcv_dd, @ls_req_list)
               dd = DatabaseDescription.new :router_id=> @router_id, :area_id=> @area_id, 
-                                            :ls_db => @ls_db, :number_of_lsa=>60
+                                            :ls_db => @ls_db, :cursor => @dd_cursor, :number_of_lsa=>60
             else
               dd = DatabaseDescription.new :router_id=> @router_id, :area_id=> @area_id
             end
@@ -63,7 +60,7 @@ module OSPFv2
           if rcv_dd.imms & 0x7 == 0x7
             if @ls_db
               @ls_db.recv_dd(rcv_dd, @ls_req_list)
-              dd = DatabaseDescription.new :router_id=> @router_id, :area_id=> @area_id, :ls_db => @ls_db
+              dd = DatabaseDescription.new :router_id=> @router_id, :area_id=> @area_id, :ls_db => @ls_db, :cursor => @dd_cursor
             else
               dd = DatabaseDescription.new :router_id=> @router_id, :area_id=> @area_id
               dd.imms = 0 # no more
@@ -90,7 +87,7 @@ module OSPFv2
             if @ls_db
               @ls_db.recv_dd(rcv_dd, @ls_req_list)
               @dd = DatabaseDescription.new :router_id=> @router_id, :area_id=> @area_id, 
-              :ls_db => @ls_db, :dd_sequence_number=>rcv_dd.seqn
+              :ls_db => @ls_db, :cursor => @dd_cursor, :dd_sequence_number=>rcv_dd.seqn
             else
               @dd = DatabaseDescription.new :router_id=> @router_id, :area_id=> @area_id
               @dd.imms = 0 # no more
@@ -129,7 +126,7 @@ module OSPFv2
               @last_dd_seqn += 1
               if @ls_db
                 @dd = DatabaseDescription.new :router_id=> @router_id, :area_id=> @area_id,
-                :ls_db => @ls_db, :number_of_lsa=>60
+                :ls_db => @ls_db, :cursor => @dd_cursor, :number_of_lsa=>60
               else
                 @dd = DatabaseDescription.new :router_id=> @router_id, :area_id=> @area_id
                 @dd.no_more

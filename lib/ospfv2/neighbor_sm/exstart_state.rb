@@ -31,7 +31,7 @@ module OSPFv2
       def initialize(n)
         @neighbor = n
         n.instance_eval do
-          @ls_db&.reset
+          reset_lsdb_view
           @ls_req_list = {}
           cancel_adjacency_timers
           @last_dd_seqn = dd_sequence_number

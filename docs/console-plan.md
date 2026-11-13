@@ -2,7 +2,16 @@
 
 routescope is a web console for the ospfd router lab: one window to see, drive, debug and record every device in the lab. It goes well past the demo dashboard, which shows one simulator and polls it.
 
-Status: plan agreed in outline, phase 0 (UX mockups) in progress. Each pane, its inputs and decisions: `console-panes.md`.
+Status, 2026-11-13: phases 0 to 6 are built. Phase 7 is partly built: containerlab import and many more node kinds, no cEOS. Some pieces of phases 3 and 5 are still open. The live status, item by item, is in routescope's `CLAUDE.md`, "Where the work is going". ospfv2's part is in this repo's `CLAUDE.md`, under the same heading. Each pane, its inputs and decisions: `console-panes.md`.
+
+routescope now covers more than the ospfd lab: BGP, IS-IS and BGP-LS labs, with FRR, BIRD, GoBGP, SR Linux, bgp4r and isis4r nodes.
+
+**What changed since this plan was written:**
+
+- Decision 2: routescope does not load `lib/ospfv2`. The decoder runs as `ospfv2 capture` in the node's namespace, inside ospfv2's image, and routescope reads its JSON lines.
+- Decision 8: the labs live in `routescope/labs/<lab>/` of each repository. `routescope-labs` installs them into `~/labs`. `examples/lab` is a symlink kept for one release.
+- Working across the two repos: routescope does not pin ospfv2 to a tag. Its compose file names an ospfv2 checkout. The clones are `~/ospfv2` and `~/routescope`, not `~/src`.
+- Main libraries: the front end uses dockview, xterm.js and diff. React Flow, Monaco and TanStack Table were not needed.
 
 ## Goals
 
@@ -119,4 +128,4 @@ Each phase ends usable on its own.
 
 ## Open questions
 
-- License for routescope. None while the repo is private.
+- License for routescope. None while the repo is private. Still open on 2026-11-13.

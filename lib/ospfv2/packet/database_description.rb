@@ -290,9 +290,12 @@ module OSPFv2
       super
       if arg[:ls_db].is_a?(OSPFv2::LSDB::LinkStateDatabase)
         ls_db = arg[:ls_db]
-        @lsas = ls_db.lsas[ls_db.offset, number_of_lsa] ||=[]
-        ls_db.offset += number_of_lsa
-        self.more if ls_db.size > ls_db.offset
+        # Where this DD starts: the adjacency's cursor when it has one
+        # (Neighbor::Cursor), else the LSDB's own, as before.
+        cursor = arg[:cursor] || ls_db
+        @lsas = ls_db.lsas[cursor.offset, number_of_lsa] ||=[]
+        cursor.offset += number_of_lsa
+        self.more if ls_db.size > cursor.offset
       end
     end
     
