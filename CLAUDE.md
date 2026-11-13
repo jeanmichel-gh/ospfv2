@@ -371,6 +371,18 @@ them (Decisions, 2026-10-26). None is started in the simulator.
    file, several neighbors from one simulator, and pcap of what it sent
    are not started.
 
+### Noted for later, from the owner, 2026-11-13
+
+Not designed yet; routescope's `CLAUDE.md`, "Where the work is going",
+holds the full note.
+
+* One CLI for OSPF, IS-IS and BGP in Cisco syntax (IOS XE is the likely
+  OS, once its public command references are checked). `ospf-cli` already has IOS and Junos forms; it would join `bgp4r-cli` and `isis-cli` behind one shell. The owner found odd things in the `ospf-lab` topology: review it first.
+* CI runs only the jobs a change's paths need.
+* Review and document every lab in `routescope/labs/`.
+* Do not open a pull request for documents alone: CI costs money. Let a
+  document change ride with the next code change, or ask first.
+
 ### Open questions
 
 * `ospf-topology.md`: whether `show.spf` should carry `reached`. Left
