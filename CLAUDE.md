@@ -96,7 +96,8 @@ test/integration/    two simulators over the in-memory segment, and the
                      FRR interop tests in network namespaces
 test/support/        the FRR namespace harness, netlink probe, and
                      routescope_vocabulary.rb: what routescope reads from ospfd
-test/lab/            the lab tests, in shell: compose, clab, srl, bgp
+test/lab/            the lab tests, in shell: compose, clab, srl, bgp; pull.sh,
+                     the image pulls CI makes, retried
 examples/            grid.yml, and links from the old template paths to
                      routescope/labs, for one release
 routescope/labs/     the labs routescope runs, one ready-to-run folder
