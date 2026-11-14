@@ -94,7 +94,8 @@ bin/                 ospfv2, ospfd, ospf-cli
 test/unit/           unit tests, roughly by source folder
 test/integration/    two simulators over the in-memory segment, and the
                      FRR interop tests in network namespaces
-test/support/        the FRR namespace harness, netlink probe
+test/support/        the FRR namespace harness, netlink probe, and
+                     routescope_vocabulary.rb: what routescope reads from ospfd
 test/lab/            the lab tests, in shell: compose, clab, srl, bgp
 examples/            grid.yml, and links from the old template paths to
                      routescope/labs, for one release
@@ -333,9 +334,9 @@ From `docs/console-plan.md`, "Changes needed in ospfv2", and
 | ospf-cli `show ospf log` timing, `show ospf log run N`, IOS forms | Done | `command_line/grammar.rb:148` |
 | Per node configs mounted read-write from a lab folder | Done | `docker-compose.yml`, `routescope/labs/ospf-lab` |
 | ospfd socket on a volume | Done | `docker-compose.yml:117`, `ospfd-run` |
-| `api.info`, version and methods | Done | `daemon/api.rb:75`. routescope does not call it yet. |
+| `api.info`, version and methods | Done | `daemon/api.rb:75`. routescope asks it from jeanmichel-gh/routescope#129 on. |
 | `show.topology` and the `topology` event | Done | `docs/design/ospf-topology.md`, #48, #49 |
-| Recorded API fixtures in `test/fixtures/api/` | Not started | No `test/fixtures/`. routescope keeps its own samples. |
+| Recorded API fixtures in `test/fixtures/api/` | Replaced | routescope's `docs/design/api-contract.md`: `test/support/routescope_vocabulary.rb` is what routescope reads, copied from its `rake vocabulary`; `test/unit/daemon/routescope_vocabulary_test.rb` holds ospfd's API to it. Refresh the copy when routescope reads something new. |
 | systemd unit for a native ospfd | Not started | No unit file in the repo |
 | Simulator: link metric | Done | `web/server.rb:107` |
 | Simulator: refresh or flush one LSA | Not started | `simulator.rb:174,184` has `refresh_all` and `flush_all` only |
