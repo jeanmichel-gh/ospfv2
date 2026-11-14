@@ -22,7 +22,7 @@ Measured on 2026-11-14:
 - **Adjacencies:** the simulator Full with SR Linux, the DR (priority 10), on the LAN; ospfd Full with SR Linux, point to point.
 - **Boot:** routescope saw every router up 12 s after containerlab finished.
 
-The scenario `edge-down` takes the simulator's link to `edge` down and up. Measured on 2026-11-14: ospfd lost edge's routes 61 ms after the link went down and had them back 5.3 s after it came up.
+The scenario `edge-down` takes the simulator's link to `edge` down and up. Measured on 2026-11-14: ospfd lost edge's routes 61 ms after the link went down and had them back 5.3 s after it came up. The 5 s is ospfd's SPF back-off (RFC 8405), not SR Linux: see ospf-lab's ABOUT.md, "Convergence".
 
 ## Images
 
