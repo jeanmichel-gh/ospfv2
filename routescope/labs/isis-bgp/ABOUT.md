@@ -21,7 +21,7 @@ Things to watch:
 - The IS-IS metric becomes the BGP MED. `isis metric 50` on asbr's eth3, and i3's prefixes reach AS 65001 with MED 60.
 - The route map ISIS-TO-BGP in `asbr/frr.conf` gives area 49.0002's prefixes community 65000:2. Make it deny and they leave AS 65001.
 
-The BGP labs reuse the names r1, r2 and r3, so run one at a time.
+The BGP labs reuse the names r1, r2 and r3. Each lab's containers are named `clab-LAB-NODE`, so the labs can run side by side.
 
 Images: FRR (`docker pull quay.io/frrouting/frr:10.2.1`), and `ospfv2-bird:latest`, built in the ospfv2 checkout (`docker compose --profile bird build bird`).
 
