@@ -102,7 +102,7 @@ examples/            grid.yml, and links from the old template paths to
                      routescope/labs, for one release
 routescope/labs/     the labs routescope runs, one ready-to-run folder
                      per lab, named for it; routescope-labs installs them
-docker-compose.yml   the compose lab: sim, peer, frr, ospfd, bird
+docker-compose.yml   the compose lab: sim, frr, ospfd, bird
 Dockerfile           one image, an entrypoint per role, a test stage
 docs/                user guide, lab commands, the routescope plan
 REVIEW.md            the 2026 review: what was broken, what is next
