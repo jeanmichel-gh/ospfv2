@@ -15,6 +15,7 @@
 #              |                       10.1.12.0/30    10.1.13.0/30
 #         i3 10.255.0.3  level 2                 r2 ---------- r3 (BIRD)
 #                                          10.255.1.2      10.255.1.3
+#                                             r2-r3: 10.1.23.0/30
 #
 # Links: i1-i2 10.0.12.0/30, i1-asbr 10.0.14.0/30, i2-asbr 10.0.24.0/30,
 # i3-asbr 10.0.34.0/30. Each IS-IS router also puts 172.16.N.0/24 (a
@@ -29,7 +30,7 @@
 # - asbr, at both levels, knows every prefix.
 # - It hands everything IS-IS knows to r1 ("redistribute isis"); the
 #   IS-IS metric becomes the MED. "isis metric 50" on asbr's eth3 and
-#   i3's prefixes come to AS 65001 with MED 60.
+#   i3's loopback comes to AS 65001 with MED 60, 172.16.3.0/24 with 50.
 # - The route map ISIS-TO-BGP in asbr/frr.conf marks area 49.0002's
 #   prefixes with community 65000:2; make it deny and they leave AS 65001.
 #
