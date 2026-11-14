@@ -295,7 +295,7 @@ routescope-labs install ospfv2/ospf-bgp
 routescope-labs install ospfv2/isis-bgp
 ```
 
-The labs reuse the names r1, r2 and r3, so run one at a time. Start one from routescope's lab menu. Look at them from the shell:
+The labs reuse the names r1, r2 and r3, but each lab's containers are named `clab-LAB-NODE`, so they can run side by side. Start one from routescope's lab menu. Look at them from the shell:
 
 ```sh
 # in the VM

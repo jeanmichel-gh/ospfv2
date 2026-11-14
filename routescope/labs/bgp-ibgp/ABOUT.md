@@ -11,7 +11,7 @@ Three BGP speakers in AS 65001 peer with one another (iBGP, full mesh) over a tr
   192.168.2.0/24  eth2  10.1.23.0/30  eth1  192.168.3.0/24
 ```
 
-The BGP labs reuse the names r1, r2 and r3, so run one at a time.
+The BGP labs reuse the names r1, r2 and r3. Each lab's containers are named `clab-LAB-NODE`, so the labs can run side by side.
 
 Images: FRR (`docker pull quay.io/frrouting/frr:10.2.1`), and `ospfv2-bird:latest`, built in the ospfv2 checkout (`docker compose --profile bird build bird`).
 
