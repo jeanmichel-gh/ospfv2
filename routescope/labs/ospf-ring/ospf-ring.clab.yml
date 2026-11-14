@@ -15,7 +15,8 @@
 #   docker build -t ospfv2 . && docker compose --profile bird build bird
 # Then, in this folder:
 #   sudo containerlab deploy -t ospf-ring.clab.yml
-# routescope reads this folder as its lab: LAB=$PWD docker compose up -d
+# routescope serves it from ~/labs/ospfv2/ospf-ring once installed:
+#   routescope-labs install ospfv2/ospf-ring
 name: ospf-ring
 
 topology:
