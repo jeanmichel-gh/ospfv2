@@ -17,7 +17,7 @@ nodes:
   - name: sim
     kind: ospfv2-sim
     service: sim
-    profiles: [lab, frr]
+    profiles: [frr]
     address: 10.99.0.10
     config: sim/sim.yml
 
@@ -27,13 +27,6 @@ nodes:
     profiles: [frr]
     address: 10.99.0.20
     config: frr/frr.conf
-
-  - name: peer
-    kind: ospfv2-sim
-    service: peer
-    profiles: [lab]
-    address: 10.99.0.20
-    config: peer/peer.yml
 
   - name: bird
     kind: bird

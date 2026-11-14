@@ -6,12 +6,8 @@
 #
 #   The router lab, on a bridge (10.99.0.0/24), from a lab folder:
 #
-#   docker compose --profile lab up    the simulator floods a 5x5 grid to a second
-#                                      ospfv2 using real raw sockets. Dashboards on
-#                                      :8080 (simulator) and :8081 (peer).
-#
 #   docker compose --profile frr up -d sim frr
-#                                      the same simulator against FRRouting ospfd,
+#                                      the simulator floods a 5x5 grid to FRRouting ospfd,
 #                                      then: docker compose exec frr vtysh -c "show ip ospf neighbor"
 #
 #   docker compose --profile bird up -d bird
@@ -21,7 +17,7 @@
 #                                      is Full. Its socket is on the ospfd-run volume:
 #                                      docker compose exec ospfd ospf-cli
 #
-# The lab folder holds one folder per node (sim/, peer/, frr/, ospfd/), each
+# The lab folder holds one folder per node (sim/, frr/, ospfd/, bird/), each
 # mounted read-write, so configurations saved in the lab land back there.
 # LAB selects it; without it, the lab in routescope/labs/ospf-lab is used.
 # Make your own copy before changing configurations, with routescope's
@@ -51,7 +47,7 @@ services:
   sim:
     hostname: sim
     <<: *ospfv2
-    profiles: [lab, frr]
+    profiles: [frr]
     networks:
       ospflab:
         ipv4_address: 10.99.0.10
@@ -62,21 +58,6 @@ services:
         target: /lab
         bind: { create_host_path: false }
     command: ["run", "/lab/sim.yml", "--web", "0.0.0.0:8080", "--log", "/tmp/ospfv2.log"]
-
-  peer:
-    hostname: peer
-    <<: *ospfv2
-    profiles: [lab]
-    networks:
-      ospflab:
-        ipv4_address: 10.99.0.20
-    ports: ["8081:8080"]
-    volumes:
-      - type: bind
-        source: ${LAB:-./routescope/labs/ospf-lab}/peer
-        target: /lab
-        bind: { create_host_path: false }
-    command: ["run", "/lab/peer.yml", "--web", "0.0.0.0:8080", "--log", "/tmp/ospfv2.log"]
 
   frr:
     hostname: frr

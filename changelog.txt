@@ -1,5 +1,10 @@
 === Unreleased
 
+* ospf-lab drops `peer`, the second ospfv2 that could stand in for FRR.
+  It added nothing FRR does not, and routescope drew a second simulated
+  area for it. The compose `lab` profile goes with it: start the lab
+  with --profile frr
+
 * The labs moved to routescope/labs/<lab>, one folder per lab named for
   it: ospf-lab, ospf-ring, ospf-srl, bgp-ibgp, ospf-bgp, isis-bgp. Each
   has an ABOUT.md and a .gitignore for routescope's runtime state.

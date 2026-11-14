@@ -101,7 +101,7 @@ class TestCLI < Test::Unit::TestCase
       assert_match(/lab created in #{Regexp.escape(dir)}/, out)
       assert_match(/^  routescope-labs install ospfv2\/ospf-lab$/, err)
       assert_match(/export LAB=#{Regexp.escape(dir)}/, out)
-      %w[lab.yml .gitignore tools/frr-start.sh sim/sim.yml peer/peer.yml frr/frr.conf frr/daemons frr/vtysh.conf ospfd/ospfd.conf].each do |f|
+      %w[lab.yml .gitignore tools/frr-start.sh sim/sim.yml frr/frr.conf frr/daemons frr/vtysh.conf ospfd/ospfd.conf].each do |f|
         assert File.file?(File.join(dir, f)), "missing #{f}"
       end
       refute File.exist?(File.join(dir, '.git'))
@@ -335,7 +335,7 @@ class TestCLI < Test::Unit::TestCase
 
   def test_lab_template_files_are_valid
     lab = OSPFv2::CLI::LAB_TEMPLATE
-    %w[sim/sim.yml peer/peer.yml].each { |f| assert_equal 0, run_cli('check', File.join(lab, f))[0], f }
+    %w[sim/sim.yml].each { |f| assert_equal 0, run_cli('check', File.join(lab, f))[0], f }
     nodes = YAML.safe_load(File.read(File.join(lab, 'lab.yml')))['nodes']
     nodes.each { |n| assert File.file?(File.join(lab, n['config'])), "#{n['name']}: #{n['config']}" }
   end

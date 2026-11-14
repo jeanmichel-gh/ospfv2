@@ -32,7 +32,6 @@ Ports the Mac forwards to the VM, in the `-nic` line of `~/vms/ospflab/start.sh`
 | --- | --- |
 | 2222 | SSH |
 | 8080 | Simulator dashboard, http://localhost:8080 |
-| 8081 | Peer dashboard (lab profile) |
 | 8082 | routescope, http://localhost:8082 |
 
 A change to `start.sh` takes effect after a restart of the VM:

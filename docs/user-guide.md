@@ -486,7 +486,7 @@ docker compose --profile frr --profile ospfd down
 
 ### Your own lab folder
 
-The lab's configurations live in a lab folder: one folder per node, `sim/`, `peer/`, `frr/` and `ospfd/`, and `lab.yml`, which lists the nodes. Compose mounts each node's folder read-write, so a configuration you save in the lab lands back in the folder: `commit` in ospf-cli, `write memory` in FRR's vtysh.
+The lab's configurations live in a lab folder: one folder per node, `sim/`, `frr/`, `ospfd/` and `bird/`, and `lab.yml`, which lists the nodes. Compose mounts each node's folder read-write, so a configuration you save in the lab lands back in the folder: `commit` in ospf-cli, `write memory` in FRR's vtysh.
 
 Without `LAB`, compose uses the lab in the repo, `routescope/labs/ospf-lab`, and saved changes show up in `git status` of ospfv2. Make your own copy before changing anything:
 

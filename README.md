@@ -415,15 +415,13 @@ to decode packets at the byte level. Next to a router of the lab:
 `docker-compose.yml` has these setups:
 
 * `docker compose up ospfv2` runs `./lab.yml` on the host network against a real router.
-* `docker compose --profile lab up` runs the simulator and a second ospfv2 as the DUT on
-  a bridge, over real raw sockets. Dashboards on :8080 and :8081.
 * `docker compose --profile frr up -d sim frr` puts FRRouting ospfd in the DUT seat. Then
   `docker compose exec frr vtysh -c "show ip ospf database"`.
 * `docker compose up -d ospfd` adds ospfd as a third router on the bridge, once the
   simulator is Full. Then `docker compose exec ospfd ospf-cli`.
 
 The bridge lab reads its configurations from a lab folder, one folder per node
-(`sim/`, `peer/`, `frr/`, `ospfd/`) plus `lab.yml`, mounted read-write so saved
+(`sim/`, `frr/`, `ospfd/`, `bird/`) plus `lab.yml`, mounted read-write so saved
 configurations land back in it. `LAB` selects the folder; without it, the lab in
 `routescope/labs/ospf-lab` is used. routescope's `routescope-labs install ospfv2/ospf-lab`
 copies it into `~/labs/ospfv2/ospf-lab` and makes it a git repository. `ospfv2 lab new
