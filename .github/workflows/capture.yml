@@ -23,7 +23,7 @@ jobs:
       - name: containerlab
         run: |
           bash -c "$(curl -sL https://get.containerlab.dev)"
-          docker pull -q quay.io/frrouting/frr:10.2.1
+          test/lab/pull.sh quay.io/frrouting/frr:10.2.1
       - name: ospf-bgp lab up
         run: BGP_TEST_DIR="$RUNNER_TEMP/bgptest" KEEP_LAB=1 test/lab/bgp_test.sh ospf-bgp
       - name: capture
