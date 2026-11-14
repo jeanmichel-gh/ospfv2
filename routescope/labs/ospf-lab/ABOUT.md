@@ -30,6 +30,12 @@ Measured on 2026-11-14 with all four routers up:
 - **Timers:** hello 2 s and dead 8 s on all four. ospfd's dead interval is
   four times its hello unless set.
 
+## Convergence
+
+The scenario `edge-down` measured on 2026-11-14: ospfd lost edge's routes 81 ms after the link went down, and had them back 5.1 s after it came up.
+
+ospfd runs SPF with RFC 8405's back-off, at its default values (section 6): the first change after a quiet spell waits 50 ms, and a change within 10 s of the last one, once 500 ms have passed, waits 5 s. A link back up 1.3 s after it went down is such a change, so its routes come back about 5 s later. Measured on ospf-lab on 2026-11-14 with r5c5--edge: up 1.3 s after down, ospfd's SPF waited 5000.7 ms; up 15 s after down, it waited 50.1 ms. `show ospf log` shows each run's wait.
+
 ## Roles
 
 The simulator and ospfd run at priority 0, so FRR is the DR and there is no BDR. That is a choice, not a need: give ospfd a priority above 0 and it becomes the BDR, and the simulator keeps an adjacency with both (`docs/design/sim-dr-bdr.md`).

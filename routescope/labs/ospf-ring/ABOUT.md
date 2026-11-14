@@ -13,7 +13,7 @@ The simulator floods a 5x5 grid to FRR on a LAN. FRR, ospfd and BIRD are joined 
      eth2  10.0.34.0/30  eth1
 ```
 
-Try: take `frr`'s eth2 down, and ospfd reaches 2.2.2.2 through BIRD. The scenario `ring-failover` does it and measures it: measured on 2026-11-14, ospfd took the route through BIRD, at cost 20, 65 ms after the link went down, and had it back directly, at cost 10, 11 s after the link came up, the adjacency having to form again first.
+Try: take `frr`'s eth2 down, and ospfd reaches 2.2.2.2 through BIRD. The scenario `ring-failover` does it and measures it: measured on 2026-11-14, ospfd took the route through BIRD, at cost 20, 65 ms after the link went down, and had it back directly, at cost 10, 11 s after the link came up: the adjacency forms again first, and ospfd's SPF back-off (RFC 8405) holds the run that follows for up to 5 s. See ospf-lab's ABOUT.md, "Convergence".
 
 ## What it holds
 
