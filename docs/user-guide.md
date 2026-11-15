@@ -100,6 +100,25 @@ exec qemu-system-aarch64 \
 
 `~/vms/ospflab/start.sh` returns at once and the VM boots in the background in about 20 seconds. The `hostfwd` entries map ports on the Mac to the VM: 2222 to SSH, 8080 and 8081 to the web dashboards. They listen on 127.0.0.1 only, so nothing outside the Mac reaches the VM.
 
+#### Let the Mac's own apps come first
+
+A busy VM, running labs or routescope's CI runners, can slow the apps on the Mac. Give QEMU a lower priority: the VM still gets whatever the Mac is not using, and the apps you are looking at come first. An idle VM costs the Mac next to nothing either way.
+
+To start it that way every time, put `nice -n 10` in front of `qemu-system-aarch64` in `start.sh`:
+
+```sh
+exec nice -n 10 qemu-system-aarch64 \
+```
+
+To lower the VM that is already running, without a restart. It lasts until the VM stops. Lowering your own process needs no `sudo`; raising it back does.
+
+```sh
+renice +10 -p "$(cat ~/vms/ospflab/vm.pid)"
+ps -o pid,ni,comm -p "$(cat ~/vms/ospflab/vm.pid)"     # NI reads 10
+```
+
+`vm.pid` is the file `-pidfile` writes. If the VM was started some other way, `pgrep -f qemu-system` finds it. Do not run `start.sh` again while the VM is up: that starts a second VM on the same disk.
+
 ### 5. Log in with SSH
 
 Add this to `~/.ssh/config` on the Mac:
