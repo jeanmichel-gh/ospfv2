@@ -4,10 +4,17 @@ name: CI
 # master through push. A branch pushed without a pull request gets no CI;
 # run it by hand with workflow_dispatch. With both triggers on every
 # branch, each push to a pull request ran the whole workflow twice.
+#
+# A draft pull request runs the unit tests only, the checks master
+# requires. Marked ready (ready_for_review), it runs everything. The
+# lab and interop jobs are the slow ones, and an agent pushes to a draft
+# often while it works. Run them earlier with "Run workflow" on the
+# draft's branch.
 on:
   push:
     branches: [master]
   pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
   workflow_dispatch:
 
 # A new push to a pull request cancels that pull request's older run.
@@ -37,6 +44,7 @@ jobs:
   # namespaces: adjacency, database sync, authentication, routing tables
   # that must match FRR's, and routes in the kernel over netlink.
   interop-frr:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -72,6 +80,7 @@ jobs:
       - run: sudo -E env "PATH=$PATH" bundle exec ruby -Ilib -Itest test/integration/netlink_test.rb
 
   docker:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -83,6 +92,7 @@ jobs:
   # routes installed, configurations saved back to the lab folder with
   # the right owner, and ospfd's event stream. Same script as in the VM.
   lab:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -95,6 +105,7 @@ jobs:
   # The containerlab lab: "lab new --containerlab", deployed with
   # containerlab, a link failing and ospfd going round by BIRD.
   clab:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -109,6 +120,7 @@ jobs:
   # The BGP labs: three iBGP speakers in one AS (FRR, FRR, BIRD), then an
   # OSPF domain redistributed into BGP and carried into that AS.
   bgp:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
@@ -126,6 +138,7 @@ jobs:
   # it, the simulated area's routes on ospfd through it. Its answers to a
   # few commands are kept as annotations, for routescope's driver.
   srl:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:

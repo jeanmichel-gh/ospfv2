@@ -252,7 +252,8 @@ The FRR tests need root, iproute2 and FRR, and run only with
 `OSPFV2_FRR=1`. Without it they skip: `rake test` measured 674 tests, 25
 of them omitted, on the same day. The lab scripts replace a lab you
 are running; start yours again afterwards. CI runs every tier, in
-`.github/workflows/ci.yml`.
+`.github/workflows/ci.yml`; a draft pull request runs the unit tests
+only, and the rest once it is marked ready.
 
 **AppArmor confines FRR's ospfd on newer Ubuntu.** Ubuntu's `apparmor`
 package ships `/etc/apparmor.d/ospfd` (26.04 does, 24.04 does not). It
