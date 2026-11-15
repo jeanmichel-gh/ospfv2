@@ -340,9 +340,9 @@ From `docs/console-plan.md`, "Changes needed in ospfv2", and
 | Recorded API fixtures in `test/fixtures/api/` | Replaced | routescope's `docs/design/api-contract.md`: `test/support/routescope_vocabulary.rb` is what routescope reads, copied from its `rake vocabulary`; `test/unit/daemon/routescope_vocabulary_test.rb` holds ospfd's API to it. Refresh the copy when routescope reads something new. |
 | systemd unit for a native ospfd | Not started | No unit file in the repo |
 | Simulator: link metric | Done | `web/server.rb:107` |
-| Simulator: refresh or flush one LSA | Not started | `simulator.rb:174,184` has `refresh_all` and `flush_all` only |
-| Simulator: add and withdraw externals and summaries at runtime | Not started | Only from the topology file |
-| Simulator: a streaming event endpoint | Not started | `GET /api/events` is polled with `since` |
+| Simulator: refresh or flush one LSA | Done | `Simulator#lsa_refresh`, `#lsa_flush`; `POST /api/lsa/refresh`, `/flush`. `docs/design/sim-lsa-actions.md` |
+| Simulator: add and withdraw externals and summaries at runtime | Done, the topology's own | `POST /api/routes/withdraw`, `/advertise`; no new prefixes, by the owner's choice |
+| Simulator: a streaming event endpoint | Done | `GET /api/events/stream`; `GET /api/info` lists the routes. routescope reads neither yet |
 
 ### ospf-cli
 

@@ -90,6 +90,8 @@ module OSPFv2
           -a, --area ID             override simulator.area
               --device DEV          bind the raw socket to DEV
           -d, --debug               hex dump packets in the trace
+              --min-ls-interval S   seconds between two instances of one LSA,
+                                    0 to 5 (default 5, RFC 2328); 0 sends at once
 
         Topology files are described in README.md and examples/. The labs are in routescope/labs/.
       TXT
@@ -103,6 +105,7 @@ module OSPFv2
       opts = run_options(argv)
       topo = load_topology(argv.shift || raise(ArgumentError, 'run needs a topology file (try: ospfv2 init > lab.yml)'), opts)
       sim = Simulator.new(topo, log: open_log(opts[:log]), debug: opts[:debug])
+      sim.min_ls_interval = opts[:min_ls_interval] if opts.key?(:min_ls_interval)
       serve(sim, opts)
     end
 
@@ -114,6 +117,7 @@ module OSPFv2
       s = topo.settings
       sim = Simulator.new(topo, transport: Transport::Loopback.new(hub, s.address), log: open_log(opts[:log] || File::NULL),
                                 debug: opts[:debug])
+      sim.min_ls_interval = opts[:min_ls_interval] if opts.key?(:min_ls_interval)
       net = IPAddr.new(s.interface)
       peer_addr = [2, 1, 3].map { |i| IP.create(net.to_i + i).to_s }.find { |a| a != s.address }
       peer = Neighbor.new(router_id: '2.2.2.2', area_id: s.area, src_addr: "#{peer_addr}/#{IPAddr.new(s.interface).prefix}",
@@ -447,6 +451,8 @@ module OSPFv2
         o.on('-a', '--area ID') { |v| (opts[:override] ||= {})[:area] = v }
         o.on('--device DEV') { |v| (opts[:override] ||= {})[:device] = v }
         o.on('-d', '--debug') { opts[:debug] = true }
+        # RFC 2328's MinLSInterval is 5 s; 0 sends every change at once.
+        o.on('--min-ls-interval SECONDS', Float, 'from 0 to 5, default 5') { |v| opts[:min_ls_interval] = v }
       end.parse!(argv)
       opts
     end

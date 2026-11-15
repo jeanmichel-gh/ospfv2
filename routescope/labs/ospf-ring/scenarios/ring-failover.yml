@@ -1,0 +1,25 @@
+# A scenario for routescope's Scenarios panel (routescope docs/scenarios.md).
+name: Lose a ring link
+description: >
+  FRR's link to ospfd fails. ospfd reaches FRR's loopback the other way
+  round, through BIRD, at cost 20; when the link comes back, directly
+  again at cost 10. Measures both.
+timeout: 120
+
+steps:
+  - expect: { neighbors: { node: ospfd, full: 2 } }
+    within: 60
+  - expect: { route: { node: ospfd, prefix: 2.2.2.2/32, cost: 10 } }
+    within: 30
+  - interface: frr:eth2
+    state: down
+  - expect: { route: { node: ospfd, prefix: 2.2.2.2/32, cost: 20 } }
+    within: 15
+    measure: rerouted
+  - interface: frr:eth2
+    state: up
+  - expect: { route: { node: ospfd, prefix: 2.2.2.2/32, cost: 10 } }
+    within: 30
+    measure: restored
+  - expect: converged
+    within: 30

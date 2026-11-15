@@ -13,15 +13,18 @@ Two AS domains. AS 65000 runs IS-IS on FRR: i1 and i2 at level 1 in area 49.0001
              |                       10.1.12.0/30    10.1.13.0/30
         i3 10.255.0.3  level 2                 r2 ---------- r3 (BIRD)
                                          10.255.1.2      10.255.1.3
+                                            r2-r3: 10.1.23.0/30
 ```
 
-Things to watch:
-- i1 and i2 see nothing of area 49.0002. They get there by a default route that follows asbr's attached bit.
-- i3 sees nothing of area 49.0001: FRR does not carry level 1 prefixes into level 2. asbr gives it a default route at level 2.
-- The IS-IS metric becomes the BGP MED. `isis metric 50` on asbr's eth3, and i3's prefixes reach AS 65001 with MED 60.
-- The route map ISIS-TO-BGP in `asbr/frr.conf` gives area 49.0002's prefixes community 65000:2. Make it deny and they leave AS 65001.
+Links: i1-i2 10.0.12.0/30, i1-asbr 10.0.14.0/30, i2-asbr 10.0.24.0/30, i3-asbr 10.0.34.0/30. Each IS-IS router also puts 172.16.N.0/24 (a static blackhole route) into IS-IS. r1 gives AS 65000's routes to r2 and r3 with itself as next hop.
 
-The BGP labs reuse the names r1, r2 and r3, so run one at a time.
+Things to watch:
+- i1 and i2 see none of area 49.0002's prefixes, only asbr's own link to it (10.0.34.0/30). They reach i3, and AS 65001, by a default route that follows asbr's attached bit.
+- i3 sees none of area 49.0001's prefixes, only asbr's own links there (10.0.14.0/30, 10.0.24.0/30): FRR 10.2.1 does not carry level 1 prefixes into level 2. asbr's level 2 LSP holds its own prefixes and a default route, which i3 uses for the rest.
+- The IS-IS metric becomes the BGP MED: i3's loopback reaches AS 65001 with MED 20, and 172.16.3.0/24 with MED 10. Set `isis metric 50` on asbr's eth3 and they become 60 and 50.
+- The route map ISIS-TO-BGP in `asbr/frr.conf` gives area 49.0002's prefixes (10.255.0.3/32 and 172.16.3.0/24) community 65000:2. Make entry 10 deny and both leave AS 65001.
+
+The BGP labs reuse the names r1, r2 and r3. Each lab's containers are named `clab-LAB-NODE`, so the labs can run side by side.
 
 Images: FRR (`docker pull quay.io/frrouting/frr:10.2.1`), and `ospfv2-bird:latest`, built in the ospfv2 checkout (`docker compose --profile bird build bird`).
 

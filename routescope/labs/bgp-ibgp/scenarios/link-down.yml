@@ -1,0 +1,29 @@
+# A scenario for routescope's Scenarios panel (routescope docs/scenarios.md).
+name: Lose the r1-r2 link
+description: >
+  The sessions run on the link addresses and there is no IGP. When the
+  r1-r2 link fails, r1 loses r2's routes once the hold time (9 s) runs
+  out. r3 still holds them but does not pass them on: a route learned
+  from one iBGP peer is not sent to another. When the link comes back,
+  the session and the routes return. Measures both.
+timeout: 120
+
+steps:
+  - expect: { bgp_drained: {} }
+    within: 60
+  - expect: { bgp_prefix: { node: r1, prefix: 192.168.2.0/24, next_hop: 10.1.12.2 } }
+    within: 15
+  - interface: r1:eth1
+    state: down
+  - expect: { bgp_prefix: { node: r1, prefix: 192.168.2.0/24, present: false } }
+    within: 15
+    measure: lost
+  - expect: { bgp_prefix: { node: r3, prefix: 192.168.2.0/24, next_hop: 10.1.23.1 } }
+  - expect: { bgp_prefix: { node: r1, prefix: 10.255.1.3/32, next_hop: 10.1.13.2 } }
+  - interface: r1:eth1
+    state: up
+  - expect: { bgp_prefix: { node: r1, prefix: 192.168.2.0/24, next_hop: 10.1.12.2 } }
+    within: 30
+    measure: restored
+  - expect: { bgp_drained: {} }
+    within: 30
