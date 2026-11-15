@@ -1,6 +1,7 @@
 # The simulator acts on one LSA, toggles routes, and streams its events
 
-Status: proposed 2026-11-15. Not approved. Not started.
+Status: proposed 2026-11-15. The owner answered its three questions the
+same day (below). Not started.
 
 ## The problem
 
@@ -50,9 +51,10 @@ means every LSA whose advertising router it proxies
 simulator's database too, and it must not flush those.
 
 Today `refresh_all` re-originates at once, with no MinLSInterval wait
-(`Simulator#reoriginate` calls `force_refresh`). I do not know whether
-that is on purpose, for a test tool that wants to push a router, or an
-oversight. The design below keeps that behaviour and reports it.
+(`Simulator#reoriginate` calls `force_refresh`), and so does every other
+action. The owner's answer: do not ignore the 5 s rule. ospfd already
+keeps it (`core/instance.rb`, `originate`, around line 416), so the
+simulator follows ospfd's way, below.
 
 ## The design
 
@@ -69,9 +71,8 @@ POST /api/lsa/flush    {"type":"as_external","id":"203.0.113.0","advr":"1.1.4.4"
 ```
 
 Both answer the LSA's row, as `GET /api/lsdb` gives it: sequence number,
-age, checksum. A refresh also says `"within_min_ls_interval": true` when
-the last origination of that LSA was under 5 s ago, so a test can see it
-pushed the rule.
+age, checksum. When MinLSInterval holds the new instance back, the answer
+says so instead: `"deferred_ms": 3120`, the time until it goes out.
 
 Rules:
 
@@ -91,7 +92,39 @@ Rules:
   that honestly.
 
 Each action writes one event, kind `lsdb`, naming the LSA and its new
-sequence number.
+sequence number, when the instance goes out.
+
+### MinLSInterval, for every origination
+
+Every LSA the simulator originates waits out MinLSInterval (5 s, RFC 2328
+12.4 and Appendix B) after its last instance. This covers the new actions
+and the old ones: link up and down, metric, flap, `refresh_all`,
+`restore`. It is ospfd's way:
+
+- The simulator remembers when it last sent each LSA, by its key.
+- A change inside the 5 s starts one timer for that LSA. More changes
+  meanwhile join it. When the timer fires, the LSA goes out once, with
+  the contents it has then.
+- A flush is an instance too. An advertise or refresh right after a
+  flush waits, as ospfd's `flush` says: "the next origination waits
+  MinLSInterval, or routers two hops away drop it (13 step 5a)".
+- A held LSA shows in `GET /api/lsdb` with `"deferred_ms"`, and in
+  `/api/state`'s counts as `deferred`.
+
+What this changes for the old actions:
+
+- **A flap faster than 5 s is folded.** A link down and up again inside
+  5 s may send nothing, because when the timer fires the router LSA is
+  the same as before. The router under test never sees the flap. The
+  flap's `interval` keeps its range (0.5 s up), so nothing a caller sends
+  is refused, and the answer and the event say when an instance was held.
+  The pane's flap control suggests 5 s or more.
+- **Two metric changes inside 5 s** send one instance, with the second
+  metric.
+
+The interval is 5 s. Tests may build a Simulator with a shorter one
+(`min_ls_interval:`, a constructor option, not a topology setting), so
+the suite does not sleep. A lab file cannot change it.
 
 ### 2. Externals and summaries: withdraw and advertise
 
@@ -119,7 +152,31 @@ This first version toggles only what the topology defines. A scenario
 then reads the same topology file to know what can move. Adding a prefix
 that is not in the file is question 2 below.
 
-### 3. Streaming events
+### 3. `GET /api/info`
+
+The owner's answer to question 3: the simulator says what it has, as
+ospfd's `api.info` does.
+
+```
+GET /api/info
+{"daemon":"ospfv2-sim","version":"1.0.0","api":1,
+ "routes":["GET /api/state", "...", "POST /api/lsa/refresh", "GET /api/events/stream"]}
+```
+
+- `version` is the gem's, `OSPFv2::VERSION`.
+- `api` is a number raised when a route changes in an incompatible way,
+  as ospfd's `Api::VERSION`.
+- `routes` is every route the server answers, generated from the same
+  table `call` routes on, so the list cannot drift from the code.
+- No header needed: it is a GET, and it says nothing a page of the lab
+  cannot already read.
+
+routescope's contract (its `docs/design/api-contract.md`) asks
+`api.info` of each daemon and greys what an older one lacks. The Sim
+driver does the same with this: a simulator without `/api/info` (a 404)
+is an older one, polled as today, with the new actions greyed.
+
+### 4. Streaming events
 
 ```
 GET /api/events/stream?since=N
@@ -165,8 +222,10 @@ with one parser:
   ```
 - The simulator pane gains Refresh and Flush on a selected LSA row, and
   Withdraw and Advertise on a router's prefixes.
-- `Sim::EVENTS` reads `/api/events/stream` when the simulator's API says
-  it has it, and polls as today when not. How it asks is question 3.
+- `Sim::EVENTS` reads `/api/events/stream` when `/api/info` lists it,
+  and polls as today when not.
+- The driver asks `/api/info` and greys the actions an older simulator
+  lacks, as the contract does for the daemons.
 
 ## Tests
 
@@ -179,9 +238,15 @@ In ospfv2:
   - an LSA of the router under test: refused;
   - the simulator's own router LSA: refresh allowed, flush refused;
   - an external withdrawn then advertised; a summary the same;
-  - `within_min_ls_interval` set on a second refresh inside 5 s.
+  - MinLSInterval, with a short interval set in the test: a second
+    refresh inside it is held and goes out once when the timer fires;
+    two metric changes inside it send one instance with the second
+    metric; an advertise right after a withdraw waits; a refresh after
+    the interval goes out at once.
 - `Web::Server#call`: each new route, its 400, 404 and 409, and the
   `X-OSPFv2` header refusal (403) for each POST.
+- `GET /api/info`: every route `call` answers is in `routes`, and no
+  listed route answers 404.
 - The stream: replay after `since`, a new event arriving, a keepalive
   with a short interval set in the test, and the cap.
 - One FRR interop check, where the interop suite runs FRR: an external
@@ -193,33 +258,31 @@ scenario validation test, and the stream read against a fake.
 
 ## Out of scope
 
-- Enforcing MinLSInterval in the simulator. It keeps re-originating at
-  once and reports when it did so inside 5 s.
 - Changing an external's metric or type at runtime. It is the same
   mechanism and can follow.
 - NSSA type 7 LSAs. The simulator has no NSSA (`REVIEW.md` item 8).
 - The simulator's protocol stack debts in `REVIEW.md`. This works with
   the stack as it is.
 
-## Questions for the owner
+## The owner's answers, 2026-11-15
 
-1. **MinLSInterval.** Keep re-originating at once and report it, as
-   proposed, or wait out the 5 s as RFC 2328 12.4 asks a real router to?
-2. **New prefixes.** Is toggling the topology's own externals and
-   summaries enough, or should `routes.advertise` also take a prefix that
-   is not in the file, with its metric and type?
-3. **How routescope learns the stream exists.** The simulator has no
-   `api.info`. Add a small `GET /api/info` with its version and routes,
-   as ospfd's `api.info` gives, or let routescope try the stream and fall
-   back on a 404?
+1. **MinLSInterval:** "don't ignore the 5 s rule". Every origination
+   waits it out, as ospfd does (section 1, "MinLSInterval").
+2. **New prefixes:** "no new prefixes". Only the topology's own
+   externals and summaries are withdrawn and advertised.
+3. **How routescope learns what the simulator has:** "an api info is
+   warranted". `GET /api/info` (section 3).
 
 ## Work, once approved
 
-1. `Simulator#lsa_refresh`, `#lsa_flush`, with the 14.1 rule and tests.
-2. `Simulator#routes_withdraw`, `#routes_advertise`, with tests.
-3. The four POST routes, and their tests.
-4. Event `data` and full timestamps; `GET /api/events/stream`, with tests.
-5. The FRR interop check.
-6. `docs/user-guide.md` and CLAUDE.md's table move the three rows to
+1. MinLSInterval in `Simulator#reoriginate` and `#flush_all`, for every
+   action, with its tests; the existing tests built with a short
+   interval.
+2. `Simulator#lsa_refresh`, `#lsa_flush`, with the 14.1 rule and tests.
+3. `Simulator#routes_withdraw`, `#routes_advertise`, with tests.
+4. The four POST routes and `GET /api/info`, and their tests.
+5. Event `data` and full timestamps; `GET /api/events/stream`, with tests.
+6. The FRR interop check.
+7. `docs/user-guide.md` and CLAUDE.md's table move the three rows to
    done.
-7. Then the routescope pull request.
+8. Then the routescope pull request.
