@@ -114,7 +114,8 @@ sim.flap('r2c2--r2c3', count: 5, interval: 10)
 | `init` | Print a starter topology. `--grid CxR`, `--interface ADDR/LEN` |
 
 `run` also takes `-i ADDR/LEN`, `-r ID`, `-a AREA` and `--device DEV` to override
-the file. The original flags still work: `ospfv2 -i 192.168.1.10/24 -g 3x3 -S 10 -E 20`.
+the file, and `--min-ls-interval S` (0 to 5 seconds, default 5) to space two instances
+of one LSA. The original flags still work: `ospfv2 -i 192.168.1.10/24 -g 3x3 -S 10 -E 20`.
 
 ### Console
 
@@ -138,9 +139,14 @@ The dashboard listens on 127.0.0.1 unless you pass an address. The JSON API behi
 | GET | `/api/state` | neighbor (the adjacency with the DR), neighbors (every router heard, its role and our state with it), counts, graph, links |
 | GET | `/api/lsdb` | LSA rows; `/api/lsdb.txt?format=junos\|ios&verbose=1` for text |
 | GET | `/api/lsa?type=router&id=0.1.0.1&advr=0.1.0.1` | one LSA, verbose |
-| GET | `/api/events?since=N` | events after sequence N |
-| POST | `/api/links/:id/up\|down\|toggle\|flap` | flap takes `{"count":3,"interval":5}` |
+| GET | `/api/info` | `daemon`, `version`, `api` and every route served |
+| GET | `/api/events?since=N` | events after sequence N; each has `time` (HH:MM:SS), `at` (UTC, ms) and `data` |
+| GET | `/api/events/stream?since=N` | the same, one JSON line each as they happen, in ospfd's `events.subscribe` shapes, a keepalive line after 15 quiet seconds; 8 streams at most |
+| POST | `/api/links/:id/up\|down\|toggle\|flap\|metric` | flap takes `{"count":3,"interval":5}`, metric `{"metric":20}` |
 | POST | `/api/refresh`, `/api/flush`, `/api/aging` | aging takes `{"on":true}` |
+| POST | `/api/lsa/refresh`, `/api/lsa/flush` | one LSA the simulator originates: `{"type":"router","id":"0.1.0.1","advr":"0.1.0.1"}` |
+| POST | `/api/routes/withdraw`, `/api/routes/advertise` | one of the topology's externals or summaries: `{"router":"edge","prefix":"50.0.0.0/24"}` |
+| POST | `/api/min-ls-interval` | `{"seconds":2}`, from 0 to 5 |
 
 POST requests need an `X-OSPFv2: 1` header. It stops other web pages from driving the
 simulator through your browser.
@@ -442,6 +448,14 @@ defaults plus `NET_RAW` and `NET_ADMIN`, to write its configuration and install 
   and logged, the way a router would. So are packets with a bad checksum.
 * Taking a link down removes the point-to-point entries from both router LSAs, keeps
   the stubs, bumps the sequence numbers and floods the new instances.
+* Two instances of one LSA are at least MinLSInterval apart, 5 s (RFC 2328 12.4). A
+  change inside it is held, and the LSA goes out once when it runs out, with what it
+  holds then. So a link flapped faster than 5 s sends one new instance with the same
+  links, and the router under test sees no flap. `--min-ls-interval`, or
+  `POST /api/min-ls-interval`, sets it from 0 to 5; 0 sends every change at once.
+* Flushing one LSA, or withdrawing an external or summary, is premature aging (RFC 2328
+  14.1): MaxAge, the same sequence number. Only LSAs the simulator originates can be
+  flushed, and not its own router LSA, which ties the area to the router under test.
 
 Supported: router, network, summary, ASBR summary, AS external and TE opaque LSAs;
 hello, DD, LS request, LS update and LS ack packets; null authentication.

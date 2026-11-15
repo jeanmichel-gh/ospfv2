@@ -23,6 +23,15 @@ class TestCLI < Test::Unit::TestCase
     assert_match(/\A ?ospfv2 \d+\.\d+\.\d+/, run_cli('version')[1])
   end
 
+  # --min-ls-interval: seconds from 0 to 5 (docs/design/sim-lsa-actions.md).
+  def test_min_ls_interval_option
+    cli = OSPFv2::CLI.new(out: StringIO.new, err: StringIO.new)
+    assert_equal({ min_ls_interval: 2.5 }, cli.send(:run_options, %w[--min-ls-interval 2.5]))
+    assert_equal({ min_ls_interval: 0.0 }, cli.send(:run_options, %w[--min-ls-interval 0]))
+    assert_raise(OptionParser::InvalidArgument) { cli.send(:run_options, %w[--min-ls-interval x]) }
+    assert_match(/--min-ls-interval S/, run_cli[1])
+  end
+
   def test_unknown_command
     rc, _, err = run_cli('frobnicate')
     assert_equal 2, rc

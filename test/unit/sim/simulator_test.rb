@@ -21,7 +21,7 @@ class TestSimulator < Test::Unit::TestCase
 
   def setup
     @t = CaptureTransport.new('192.168.1.1')
-    @sim = Simulator.new(topo, transport: @t)
+    @sim = Simulator.new(topo, transport: @t, min_ls_interval: 0)
   end
 
   def teardown
@@ -121,7 +121,7 @@ class TestSimulator < Test::Unit::TestCase
 
   def test_initially_down_link
     t = Topology.from_hash(grid: { columns: 2, rows: 1 }, links: [{ from: 'r1c1', to: 'sim' }, { from: 'r1c2', to: 'sim', state: 'down' }])
-    sim = Simulator.new(t, transport: CaptureTransport.new)
+    sim = Simulator.new(t, transport: CaptureTransport.new, min_ls_interval: 0)
     refute sim.ls_db.find_router_lsa('1.1.1.1').has_link?(1, '0.1.0.2')
     assert sim.ls_db.find_router_lsa('1.1.1.1').has_link?(1, '0.1.0.1')
   end
@@ -150,7 +150,7 @@ class TestSimulator < Test::Unit::TestCase
   end
 
   def test_full_on_p2p_advertises_p2p_link
-    sim = Simulator.new(topo(network_type: 'p2p'), transport: CaptureTransport.new)
+    sim = Simulator.new(topo(network_type: 'p2p'), transport: CaptureTransport.new, min_ls_interval: 0)
     sim.start
     sim.neighbor.instance_variable_set(:@neighbor_router_id, Neighbor::RouterId.new('2.2.2.2'))
     sim.synchronize { sim.neighbor.change_state(NeighborState::Full.new, 'test') }

@@ -1,7 +1,8 @@
 # The simulator acts on one LSA, toggles routes, and streams its events
 
-Status: proposed 2026-11-15. The owner answered its three questions the
-same day (below). Not started.
+Status: approved 2026-11-15, with the owner's answers below. Built in
+this pull request. Where the build differs from the first draft, this
+document now says what was built.
 
 ## The problem
 
@@ -114,17 +115,28 @@ and the old ones: link up and down, metric, flap, `refresh_all`,
 What this changes for the old actions:
 
 - **A flap faster than 5 s is folded.** A link down and up again inside
-  5 s may send nothing, because when the timer fires the router LSA is
-  the same as before. The router under test never sees the flap. The
+  5 s sends one new instance when the timer fires, with the same links
+  as before. The router under test sees a new sequence number and no
+  flap. The
   flap's `interval` keeps its range (0.5 s up), so nothing a caller sends
   is refused, and the answer and the event say when an instance was held.
   The pane's flap control suggests 5 s or more.
 - **Two metric changes inside 5 s** send one instance, with the second
   metric.
 
-The interval is 5 s. Tests may build a Simulator with a shorter one
-(`min_ls_interval:`, a constructor option, not a topology setting), so
-the suite does not sleep. A lab file cannot change it.
+The interval is 5 s by default, and can be set from 0 to 5 s: the owner
+changed answer 1 to "a switch to turn it off or a means to set
+MinLSInterval with a value between 0 and 5". One value does both; 0 is
+off, and every change goes out at once.
+
+- `POST /api/min-ls-interval {"seconds": 2}` at runtime. Lowering it
+  makes each held LSA due from the new value, so what is due goes out at
+  once. `/api/state` gives `min_ls_interval`.
+- `ospfv2 run --min-ls-interval 2`, and `demo`, at start.
+- `Simulator.new(..., min_ls_interval:)` in Ruby. Tests pass 0, or a
+  short interval, so the suite does not sleep.
+
+A topology file does not set it.
 
 ### 2. Externals and summaries: withdraw and advertise
 
@@ -194,16 +206,17 @@ with one parser:
 
 - Events after `since` come first, then new ones as they happen.
 - A keepalive line every 15 s, as ospfd's `KEEPALIVE`.
-- `time` becomes a full UTC timestamp with milliseconds. Today it is
-  `HH:MM:SS`, and routescope guesses the date.
+- In the stream, `time` is a full UTC timestamp with milliseconds.
+  `GET /api/events` keeps `time` as `HH:MM:SS`, because routescope's
+  poller parses that shape, and adds the full one as `at`.
 - `data` carries what the text says, as fields. For an LSA action:
   `{"lsas":[{"type":"router","id":"1.1.2.3","advr":"1.1.2.3","seq":"0x80000005"}]}`.
   That is what the console needs to follow one LSA instance.
 - The server already runs one thread per connection, so a stream holds
   one thread while it lasts. It ends when the client goes. At most 8
   streams at once; the ninth gets 503.
-- `GET /api/events` stays as it is. Its events gain the same `data`
-  field. Nothing is removed, so an older routescope keeps working.
+- `GET /api/events` stays as it is. Its events gain `at` and `data`.
+  Nothing is removed, so an older routescope keeps working.
 
 ### What routescope does with it, in a routescope pull request after
 
@@ -267,7 +280,11 @@ scenario validation test, and the stream read against a fake.
 ## The owner's answers, 2026-11-15
 
 1. **MinLSInterval:** "don't ignore the 5 s rule". Every origination
-   waits it out, as ospfd does (section 1, "MinLSInterval").
+   waits it out, as ospfd does (section 1, "MinLSInterval"). Then,
+   during the build: "the simulator should be able to not respect the
+   MinLSInterval", as "a switch to turn it off or a means to set
+   MinLSInterval with a value between 0 and 5". Built as the value, 0 to
+   5 s, default 5.
 2. **New prefixes:** "no new prefixes". Only the topology's own
    externals and summaries are withdrawn and advertised.
 3. **How routescope learns what the simulator has:** "an api info is

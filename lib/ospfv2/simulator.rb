@@ -1,6 +1,7 @@
 # frozen_string_literal: true
 
 require 'monitor'
+require 'ipaddr'
 require 'time'
 require 'stringio'
 require_relative '../ospfv2'
@@ -17,7 +18,15 @@ module OSPFv2
   #   sim.start
   #   sim.link_down('r1c1--r1c2')
   class Simulator
-    Event = Struct.new(:seq, :time, :kind, :text, keyword_init: true)
+    # time: the clock time, HH:MM:SS, as it always was. at: the same
+    # moment in full, UTC with milliseconds. data: what text says, as
+    # fields; for an LSA action, lsas: [{type, id, advr, seq}].
+    Event = Struct.new(:seq, :time, :at, :kind, :text, :data, keyword_init: true)
+
+    # No such LSA, router or prefix: the web API answers 404.
+    class NotFound < StandardError; end
+
+    LSA_TYPES = %w[router network summary asbr_summary as_external].freeze
 
     # A topology link and the LSDB link that implements it.
     class LinkState
@@ -50,13 +59,22 @@ module OSPFv2
 
     # transport: optional Transport (default raw socket on the interface)
     # log:       IO or file name for protocol traces (default: discard)
-    def initialize(topology, transport: nil, log: nil, debug: false)
+    # min_ls_interval: seconds between two instances of one LSA, RFC 2328
+    #            12.4. MinLSInterval, 5 s; tests pass less so they do not
+    #            sleep. A topology file cannot change it.
+    def initialize(topology, transport: nil, log: nil, debug: false, min_ls_interval: OSPFv2::MinLSInterval)
       @topology = topology
       @lock = Monitor.new
+      @event_cond = @lock.new_cond
       @events = []
       @event_seq = 0
       @flaps = {}
       @flushed_seq = {}
+      @flushed_lsas = {} # key => an LSA flushed on its own, to bring back
+      @min_ls_interval = min_ls_interval.to_f
+      @last_sent = {}    # key => monotonic time its last instance went out
+      @held = {}         # key => { due:, floor:, why: }, an instance MinLSInterval holds
+      @releaser = nil    # the thread that sends held instances when due
       @log = log || StringIO.new
       build_lsdb
       build_neighbor(transport, debug)
@@ -79,6 +97,7 @@ module OSPFv2
       @flaps.each_value(&:kill)
       @flaps.clear
       synchronize do
+        settle_held
         @neighbor.stop
         event :info, 'neighbor stopped'
       end
@@ -169,11 +188,14 @@ module OSPFv2
     end
 
     # Re-originates every LSA the simulator owns (new sequence numbers).
-    # Re-originates every LSA the simulator owns (new sequence numbers).
     # After a flush, rebuilds them from the topology first.
+    # A flushed LSA, whole or one of them, is rebuilt from the topology
+    # first, so refresh_all brings everything back.
     def refresh_all
       synchronize do
         next restore if flushed?
+        @flushed_lsas.each_value { reinsert(_1) }
+        @flushed_lsas.clear
         reoriginate(@ls_db.all_proxied, 'refresh of all originated LSAs')
       end
     end
@@ -183,11 +205,14 @@ module OSPFv2
     # them back from the topology.
     def flush_all
       synchronize do
+        @held.clear
         lsas = @ls_db.all_proxied
         lsas.each { |l| @flushed_seq[l.key] = l.sequence_number.to_I }
         lsas.each(&:maxage)
+        sent(lsas)
         @neighbor.flood(lsas) if @neighbor.adjacent?
-        event :lsdb, "flushed #{lsas.size} LSAs. Refresh LSAs or restart the neighbor to originate them again"
+        event :lsdb, "flushed #{lsas.size} LSAs. Refresh LSAs or restart the neighbor to originate them again",
+              lsas_data(lsas).merge(flushed: true)
         lsas
       end
     end
@@ -218,13 +243,11 @@ module OSPFv2
             @ls_db.link_up(l.lsdb_link)
           end
         end
-        lsas = @ls_db.all_proxied
-        lsas.each { |l| l.force_refresh(@flushed_seq.fetch(l.key, nil)) }
+        floors = @flushed_lsas.transform_values { _1.sequence_number.to_I }.merge(@flushed_seq)
         @flushed_seq.clear
+        @flushed_lsas.clear
         update_interface_link(@neighbor.state, flood: false)
-        @neighbor.flood(lsas) if @neighbor.adjacent?
-        event :lsdb, "restored #{lsas.size} LSAs from the topology"
-        lsas
+        reoriginate(@ls_db.all_proxied, 'restore from the topology', floors: floors)
       end
     end
 
@@ -237,11 +260,107 @@ module OSPFv2
       !!LsAge.aging?
     end
 
+    # Seconds between two instances of one LSA, from 0 to 5. 5 is RFC
+    # 2328's MinLSInterval (12.4, Appendix B) and the default; 0 sends
+    # every change at once, as a test that wants to push a router may
+    # ask. A held instance is due again from the new value, so lowering
+    # it sends what is due now.
+    def min_ls_interval=(seconds)
+      v = Float(seconds, exception: false)
+      raise ArgumentError, "min_ls_interval #{seconds.inspect}: seconds from 0 to #{OSPFv2::MinLSInterval}" unless v && v.between?(0, OSPFv2::MinLSInterval)
+      synchronize do
+        @min_ls_interval = v
+        @held.each { |key, h| h[:due] = (@last_sent[key] || 0) + v }
+        release(mono)
+        start_releaser unless @held.empty?
+        event :info, "MinLSInterval #{v.zero? ? 'off' : "#{v} s"}"
+      end
+    end
+
+    def min_ls_interval = @min_ls_interval
+
+    # ---- one LSA, and the topology's routes (docs/design/sim-lsa-actions.md)
+
+    # A new instance of one LSA the simulator originates. One flushed on
+    # its own comes back, above its flushed sequence number, with the
+    # links it has now.
+    def lsa_refresh(type, ls_id, advr)
+      synchronize do
+        key = lsa_key(type, ls_id, advr)
+        if (l = @flushed_lsas[key])
+          bring_back(l)
+          next lsa_row(l)
+        end
+        l = own_lsa(key)
+        reoriginate l, "refresh of #{describe(l)}"
+        lsa_row(l)
+      end
+    end
+
+    # Flushes one LSA the simulator originates (RFC 2328 14.1: MaxAge,
+    # the same sequence number). Its own router LSA, which ties the area
+    # to the router under test, is refused: stop the neighbor instead.
+    def lsa_flush(type, ls_id, advr)
+      synchronize do
+        key = lsa_key(type, ls_id, advr)
+        next lsa_row(@flushed_lsas[key]) if @flushed_lsas.key?(key)
+        l = own_lsa(key)
+        if l.equal?(@sim_lsa)
+          raise PermissionError, "#{describe(l)} links the area to the router under test; stop the neighbor instead"
+        end
+        flush_one(l, "flush of #{describe(l)}")
+        lsa_row(l)
+      end
+    end
+
+    # Withdraws one of the topology's externals or summaries, by premature
+    # aging (RFC 2328 14.1). +router+ is its name in the topology.
+    def routes_withdraw(router, prefix)
+      synchronize do
+        kind, key = route_key(router, prefix)
+        row = if @flushed_lsas.key?(key)
+                lsa_row(@flushed_lsas[key]).merge(already: true)
+              else
+                l = @ls_db.lookup(key.dup) or raise NotFound, "#{kind} #{prefix} of #{router} is not in the database"
+                flush_one(l, "withdraw of #{kind} #{prefix} from #{router}")
+                lsa_row(l)
+              end
+        { kind: kind, router: router, prefix: prefix }.merge(row)
+      end
+    end
+
+    # Advertises again one the topology's externals or summaries that was
+    # withdrawn. One already advertised is left alone and says so.
+    def routes_advertise(router, prefix)
+      synchronize do
+        kind, key = route_key(router, prefix)
+        row = if (l = @flushed_lsas[key])
+                bring_back(l)
+                lsa_row(l)
+              else
+                l = @ls_db.lookup(key.dup) or raise NotFound, "#{kind} #{prefix} of #{router} is not in the database"
+                lsa_row(l).merge(already: true)
+              end
+        { kind: kind, router: router, prefix: prefix }.merge(row)
+      end
+    end
+
     # ---- views
 
     def events(since: 0)
       @lock.synchronize { @events.select { |e| e.seq > since } }
     end
+
+    # The events after +since+, waiting up to +timeout+ seconds for one
+    # when there is none yet. For the event stream.
+    def wait_events(since:, timeout:)
+      @lock.synchronize do
+        @event_cond.wait(timeout) if @events.empty? || @events.last.seq <= since
+        @events.select { |e| e.seq > since }
+      end
+    end
+
+    def event_seq = @lock.synchronize { @event_seq }
 
     def lsdb_text(format = :junos, verbose: false)
       synchronize do
@@ -266,6 +385,7 @@ module OSPFv2
           started_at: @started_at&.iso8601,
           aging: aging?,
           flushed: flushed?,
+          min_ls_interval: @min_ls_interval,
           neighbor: @neighbor.to_hash,
           neighbors: @neighbor.neighbors,
           counts: lsdb_counts,
@@ -282,16 +402,24 @@ module OSPFv2
     def lsdb_rows(detail: false)
       synchronize do
         @ls_db.all.sort_by { |l| [l.ls_type.to_i, l.advertising_router.to_i, lsa_id(l)] }.map do |l|
-          row = {
-            type: l.ls_type.to_sym, type_name: l.ls_type.to_junos, ls_id: IP.create(lsa_id(l)).to_s,
-            advertising_router: l.advertising_router.to_ip, seq: format('0x%08x', l.sequence_number.to_I),
-            age: l.ls_age.to_i, checksum: format('0x%04x', l.encode && l.send(:csum_to_i)),
-            length: l.encode.bytesize, acked: l.ack?, originated: @ls_db.proxied?(l.advertising_router)
-          }
-          row[:detail] = lsa_detail(l) if detail
-          row
+          lsa_row(l, detail: detail)
         end
       end
+    end
+
+    # One LSA as lsdb_rows gives it. deferred_ms: MinLSInterval holds its
+    # next instance that long. flushed: flushed on its own, to come back.
+    def lsa_row(l, detail: false)
+      row = {
+        type: l.ls_type.to_sym, type_name: l.ls_type.to_junos, ls_id: IP.create(lsa_id(l)).to_s,
+        advertising_router: l.advertising_router.to_ip, seq: format('0x%08x', l.sequence_number.to_I),
+        age: l.ls_age.to_i, checksum: format('0x%04x', l.encode && l.send(:csum_to_i)),
+        length: l.encode.bytesize, acked: l.ack?, originated: @ls_db.proxied?(l.advertising_router)
+      }
+      (ms = deferred_ms(l.key)) and row[:deferred_ms] = ms
+      row[:flushed] = true if @flushed_lsas.key?(l.key)
+      row[:detail] = lsa_detail(l) if detail
+      row
     end
 
     def lsa_detail(l)
@@ -328,7 +456,8 @@ module OSPFv2
 
     def lsdb_counts
       @ls_db.all.group_by { |l| l.ls_type.to_sym }.transform_values(&:size).merge(total: @ls_db.size,
-                                                                                  unacked: @ls_db.all_not_acked.size)
+                                                                                  unacked: @ls_db.all_not_acked.size,
+                                                                                  deferred: @held.size)
     end
 
     def lsa_id(l)
@@ -339,12 +468,24 @@ module OSPFv2
       IP.create(id).to_s
     end
 
-    def event(kind, text)
+    def event(kind, text, data = {})
+      now = Time.now
       @lock.synchronize do
         @event_seq += 1
-        @events << Event.new(seq: @event_seq, time: Time.now.strftime('%H:%M:%S'), kind: kind, text: text)
+        @events << Event.new(seq: @event_seq, time: now.strftime('%H:%M:%S'), at: now.utc.iso8601(3),
+                             kind: kind, text: text, data: data)
         @events.shift while @events.size > MAX_EVENTS
+        @event_cond.broadcast
       end
+    end
+
+    # The LSAs of an event's data: what the console needs to follow one
+    # instance from the simulator to each router.
+    def lsas_data(lsas)
+      { lsas: lsas.map do |l|
+        { type: l.ls_type.to_sym, id: IP.create(lsa_id(l)).to_s, advr: l.advertising_router.to_ip,
+          seq: format('0x%08x', l.sequence_number.to_I) }
+      end }
     end
 
     def find_link(ref)
@@ -358,13 +499,176 @@ module OSPFv2
       l or raise ArgumentError, "no such link: #{ref.inspect} (#{@links.first(3).map(&:name).join(', ')}...)"
     end
 
-    def reoriginate(lsas, why)
-      lsas = Array(lsas).compact.uniq
+    # Sends a new instance of each of +lsas+, at once or, inside
+    # MinLSInterval of its last one, when that runs out (RFC 2328 12.4).
+    # Their contents have changed already; a held LSA goes out once, with
+    # what it holds then, however many changes joined it. +floors+: key =>
+    # a sequence number the new instance must pass (a flushed copy's).
+    def reoriginate(lsas, why, floors: {})
+      lsas = Array(lsas).compact.uniq.reject { @flushed_lsas.key?(_1.key) }
       return [] if lsas.empty?
-      lsas.each { |l| l.force_refresh(nil) }
-      @neighbor.flood(lsas) if @neighbor.adjacent?
-      event :lsdb, "#{why}: re-originated #{lsas.size} LSA#{'s' unless lsas.size == 1}"
+      now = mono
+      ready, held = lsas.partition { |l| !@held.key?(l.key) && wait_for(l.key, now) <= 0 }
+      unless ready.empty?
+        ready.each { |l| l.force_refresh(floors[l.key]) }
+        sent(ready, now)
+        @neighbor.flood(ready) if @neighbor.adjacent?
+        event :lsdb, "#{why}: re-originated #{plural(ready.size, 'LSA')}", lsas_data(ready)
+      end
+      unless held.empty?
+        held.each { |l| hold(l.key, floors[l.key], why, now) }
+        wait = held.map { |l| @held[l.key][:due] - now }.max
+        event :lsdb, "#{why}: #{plural(held.size, 'LSA')} held by MinLSInterval, out in #{(wait * 1000).round} ms",
+              lsas_data(held).merge(deferred_ms: (wait * 1000).round)
+      end
       lsas
+    end
+
+    def mono = Process.clock_gettime(Process::CLOCK_MONOTONIC)
+
+    def plural(n, word) = "#{n} #{word}#{'s' unless n == 1}"
+
+    # Seconds until a new instance of +key+ may go out; 0 or less: now.
+    def wait_for(key, now = mono)
+      (t = @last_sent[key]) ? t + @min_ls_interval - now : 0
+    end
+
+    def sent(lsas, now = mono)
+      lsas.each { |l| @last_sent[l.key] = now }
+    end
+
+    # Milliseconds until a held instance of +key+ goes out, or nil.
+    def deferred_ms(key)
+      (h = @held[key]) ? [((h[:due] - mono) * 1000).round, 0].max : nil
+    end
+
+    def hold(key, floor, why, now)
+      h = (@held[key] ||= { due: now + wait_for(key, now), floor: nil, why: why })
+      h[:floor] = [h[:floor], floor].compact.max
+      start_releaser
+    end
+
+    # One thread sends every held instance when it is due, and ends when
+    # none is left. Both it and hold run under the lock, so a hold cannot
+    # slip between its last look and its end.
+    def start_releaser
+      if @releaser&.alive?
+        @releaser.wakeup rescue ThreadError
+        return
+      end
+      @releaser = Thread.new do
+        Thread.current.name = 'min-ls-interval'
+        loop do
+          due = synchronize do
+            next(@releaser = nil) if @held.empty?
+            @held.values.map { _1[:due] }.min
+          end
+          break unless due
+          wait = due - mono
+          sleep(wait) if wait.positive?
+          synchronize { release(mono) }
+        end
+      end
+    end
+
+    # Sends the held instances that are due, in one flood and one event.
+    def release(now)
+      due = @held.select { |_, h| h[:due] <= now }
+      return if due.empty?
+      due.each_key { @held.delete(_1) }
+      lsas = due.filter_map do |key, h|
+        l = @ls_db.lookup(key.dup)
+        next if l.nil? || @flushed_lsas.key?(key) # flushed again while it waited
+        l.force_refresh(h[:floor])
+      end
+      return if lsas.empty?
+      sent(lsas, now)
+      @neighbor.flood(lsas) if @neighbor.adjacent?
+      whys = due.values.map { _1[:why] }.uniq
+      event :lsdb, "#{whys.join('; ')}: re-originated #{plural(lsas.size, 'LSA')} after MinLSInterval", lsas_data(lsas)
+    end
+
+    def lsa_key(type, ls_id, advr)
+      t = type.to_s
+      raise ArgumentError, "type #{t.inspect}: one of #{LSA_TYPES.join(', ')}" unless LSA_TYPES.include?(t)
+      raise ArgumentError, 'id and advr are required' if ls_id.to_s.empty? || advr.to_s.empty?
+      [LsType.to_i(t.to_sym), IPAddr.new(ls_id.to_s).to_i, IPAddr.new(advr.to_s).to_i]
+    rescue IPAddr::InvalidAddressError => e
+      raise ArgumentError, e.message
+    end
+
+    # An LSA the simulator originates (RFC 2328 14.1: it may age only its own).
+    def own_lsa(key)
+      l = @ls_db.lookup(key.dup) or raise NotFound, 'no such LSA'
+      unless @ls_db.proxied?(l.advertising_router)
+        raise PermissionError, "#{describe(l)} is not originated by the simulator (RFC 2328 14.1)"
+      end
+      l
+    end
+
+    def describe(l)
+      "#{l.ls_type.to_sym} #{IP.create(lsa_id(l))} from #{l.advertising_router.to_ip}"
+    end
+
+    # [kind, key] of a topology router's external or summary.
+    def route_key(router, prefix)
+      r = @topology.all_routers.find { _1.name == router.to_s } or raise NotFound, "no router #{router.inspect}"
+      want = IPAddr.new(prefix.to_s)
+      same = ->(p) { a = IPAddr.new(p.prefix.to_s); a.to_s == want.to_s && a.prefix == want.prefix }
+      kind = if Array(r.externals).any?(&same) then :as_external
+             elsif Array(r.summaries).any?(&same) then :summary
+             end
+      unless kind
+        have = (Array(r.externals) + Array(r.summaries)).map(&:prefix).first(6)
+        raise NotFound, "#{router} has no external or summary #{prefix} (#{have.join(', ')}#{' ...' if have.size == 6})"
+      end
+      [kind, [LsType.to_i(kind), want.to_i, IPAddr.new(IP.create(r.id).to_s).to_i]]
+    rescue IPAddr::InvalidAddressError => e
+      raise ArgumentError, e.message
+    end
+
+    # Premature aging of one LSA (RFC 2328 14.1). A flush is an instance
+    # too: the next one waits MinLSInterval.
+    def flush_one(l, why)
+      @held.delete(l.key)
+      @flushed_lsas[l.key] = l
+      l.maxage
+      sent([l])
+      @neighbor.flood([l]) if @neighbor.adjacent?
+      event :lsdb, "#{why}: flushed at MaxAge, sequence #{format('0x%08x', l.sequence_number.to_I)}",
+            lsas_data([l]).merge(flushed: true)
+    end
+
+    # A flushed LSA back in the database; a router LSA gets the links it
+    # has now, since link changes skip a router LSA that is not there.
+    def reinsert(l)
+      @ls_db << l
+      return unless l.ls_type.to_i == 1
+      rid = l.advertising_router.to_i
+      @links.each do |ln|
+        ends = [ln.lsdb_link.router_id.to_i, ln.lsdb_link.neighbor_id.to_i]
+        next unless ends.include?(rid)
+        ln.up? ? relink(ln) : @ls_db.link_down(ln.lsdb_link)
+      end
+    end
+
+    # Brings back one LSA flushed on its own, above its flushed sequence
+    # number (its MaxAge copy kept it).
+    def bring_back(l)
+      @flushed_lsas.delete(l.key)
+      reinsert(l)
+      reoriginate l, "#{describe(l)} back"
+    end
+
+    # On a stop: a held instance takes its new sequence number now, with
+    # no flood, so the database never holds new contents under an old
+    # number while nobody is listening.
+    def settle_held
+      @held.each do |key, h|
+        l = @ls_db.lookup(key.dup)
+        l.force_refresh(h[:floor]) if l && !@flushed_lsas.key?(key)
+      end
+      @held.clear
     end
 
     def build_lsdb
