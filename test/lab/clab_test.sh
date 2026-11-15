@@ -84,7 +84,11 @@ wait_for 60 "ospfd Full with bird" ospfd_full 4.4.4.4
 step "routes"
 wait_for 90 "ospfd installs the simulated area's routes (250 or more)" ospfd_routes
 wait_for 60 "bird has them too" bird_routes
-check "ospfd reaches FRR's loopback straight over eth1" ospfd_via 2.2.2.2 10.0.23.1
+# A wait, not a check. Checked once, right after the routes came, this
+# failed on routescope's CI VM with a second lab starting beside it
+# (routescope #139, 2026-11-15). Why the route was not there yet is not
+# known; the steps around it wait too.
+wait_for 30 "ospfd reaches FRR's loopback straight over eth1" ospfd_via 2.2.2.2 10.0.23.1
 check "ospfd takes the ring's MTU from the kernel" sh -c "docker exec clab-$NAME-ospfd ospf-cli -c 'show ospf interface detail' | grep -q 'MTU: 9500'"
 
 step "a link fails: ospfd goes round by BIRD"
