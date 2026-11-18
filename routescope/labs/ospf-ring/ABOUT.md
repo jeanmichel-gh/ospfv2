@@ -1,3 +1,8 @@
+---
+title: "OSPF on a ring of point-to-point links: FRR, ospfd and BIRD"
+tags: [ospf]
+role: main
+---
 # The router lab on containerlab: a ring
 
 The simulator floods a 5x5 grid to FRR on a LAN. FRR, ospfd and BIRD are joined by a ring of point-to-point links, so a link can fail and traffic take the other way round.

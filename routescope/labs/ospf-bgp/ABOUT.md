@@ -1,3 +1,8 @@
+---
+title: OSPF redistributed into BGP at an FRR ASBR
+tags: [ospf, bgp]
+role: interop
+---
 # OSPF into BGP
 
 Two AS domains. AS 65000 runs OSPF: the simulator (a 3x3 grid behind it), ospfd, and asbr (FRR), which redistributes OSPF into BGP. Area 0 holds 34 LSAs: 13 router LSAs (the 9 grid routers, edge, sim, asbr, ospfd), 1 network LSA (the LAN, from asbr, its DR), and 10 summaries and 10 externals from the grid's edge router 10.0.0.1. AS 65001 is three iBGP speakers, full mesh: r1 and r2 (FRR), r3 (BIRD). asbr and r1 peer by eBGP; r1 gives AS 65000's routes to r2 and r3 with itself as next hop.

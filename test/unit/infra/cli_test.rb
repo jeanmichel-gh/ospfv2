@@ -244,7 +244,10 @@ class TestCLI < Test::Unit::TestCase
       assert File.file?(File.join(dir, file)), "#{lab}: #{file}"
       assert_equal lab, YAML.safe_load(File.read(File.join(dir, file)))['name'], "#{lab}: the name in #{file}"
       assert_equal "#{lab}.clab.yml", clab.first, "#{lab}: the clab file is named for the lab" unless clab.empty?
-      assert_match(/\A# \S/, File.read(File.join(dir, 'ABOUT.md')), "#{lab}: ABOUT.md")
+      about = File.read(File.join(dir, 'ABOUT.md'))
+      # routescope's front matter first (its docs/design/lab-organization.md),
+      # then the heading.
+      assert_match(/\A---\ntitle: .+\ntags: \[[a-z, -]+\]\nrole: (main|interop|reference)\n---\n# \S/, about, "#{lab}: ABOUT.md")
       ignore = File.readlines(File.join(dir, '.gitignore'), chomp: true)
       %w[recordings/ *-run/* !*-run/.gitkeep clab-*/ .*.clab.yml.bak *.sav *.tmp *.broken *.kernel *.rollback.*].each do |line|
         assert_include ignore, line, "#{lab}: .gitignore"

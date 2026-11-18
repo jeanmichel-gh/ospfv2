@@ -1,3 +1,8 @@
+---
+title: IS-IS redistributed into BGP, on FRR
+tags: [isis, bgp]
+role: reference
+---
 # IS-IS into BGP
 
 Two AS domains. AS 65000 runs IS-IS on FRR: i1 and i2 at level 1 in area 49.0001, i3 at level 2 in area 49.0002, and asbr, level 1 and 2, which joins the two areas and redistributes IS-IS into BGP. AS 65001 is three iBGP speakers, full mesh: r1 and r2 (FRR), r3 (BIRD). asbr and r1 peer by eBGP.

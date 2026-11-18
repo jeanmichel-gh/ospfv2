@@ -1,3 +1,8 @@
+---
+title: OSPF with Nokia SR Linux and ospfd
+tags: [ospf]
+role: interop
+---
 # Nokia SR Linux in the router lab
 
 The simulator floods a 5x5 grid to SR Linux on a LAN, and ospfd sits behind SR Linux on a point-to-point link.
