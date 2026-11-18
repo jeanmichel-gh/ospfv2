@@ -1,3 +1,8 @@
+---
+title: Three iBGP speakers on FRR and BIRD
+tags: [bgp]
+role: reference
+---
 # Three iBGP speakers
 
 Three BGP speakers in AS 65001 peer with one another (iBGP, full mesh) over a triangle of links. r1 and r2 run FRR, r3 runs BIRD. Each advertises its loopback (10.255.1.N) and a /24 (192.168.N.0/24).

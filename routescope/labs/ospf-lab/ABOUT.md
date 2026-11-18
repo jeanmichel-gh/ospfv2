@@ -1,3 +1,8 @@
+---
+title: "OSPF on one LAN: the simulator, FRR, ospfd and BIRD"
+tags: [ospf]
+role: main
+---
 # The router lab: OSPF on one LAN
 
 The ospfv2 simulator floods a 5x5 grid of routers to FRR on the LAN 10.99.0.0/24. Behind the grid, `edge` has 50 summary and 200 external routes. ospfd and BIRD 2 join the same LAN as more routers under test.
