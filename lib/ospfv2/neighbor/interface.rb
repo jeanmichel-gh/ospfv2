@@ -435,16 +435,22 @@ module OSPFv2
       recheck_acks
     end
 
-    # Tells on_state_change listeners when the segment's state changes, or
+    # Tells on_state_change listeners when the segment's state changes,
     # when another adjacency becomes the DR's (the BDR taking over keeps
-    # Full, but the interface link must name the new DR).
+    # Full, but the interface link must name the new DR), or when the DR
+    # is named after the adjacency went Full. FRR leaves Waiting and goes
+    # to Exchange before its hello names the DR; when Loading ends before
+    # that hello comes, we are Full with no DR, and the interface link
+    # stays a stub unless the naming tells the listeners.
     def facade_changed(why)
       new = state
       p = primary
+      dr = designated_router
       old = @facade_state
-      return if new == old && p.equal?(@facade_primary)
+      return if new == old && p.equal?(@facade_primary) && dr == @facade_dr
       @facade_state = new
       @facade_primary = p
+      @facade_dr = dr
       @listeners.each { |l| l.call(old, new, why) }
     end
 
