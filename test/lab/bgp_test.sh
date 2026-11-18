@@ -41,7 +41,9 @@ diag() {
       sim) docker logs --tail 10 "clab-$NAME-sim" 2>&1 ;;
       ospfd) docker exec "clab-$NAME-ospfd" ospf-cli -c 'show ospf neighbor' ;;
       i[0-9]) vt "$n" 'show isis neighbor'; vt "$n" 'show ip route' ;;
-      asbr) vt "$n" 'show bgp summary'; vt "$n" 'show ip ospf neighbor'; vt "$n" 'show isis neighbor' ;;
+      asbr) vt "$n" 'show bgp summary'; vt "$n" 'show ip ospf neighbor'; vt "$n" 'show isis neighbor'
+        # The simulator's router LSA: its LAN must be a transit link once Full.
+        [ "$WHICH" = ospf-bgp ] && vt "$n" 'show ip ospf database router 1.1.1.1' ;;
       *) vt "$n" 'show bgp summary'; vt "$n" 'show ip ospf neighbor' ;;
     esac
     docker exec "clab-$NAME-$n" ip -br addr 2>&1 | grep -v '^lo '

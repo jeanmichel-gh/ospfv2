@@ -144,7 +144,11 @@ the BDR, and stops at 2-Way with everyone else.
   `running?` and `synchronize` go to the interface. `flood` goes to the
   interface, which sends it if any adjacency is Full.
 - **The interface link** keeps following RFC 2328 12.4.1.2: a transit
-  link once the adjacency with the DR is Full, a stub before.
+  link once the adjacency with the DR is Full, a stub before. FRR can
+  reach Exchange before its hello names the DR, so the adjacency may be
+  Full while no DR is named. The interface link is then a stub, and it
+  becomes the transit link when a hello names the DR (added after the
+  `ospf-bgp` lab failed its OSPF routes check in routescope's CI).
 - **One refresh timer** per simulator. Today each `Neighbor` has one,
   and two would refresh twice.
 - **Events** name the neighbor: `2.2.2.2 exstart -> exchange (...)`.

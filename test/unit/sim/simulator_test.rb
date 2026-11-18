@@ -138,6 +138,30 @@ class TestSimulator < Test::Unit::TestCase
     refute sim.has_link?(2, '192.168.1.254')
   end
 
+  # The DUT's hello as the segment hears it: router 2.2.2.2 at
+  # 192.168.1.2, naming DR and listing us.
+  def dut_hello(dr)
+    Hello.new(router_id: '2.2.2.2', area_id: 0, netmask: '255.255.255.0', hello_interval: 60,
+              router_dead_interval: 240, rtr_pri: 1, designated_router_id: dr, neighbors: '1.1.1.1')
+  end
+
+  # Full before any hello names a DR: the DUT was still in Waiting, or
+  # had not run its election. The router LSA keeps the stub then. When a
+  # later hello names the DR, the adjacency stays Full and is the same
+  # one, but the interface link must become the transit link, or the DUT
+  # has no way back into the simulated area.
+  def test_dr_named_after_full_gives_the_transit_link
+    @sim.start
+    ifc = @sim.neighbor
+    @sim.synchronize { ifc.receive(dut_hello('0.0.0.0'), '192.168.1.2') }
+    @sim.synchronize { ifc.change_state(NeighborState::Full.new, 'test') }
+    assert rlsa('1.1.1.1').has_link?(3, '192.168.1.0'), 'a stub while no DR is named'
+    @sim.synchronize { ifc.receive(dut_hello('192.168.1.2'), '192.168.1.2') }
+    assert_equal :full, ifc.state
+    assert rlsa('1.1.1.1').has_link?(2, '192.168.1.2'), 'transit link to the DR named after Full'
+    refute rlsa('1.1.1.1').has_link?(3, '192.168.1.0')
+  end
+
   def test_intermediate_states_do_not_reoriginate
     @sim.start
     seq = rlsa('1.1.1.1').sequence_number.to_I
