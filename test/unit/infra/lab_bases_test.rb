@@ -32,8 +32,11 @@ class TestLabBases < Test::Unit::TestCase
     end
   end
 
+  # Not in the test image, which has test/ but not the Dockerfiles.
   def test_our_dockerfiles
-    images = list(File.join(ROOT, 'Dockerfile'), File.join(ROOT, 'docker/bird/Dockerfile'))
+    files = [File.join(ROOT, 'Dockerfile'), File.join(ROOT, 'docker/bird/Dockerfile')]
+    omit('the Dockerfiles are not here') unless files.all? { File.file?(_1) }
+    images = list(*files)
     assert_equal 2, images.size, images.inspect
     assert_match(/\Aruby:[\d.]+-slim\z/, images[0])
     assert_equal 'debian:bookworm-slim', images[1]
