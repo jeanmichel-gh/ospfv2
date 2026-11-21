@@ -51,10 +51,25 @@ wait_for() {
 # netem on a node's eth1, with the host's tc in the node's network
 # namespace: quicker than containerlab tools netem, so the loss starts
 # within a few milliseconds of T0.
+# The PIDs are read once, before the clock starts.
+declare -A PID
 netem() {
-  local pid; pid=$(docker inspect -f '{{.State.Pid}}' "clab-$NAME-$1")
-  if [ "$2" = 0 ]; then sudo nsenter -t "$pid" -n tc qdisc del dev eth1 root
-  else sudo nsenter -t "$pid" -n tc qdisc replace dev eth1 root netem loss "$2%"; fi
+  [ -n "${PID[$1]:-}" ] || PID[$1]=$(docker inspect -f '{{.State.Pid}}' "clab-$NAME-$1")
+  if [ "$2" = 0 ]; then sudo nsenter -t "${PID[$1]}" -n tc qdisc del dev eth1 root
+  else sudo nsenter -t "${PID[$1]}" -n tc qdisc replace dev eth1 root netem loss "$2%"; fi
+}
+# Inside FRR's container, so no docker exec sits between two looks: asks
+# vtysh for the neighbors back to back (about 20 ms each) and writes the
+# time 1.1.1.1 is gone, in ms since the epoch, to /tmp/frr-down.
+frr_watch() {
+  docker exec -d clab-$NAME-frr python3 -c '
+import subprocess, time
+end = time.time() + 15
+while time.time() < end:
+    out = subprocess.run(["vtysh", "-c", "show ip ospf neighbor"], capture_output=True, text=True).stdout
+    if not any(l.startswith("1.1.1.1 ") for l in out.splitlines()):
+        open("/tmp/frr-down", "w").write(str(round(time.time() * 1000)))
+        break'
 }
 cleanup() {
   local rc=$?
@@ -71,7 +86,6 @@ cli() { docker exec clab-$NAME-ospfd ospf-cli -c "$*"; }
 # ospfd's neighbor 2.2.2.2, one field of its row in show.neighbors.
 nbr() { cli 'show ospf neighbor | display json' | ruby -rjson -e 'n = JSON.parse($stdin.read).find { _1["router_id"] == "2.2.2.2" }; puts n && n[ARGV[0]]' "$1"; }
 frr_full() { vtysh 'show ip ospf neighbor' | grep -Eq '^1\.1\.1\.1 .*Full'; }
-frr_down() { ! vtysh 'show ip ospf neighbor' | grep -Eq '^1\.1\.1\.1 '; }
 frr_bfd_up() { vtysh 'show bfd peers' | grep -A12 'peer 10.0.12.1 ' | grep -q 'Status: up'; }
 ospfd_full() { [ "$(nbr state)" = full ]; }
 ospfd_bfd_up() { [ "$(nbr bfd)" = up ]; }
@@ -113,35 +127,33 @@ check "bfdd4r has the session, client ospfd" sh -c "docker exec clab-$NAME-ospfd
 
 step "the link fails: 100% loss with netem on both ends"
 sudo true # sudo's prompt, if any, before the clock starts
+PID[ospfd]=$(docker inspect -f '{{.State.Pid}}' clab-$NAME-ospfd)
+PID[frr]=$(docker inspect -f '{{.State.Pid}}' clab-$NAME-frr)
+docker exec clab-$NAME-frr rm -f /tmp/frr-down
+frr_watch
+sleep 1 # the watch running
+frr_full || fail "FRR's neighbor went before the link failed"
 T0=$(now_ms)
 netem ospfd 100 & netem frr 100 & wait
 echo "  loss on both ends $(( $(now_ms) - T0 )) ms after T0"
-# Each side's Down, by its own clock: polled here every 50 ms, so the
-# figure is at most 50 ms late, plus one docker exec.
-FRR_MS='' ; OSPFD_MS=''
-end=$((SECONDS + 15))
-while { [ -z "$FRR_MS" ] || [ -z "$OSPFD_MS" ]; } && ((SECONDS < end)); do
-  [ -z "$OSPFD_MS" ] && [ "$(nbr state)" = "" ] && OSPFD_MS=$(( $(now_ms) - T0 ))
-  [ -z "$FRR_MS" ] && frr_down && FRR_MS=$(( $(now_ms) - T0 ))
-  sleep 0.05
-done
-[ -n "$OSPFD_MS" ] || fail "ospfd's neighbor did not go Down"
-[ -n "$FRR_MS" ] || fail "FRR's neighbor did not go Down"
+wait_for 15 "ospfd's neighbor Down" sh -c "[ -z \"\$(docker exec clab-$NAME-ospfd ospf-cli -c 'show ospf neighbor' | grep 2.2.2.2)\" ]"
+wait_for 15 "FRR's neighbor Down" docker exec clab-$NAME-frr test -s /tmp/frr-down
+FRR_MS=$(( $(docker exec clab-$NAME-frr cat /tmp/frr-down) - T0 ))
 # ospfd's own record of it: the neighbor event's time, to the millisecond.
 EVENT=$(neighbor_events | ruby -rjson -rtime -e '
   t0 = ARGV[0].to_i
   ms = ->(e) { (Time.iso8601(e["time"]).to_f * 1000).round - t0 }
   e = JSON.parse($stdin.read).find { _1.dig("data", "to") == "down" && ms.(_1) >= 0 }
   puts e ? [e.dig("data", "event"), ms.(e)].join(" ") : "none -1"' "$T0")
-echo "  ospfd's neighbor Down after ${OSPFD_MS} ms (polled), event: ${EVENT}; FRR's after ${FRR_MS} ms (polled)"
+echo "  ospfd's neighbor Down event: ${EVENT}; FRR's neighbor gone after ${FRR_MS} ms (watched in its container)"
 check "ospfd's neighbor event says BFD down" test "${EVENT% *}" = "BFD down"
 EVENT_MS=${EVENT##* }
 check "ospfd's neighbor Down in under a second (${EVENT_MS} ms, by its event)" test "$EVENT_MS" -lt $LIMIT_MS
-check "FRR's neighbor Down in under a second (${FRR_MS} ms, polled)" test "$FRR_MS" -lt $LIMIT_MS
+check "FRR's neighbor Down in under a second (${FRR_MS} ms, watched)" test "$FRR_MS" -lt $LIMIT_MS
 # FRR's daemons do not log to the container's output, so FRR's reason is
 # not read here: Down in under a second, with hellos every 2 s and a dead
 # interval of 8 s, can only be BFD.
-RESULT="neighbor Down: ospfd ${EVENT_MS} ms (event), FRR ${FRR_MS} ms (polled)"
+RESULT="neighbor Down: ospfd ${EVENT_MS} ms (event), FRR ${FRR_MS} ms (watched)"
 
 step "the link back"
 netem ospfd 0 & netem frr 0 & wait
