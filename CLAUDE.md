@@ -103,7 +103,8 @@ test/integration/    two simulators over the in-memory segment, and the
 test/support/        the FRR namespace harness, netlink probe, and
                      routescope_vocabulary.rb: what routescope reads from ospfd
 test/lab/            the lab tests, in shell: compose, clab, srl, bgp, bfd; pull.sh,
-                     the image pulls CI makes, retried
+                     the image pulls CI makes, retried; bases.sh, the base
+                     images tagged before a build, so Docker Hub is not asked
 examples/            grid.yml, and links from the old template paths to
                      routescope/labs, for one release
 routescope/labs/     the labs routescope runs, one ready-to-run folder

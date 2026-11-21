@@ -112,6 +112,7 @@ check "the topology and one folder per node" test -f "$DIR/$NAME.clab.yml" -a -d
 
 step "images"
 if [ -z "${SKIP_BUILD:-}" ]; then
+  test/lab/bases.sh Dockerfile || fail "base images"
   docker build -q -t "$IMAGE" --build-context bfd4r="${BFD4R:-../bfd4r}" . >/dev/null || fail "docker build"
 fi
 check "ospfv2 image" docker image inspect "$IMAGE"
