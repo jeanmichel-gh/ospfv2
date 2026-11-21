@@ -13,6 +13,7 @@ require_relative 'virtual_link'
 require_relative 'spf'
 require_relative 'lsdb_topology'
 require_relative 'spf_scheduler'
+require_relative 'bfd'
 
 module OSPFv2
   module Core
@@ -53,6 +54,8 @@ module OSPFv2
                   :route_table, :spf, :spf_log, :externals, :virtual_links
       # area id => { stub: { default_metric:, no_summaries: } }
       attr_accessor :area_options
+      # The Core::Bfd that asks for BFD sessions, if any (it sets itself).
+      attr_accessor :bfd
 
       # router_id: dotted quad or Integer
       # loop:      the EventLoop that owns this router

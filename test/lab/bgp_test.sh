@@ -114,7 +114,7 @@ check "the topology" test -f "$DIR/$NAME.clab.yml"
 
 step "images"
 if [ -z "${SKIP_BUILD:-}" ]; then
-  [ "$WHICH" = ospf-bgp ] && docker build -q -t ospfv2 . >/dev/null
+  [ "$WHICH" = ospf-bgp ] && docker build -q -t ospfv2 --build-context bfd4r=../bfd4r . >/dev/null
   docker build -q -t ospfv2-bird docker/bird >/dev/null
 fi
 docker image inspect quay.io/frrouting/frr:10.2.1 >/dev/null 2>&1 || docker pull -q quay.io/frrouting/frr:10.2.1 >/dev/null

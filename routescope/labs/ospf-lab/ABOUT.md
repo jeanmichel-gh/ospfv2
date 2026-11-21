@@ -55,7 +55,7 @@ So the simulator reaches the lab through FRR: its one Full adjacency is with the
 
 ## Running it
 
-Images, built in the ospfv2 checkout: `docker build -t ospfv2 .`, and `docker compose --profile bird build bird` for BIRD. FRR is pulled.
+Images, built in the ospfv2 checkout: `docker build -t ospfv2 --build-context bfd4r=../bfd4r .`, and `docker compose --profile bird build bird` for BIRD. FRR is pulled.
 
 Start it from routescope's Labs panel, or from the ospfv2 checkout:
 

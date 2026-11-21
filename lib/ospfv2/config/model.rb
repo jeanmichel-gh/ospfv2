@@ -85,6 +85,13 @@ module OSPFv2
         end
         auth = authentication(name, i['authentication'])
         opts[:auth] = auth if auth
+        if (b = i['bfd-liveness-detection'])
+          if opts[:passive]
+            @warnings << "interface #{name}: passive, so bfd-liveness-detection has no neighbor to run on"
+          else
+            opts[:bfd] = { minimum_interval: b['minimum-interval'], multiplier: b['multiplier'] }.compact.freeze
+          end
+        end
         @interfaces[name] = opts.freeze
       end
 

@@ -7,7 +7,7 @@
 #          | ethernet-1/2 (e1-2)  10.0.23.0/30  point-to-point
 #        ospfd 3.3.3.3  eth1
 #
-# Images: ospfv2:latest, built in ~/ospfv2 (docker build -t ospfv2 .), and
+# Images: ospfv2:latest, built in ~/ospfv2 (docker build -t ospfv2 --build-context bfd4r=../bfd4r .), and
 # SR Linux, free from Nokia (about 2 GB of memory when running):
 #   docker pull ghcr.io/nokia/srlinux:26.3.1
 # Then start it from routescope's Labs panel, or in this folder:

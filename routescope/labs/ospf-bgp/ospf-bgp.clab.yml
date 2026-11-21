@@ -14,7 +14,7 @@
 #                                                                  r2-r3: 10.1.23.0/30
 #
 # Images: ospfv2:latest and ospfv2-bird:latest from ~/ospfv2
-# (docker build -t ospfv2 . && docker compose --profile bird build bird),
+# (docker build -t ospfv2 --build-context bfd4r=../bfd4r . && docker compose --profile bird build bird),
 # and FRR (docker pull quay.io/frrouting/frr:10.2.1).
 # Start it from routescope's lab menu, or in this folder:
 #   sudo containerlab deploy -t ospf-bgp.clab.yml

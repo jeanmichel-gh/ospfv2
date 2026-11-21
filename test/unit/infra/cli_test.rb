@@ -236,7 +236,8 @@ class TestCLI < Test::Unit::TestCase
   # running lab writes.
   def test_the_routescope_labs_are_ready_to_run
     labs = Dir.children(OSPFv2::CLI::LABS_DIR).sort
-    assert_equal OSPFv2::CLI::LAB_NAMES.values.sort, labs
+    assert_equal OSPFv2::CLI::LABS.sort, labs
+    assert_equal [], OSPFv2::CLI::LAB_NAMES.values - OSPFv2::CLI::LABS
     labs.each do |lab|
       dir = File.join(OSPFv2::CLI::LABS_DIR, lab)
       clab = Dir.glob('*.clab.yml', base: dir)

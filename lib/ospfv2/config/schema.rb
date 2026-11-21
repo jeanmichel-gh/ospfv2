@@ -243,6 +243,15 @@ module OSPFv2
                   flag 'passive', help: 'Advertise the subnet, form no adjacency'
                   flag 'disable', help: 'Keep the configuration, do not run OSPF here'
                   instance_eval(&Schema::AUTHENTICATION)
+                  # Junos: [edit protocols ospf area area-id interface
+                  # interface-name] bfd-liveness-detection, with these two of
+                  # its options. Without them, bfdd4r's defaults.
+                  container 'bfd-liveness-detection', help: 'BFD for the neighbors here (RFC 5882), through bfdd4r' do
+                    leaf 'minimum-interval', Schema.hint(T.range(1, 255_000), '<milliseconds>'),
+                         help: 'Transmit and receive interval, 1..255000 ms (default: bfdd4r\'s)'
+                    leaf 'multiplier', Schema.hint(T.range(1, 255), '<1..255>'),
+                         help: 'Packets missed before the session goes down (default 3)'
+                  end
                 end
               end
             end

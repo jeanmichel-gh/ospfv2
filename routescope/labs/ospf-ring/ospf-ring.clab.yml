@@ -12,7 +12,7 @@
 #      eth2  10.0.34.0/30  eth1
 #
 # Images: ospfv2:latest and ospfv2-bird:latest, built in ~/ospfv2:
-#   docker build -t ospfv2 . && docker compose --profile bird build bird
+#   docker build -t ospfv2 --build-context bfd4r=../bfd4r . && docker compose --profile bird build bird
 # Then, in this folder:
 #   sudo containerlab deploy -t ospf-ring.clab.yml
 # routescope serves it from ~/labs/ospfv2/ospf-ring once installed:
