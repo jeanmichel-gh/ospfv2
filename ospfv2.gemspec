@@ -19,7 +19,7 @@ Gem::Specification.new do |spec|
   DESC
   spec.homepage      = 'https://github.com/jeanmichel-gh/ospfv2'
   spec.license       = 'GPL-3.0-or-later'
-  spec.required_ruby_version = '>= 3.3' # bfd4r's
+  spec.required_ruby_version = '>= 3.2' # the owner's floor for the routers, as bfd4r
 
   spec.metadata['source_code_uri'] = spec.homepage
   spec.metadata['changelog_uri']   = "#{spec.homepage}/blob/master/changelog.txt"

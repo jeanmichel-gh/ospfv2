@@ -31,8 +31,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # bfd4r needs Ruby 3.3 (its gemspec), so ospfv2 does too.
-        ruby: ['3.3', '3.4', '4.0']
+        # 3.2 is the floor for every router that takes bfd4r (the owner,
+        # 2026-11-21). bfd4r says 3.2 from bfd4r #10 on.
+        ruby: ['3.2', '3.3', '3.4', '4.0']
     steps:
       - uses: actions/checkout@v4
       # bfd4r is a path dependency (../bfd4r in the Gemfile, a build

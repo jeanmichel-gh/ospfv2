@@ -6,7 +6,7 @@ Simulate an OSPFv2 area behind one LAN or point-to-point interface.
 synthetic link state database behind it. Use it to load a router with thousands of
 LSAs, flap links and watch SPF, or check how a router handles summaries and externals.
 
-It targets Ruby 3.3 and later (CI covers 3.3 to 4.0), uses the standard library and
+It targets Ruby 3.2 and later (CI covers 3.2 to 4.0), uses the standard library and
 [bfd4r](https://github.com/jeanmichel-gh/bfd4r), the BFD library ospfd's neighbors use,
 and ships as a Docker image. bfd4r is not published yet: clone it beside this
 repository, where the `Gemfile` and the image build look for it (`../bfd4r`).
@@ -507,7 +507,7 @@ docker build --target test --build-context bfd4r=../bfd4r .        # the same te
 test/lab/lab_test.sh                # the compose router lab end to end (Docker, a few minutes)
 ```
 
-CI runs the unit tests on Ruby 3.3 to 4.0, the FRR interop tests in network
+CI runs the unit tests on Ruby 3.2 to 4.0, the FRR interop tests in network
 namespaces, the image build, and `test/lab/lab_test.sh`.
 
 The FRR interop tests need root and `OSPFV2_FRR=1`. On Ubuntu 26.04, AppArmor confines

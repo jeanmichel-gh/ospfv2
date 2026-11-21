@@ -170,7 +170,7 @@ If QEMU will not start and its error mentions the address size or IPA, add `,hig
 
 ## Ruby, Docker and the repo
 
-ospfv2 uses the Ruby standard library and one gem of its own, bfd4r, for BFD. bfd4r is not published: it is cloned beside ospfv2, where the image build and the `Gemfile` find it. Ruby 3.3 or newer is enough.
+ospfv2 uses the Ruby standard library and one gem of its own, bfd4r, for BFD. bfd4r is not published: it is cloned beside ospfv2, where the image build and the `Gemfile` find it. Ruby 3.2 or newer is enough.
 
 ### In the VM
 
@@ -247,12 +247,12 @@ It prints `ok` or `FAIL` per check, and on a failure the routers' neighbors and 
 
 ### On the Mac
 
-Only for the demo and for `ospf-cli`. Any Ruby 3.3 or newer works; with [rv](https://github.com/spinel-coop/rv):
+Only for the demo and for `ospf-cli`. Any Ruby 3.2 or newer works; with [rv](https://github.com/spinel-coop/rv):
 
 ```sh
 cd ~/path/to/ospfv2                 # your clone
 git pull
-rv ruby list                        # need 3.3 or newer
+rv ruby list                        # need 3.2 or newer
 rv ruby install latest              # only if the list has none
 ruby -v
 ```

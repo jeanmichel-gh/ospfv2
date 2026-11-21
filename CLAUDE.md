@@ -234,7 +234,8 @@ bgp4r's own docs. `docs/lab-commands.md` is the runbook for all of them.
 
 ## Testing
 
-Ruby 3.3, 3.4 and 4.0 are tested in CI; bfd4r needs 3.3. Tests use
+Ruby 3.2, 3.3, 3.4 and 4.0 are tested in CI; 3.2 is the floor for
+every router that takes bfd4r (the owner, 2026-11-21). Tests use
 test-unit. bfd4r must be checked out beside this repository, at
 `../bfd4r`, for `bundle` and for the image.
 
