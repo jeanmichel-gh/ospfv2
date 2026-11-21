@@ -130,7 +130,10 @@ check "a git repository with a first commit" git -C "$LAB" rev-parse --verify -q
 check "nothing uncommitted" test -z "$(git -C "$LAB" status --porcelain)"
 
 step "image"
-if [ -z "${SKIP_BUILD:-}" ]; then docker build -q -t ospfv2 --build-context bfd4r=../bfd4r . >/dev/null; fi
+if [ -z "${SKIP_BUILD:-}" ]; then
+  test/lab/bases.sh Dockerfile docker/bird/Dockerfile || fail "base images"
+  docker build -q -t ospfv2 --build-context bfd4r=../bfd4r . >/dev/null
+fi
 check "ospfv2 image" docker image inspect ospfv2 >/dev/null
 
 step "lab up"

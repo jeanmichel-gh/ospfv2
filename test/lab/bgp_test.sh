@@ -114,6 +114,7 @@ check "the topology" test -f "$DIR/$NAME.clab.yml"
 
 step "images"
 if [ -z "${SKIP_BUILD:-}" ]; then
+  test/lab/bases.sh Dockerfile docker/bird/Dockerfile || fail "base images"
   [ "$WHICH" = ospf-bgp ] && docker build -q -t ospfv2 --build-context bfd4r=../bfd4r . >/dev/null
   docker build -q -t ospfv2-bird docker/bird >/dev/null
 fi

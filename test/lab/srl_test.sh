@@ -75,6 +75,7 @@ ruby bin/ospfv2 lab new "$DIR" --srlinux
 check "the topology and one folder per node" test -f "$DIR/$NAME.clab.yml" -a -f "$DIR/srl/config.cli" -a -d "$DIR/ospfd"
 
 step "images"
+[ -z "${SKIP_BUILD:-}" ] && { test/lab/bases.sh Dockerfile || fail "base images"; }
 [ -z "${SKIP_BUILD:-}" ] && docker build -q -t ospfv2 --build-context bfd4r=../bfd4r . >/dev/null
 check "ospfv2 image" docker image inspect ospfv2
 IMAGE="$(ruby -ryaml -e 'puts YAML.load_file(ARGV[0]).dig("topology", "nodes", "srl", "image")' "$DIR/$NAME.clab.yml")"
