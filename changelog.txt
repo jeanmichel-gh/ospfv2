@@ -1,5 +1,15 @@
 === Unreleased
 
+* ospfd runs BFD for its neighbors: bfd-liveness-detection on an
+  interface, with minimum-interval and multiplier, as on Junos. The
+  sessions are bfdd4r's, from bfd4r, which the image now starts beside
+  every role (entrypoint with-bfdd4r). A session that goes Down takes
+  the neighbor Down ("BFD down"); AdminDown does nothing. show.neighbors
+  gains bfd, and a bfd event kind. routescope/labs/ospf-bfd checks it
+  with FRR
+* bfd4r is a dependency, taken by path from ../bfd4r: the image build
+  needs --build-context bfd4r=../bfd4r. Ruby 3.3 or later, as bfd4r
+
 * ospf-lab drops `peer`, the second ospfv2 that could stand in for FRR.
   It added nothing FRR does not, and routescope drew a second simulated
   area for it. The compose `lab` profile goes with it: start the lab

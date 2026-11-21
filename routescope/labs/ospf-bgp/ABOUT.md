@@ -20,6 +20,6 @@ Two AS domains. AS 65000 runs OSPF: the simulator (a 3x3 grid behind it), ospfd,
 
 The BGP labs reuse the names r1, r2 and r3. Each lab's containers are named `clab-LAB-NODE`, so the labs can run side by side.
 
-Images: `ospfv2:latest` and `ospfv2-bird:latest`, built in the ospfv2 checkout (`docker build -t ospfv2 . && docker compose --profile bird build bird`), and FRR (`docker pull quay.io/frrouting/frr:10.2.1`).
+Images: `ospfv2:latest` and `ospfv2-bird:latest`, built in the ospfv2 checkout (`docker build -t ospfv2 --build-context bfd4r=../bfd4r . && docker compose --profile bird build bird`), and FRR (`docker pull quay.io/frrouting/frr:10.2.1`).
 
 Start it from routescope's Labs panel, or in this folder: `sudo containerlab deploy -t ospf-bgp.clab.yml`.

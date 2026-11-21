@@ -16,12 +16,12 @@ module OSPFv2
 
       DEFAULTS = {
         type: :broadcast, cost: 10, priority: 1, hello_interval: 10, dead_interval: nil,
-        rxmt_interval: 5, transmit_delay: 1, mtu: 1500, mtu_ignore: false, passive: false, auth: nil
+        rxmt_interval: 5, transmit_delay: 1, mtu: 1500, mtu_ignore: false, passive: false, auth: nil, bfd: nil
       }.freeze
 
       attr_reader :instance, :name, :area, :address, :prefix_len, :type, :cost, :priority,
                   :hello_interval, :dead_interval, :rxmt_interval, :transmit_delay, :mtu,
-                  :state, :dr, :bdr, :neighbors, :stats, :transport, :auth
+                  :state, :dr, :bdr, :neighbors, :stats, :transport, :auth, :bfd
       attr_accessor :mtu_ignore
 
       # instance:  the Core::Instance
@@ -30,6 +30,8 @@ module OSPFv2
       # area:      the Core::Area
       # transport: a Transport (RawSocket, Loopback); nil for passive
       # auth:      authentication spec for Auth.build (null by default)
+      # bfd:       nil, or { minimum_interval: ms, multiplier: n }, both
+      #            optional: BFD for the neighbors here (Core::Bfd)
       def initialize(instance, name:, address:, area:, transport: nil, **opts)
         unknown = opts.keys - DEFAULTS.keys
         raise ArgumentError, "unknown interface option(s): #{unknown.join(', ')}" unless unknown.empty?
@@ -54,6 +56,7 @@ module OSPFv2
         @mtu_ignore = o[:mtu_ignore]
         @passive = o[:passive]
         self.auth = o[:auth]
+        @bfd = o[:bfd]
         @transport = transport
         raise ArgumentError, "interface #{name} needs a transport unless passive" if @transport.nil? && !@passive
 
@@ -85,6 +88,14 @@ module OSPFv2
         return if value == @cost
         @cost = value
         @area.schedule_origination if up?
+      end
+
+      # Turns BFD on (a Hash, maybe empty) or off (nil) for the neighbors
+      # here, without touching adjacencies.
+      def bfd=(opts)
+        return if opts == @bfd
+        @bfd = opts
+        @instance.bfd&.interface_changed(self)
       end
 
       # Largest packet body that fits the MTU with our authentication.

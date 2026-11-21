@@ -104,4 +104,31 @@ class TestConfigModel < Test::Unit::TestCase
     assert_match(/both stub and nssa/, errors('set routing-options router-id 1.1.1.1', 'set protocols ospf area 1 stub',
                                               'set protocols ospf area 1 nssa').join)
   end
+
+  # Junos: [edit protocols ospf area area-id interface interface-name]
+  # bfd-liveness-detection { minimum-interval ms; multiplier n; }
+  def test_bfd_liveness_detection
+    m = model('set protocols ospf area 0 interface eth1 bfd-liveness-detection minimum-interval 300',
+              'set protocols ospf area 0 interface eth1 bfd-liveness-detection multiplier 4',
+              'set protocols ospf area 0 interface eth2 bfd-liveness-detection',
+              'set protocols ospf area 0 interface eth3')
+    assert_equal({ minimum_interval: 300, multiplier: 4 }, m.interfaces['eth1'][:bfd])
+    assert_equal({}, m.interfaces['eth2'][:bfd], 'alone: bfdd4r\'s timers')
+    refute m.interfaces['eth3'].key?(:bfd)
+  end
+
+  def test_bfd_liveness_detection_ranges
+    t = Tree.new
+    assert_match(/not within range \(1..255000\)/,
+                 t.load('set protocols ospf area 0 interface eth1 bfd-liveness-detection minimum-interval 0').join)
+    assert_match(/not within range \(1..255\)/,
+                 t.load('set protocols ospf area 0 interface eth1 bfd-liveness-detection multiplier 256').join)
+  end
+
+  def test_bfd_on_a_passive_interface_is_a_warning
+    m = model('set protocols ospf area 0 interface lo passive',
+              'set protocols ospf area 0 interface lo bfd-liveness-detection')
+    refute m.interfaces['lo'].key?(:bfd)
+    assert_include m.warnings, 'interface lo: passive, so bfd-liveness-detection has no neighbor to run on'
+  end
 end

@@ -31,6 +31,6 @@ The scenario `edge-down` takes the simulator's link to `edge` down and up. Measu
 
 ## Images
 
-Images: `ospfv2:latest`, built in the ospfv2 checkout (`docker build -t ospfv2 .`), and SR Linux, free from Nokia (`docker pull ghcr.io/nokia/srlinux:26.3.1`).
+Images: `ospfv2:latest`, built in the ospfv2 checkout (`docker build -t ospfv2 --build-context bfd4r=../bfd4r .`), and SR Linux, free from Nokia (`docker pull ghcr.io/nokia/srlinux:26.3.1`).
 
 Start it from routescope's Labs panel, or in this folder: `sudo containerlab deploy -t ospf-srl.clab.yml`.

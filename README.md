@@ -6,8 +6,10 @@ Simulate an OSPFv2 area behind one LAN or point-to-point interface.
 synthetic link state database behind it. Use it to load a router with thousands of
 LSAs, flap links and watch SPF, or check how a router handles summaries and externals.
 
-It targets Ruby 3.1 and later (CI covers 3.2 to 4.0), uses the standard library only,
-and ships as a Docker image.
+It targets Ruby 3.3 and later (CI covers 3.3 to 4.0), uses the standard library and
+[bfd4r](https://github.com/jeanmichel-gh/bfd4r), the BFD library ospfd's neighbors use,
+and ships as a Docker image. bfd4r is not published yet: clone it beside this
+repository, where the `Gemfile` and the image build look for it (`../bfd4r`).
 
 Since 1.0 it has a second mode: `ospfd`, an OSPFv2 router you configure and query with
 `ospf-cli` in Junos or IOS terms. It forms adjacencies, floods, authenticates,
@@ -308,9 +310,39 @@ ones it no longer has, so traffic it forwards has no gap. Traffic back to the ro
 still drops while the neighbors rebuild their adjacencies: avoiding that needs graceful
 restart, which is not implemented yet.
 
-A metric or authentication change applies without touching adjacencies. Other changes
+A metric, authentication or BFD change applies without touching adjacencies. Other changes
 to an interface restart it. An interface that does not exist yet, is down or has no
 IPv4 address waits, and starts within 5 seconds of appearing.
+
+### BFD
+
+`bfd-liveness-detection` on an interface runs BFD (RFC 5880, 5881) for each neighbor
+there, through `bfdd4r`, the BFD daemon from [bfd4r](https://github.com/jeanmichel-gh/bfd4r).
+ospfd is its client `ospfd`. The Docker image starts `bfdd4r` beside whatever it runs
+(its entrypoint is `with-bfdd4r`); on a host, run `bfdd4r` yourself.
+
+```
+set protocols ospf area 0 interface eth1 bfd-liveness-detection minimum-interval 300
+set protocols ospf area 0 interface eth1 bfd-liveness-detection multiplier 3
+```
+
+| Statement | Default |
+| --- | --- |
+| `minimum-interval 1..255000` | bfdd4r's, 300 ms: transmit and receive interval, in milliseconds. bfdd4r refuses less than 300 ms |
+| `multiplier 1..255` | 3: packets missed before the session goes down |
+
+The statement alone takes bfdd4r's timers. What it does (RFC 5882):
+
+* A neighbor at 2-Way or above gets a session to its interface address. It is let go
+  when the neighbor goes Down.
+* A session that was Up and goes Down takes the neighbor Down, with the event
+  `BFD down` (10.1.2). A session going AdminDown, on either end, does nothing (4.2).
+* A neighbor never waits for BFD: OSPFv2 cannot say it runs BFD (4.1).
+* If `bfdd4r` is not running, or goes away, the neighbors stay up without BFD, with one
+  warning. When it answers again the sessions are asked for again.
+
+`show.neighbors` gives each neighbor's session as `bfd`: `up` or `down`, absent when its
+interface runs no BFD. `routescope/labs/ospf-bfd` is the interop check with FRR.
 
 ### Show commands
 
@@ -393,6 +425,7 @@ time, a level, a kind, a message and, for most kinds, structured `data`:
 | `lsa` | One of our LSAs is flushed, or an LSA reaches MaxAge | `change`, `lsa_type`, `ls_id`, `advr`, `seq` |
 | `router` | The router starts or stops | `state`, `router_id` |
 | `virtual_link` | A virtual link comes up or goes down | `to`, `neighbor_id`, `cost` |
+| `bfd` | A BFD session is wanted, let go or changes state; bfdd4r answers or is lost | `peer`, `from`, `to` (`wanted`, `released`, or a BFD state), `diag`; or `bfdd4r` (`connected`, `lost`); or `peer`, `error` |
 | `commit` | A commit | `comment`, `changes`, `statements` (the first 50, secrets hidden), `saved` |
 | `log` | Anything else | none |
 
@@ -402,7 +435,7 @@ it then gets an `overflow` event with the number lost.
 ## Docker
 
 ```sh
-docker build -t ospfv2 .
+docker build -t ospfv2 --build-context bfd4r=../bfd4r .
 docker run --rm -p 8080:8080 ospfv2                    # the demo
 docker run --rm --network host --cap-add NET_RAW \
   -v $PWD/lab.yml:/work/lab.yml ospfv2 run lab.yml --web 0.0.0.0:8080
@@ -470,11 +503,11 @@ others. RFC 2328 and RFC 4915 (multi-topology metrics).
 bundle install
 bundle exec rake test               # unit and integration tests
 bundle exec rake test:integration   # two simulators syncing over an in-memory segment
-docker build --target test .        # the same tests inside the image
+docker build --target test --build-context bfd4r=../bfd4r .        # the same tests inside the image
 test/lab/lab_test.sh                # the compose router lab end to end (Docker, a few minutes)
 ```
 
-CI runs the unit tests on Ruby 3.2 to 4.0, the FRR interop tests in network
+CI runs the unit tests on Ruby 3.3 to 4.0, the FRR interop tests in network
 namespaces, the image build, and `test/lab/lab_test.sh`.
 
 The FRR interop tests need root and `OSPFV2_FRR=1`. On Ubuntu 26.04, AppArmor confines

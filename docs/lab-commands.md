@@ -94,9 +94,11 @@ Set the branch of each repo you want to run, then paste the whole block. It fetc
 OSPFV2_BRANCH=master            # or a branch, e.g. lab-commands
 ROUTESCOPE_BRANCH=main          # or a branch, e.g. lab-missing
 
+cd ~/bfd4r                      # the ospfv2 image builds bfd4r in, from beside it
+git fetch origin && git switch master && git pull --ff-only
 cd ~/ospfv2
 git fetch origin && git switch "$OSPFV2_BRANCH" && git pull --ff-only
-docker build -t ospfv2 .
+docker build -t ospfv2 --build-context bfd4r=../bfd4r .
 
 cd ~/routescope
 git fetch origin && git switch "$ROUTESCOPE_BRANCH" && git pull --ff-only
@@ -126,6 +128,7 @@ First time only, to get routescope:
 ```sh
 # in the VM
 cd ~ && git clone https://github.com/jeanmichel-gh/routescope.git
+cd ~ && git clone https://github.com/jeanmichel-gh/bfd4r.git    # beside ospfv2: its image needs it
 ```
 
 ## Start everything after a VM boot
@@ -216,7 +219,7 @@ A second lab, on containerlab: the simulated area behind FRR, and a ring of poin
 ```sh
 # in the VM
 bash -c "$(curl -sL https://get.containerlab.dev)"
-cd ~/ospfv2 && docker build -t ospfv2 . && docker compose --profile bird build bird
+cd ~/ospfv2 && docker build -t ospfv2 --build-context bfd4r=../bfd4r . && docker compose --profile bird build bird
 docker pull quay.io/frrouting/frr:10.2.1
 ```
 
@@ -272,6 +275,29 @@ docker exec clab-ospf-srl-ospfd ospf-cli -c 'show ospf neighbor'
 ```
 
 Its configuration is `~/labs/ospfv2/ospf-srl/srl/config.cli`: `set` lines applied when it boots. Its ports are `ethernet-1/1` and `ethernet-1/2` in its CLI, `e1-1` and `e1-2` for Linux and routescope's link faults.
+
+## The BFD lab
+
+ospfd and FRR on one link, each running BFD for its OSPF neighbor: the interop check for BFD in ospfd. ospfd's BFD sessions are `bfdd4r`'s, from bfd4r, which the image starts beside ospfd. Make the lab once:
+
+```sh
+# in the VM
+docker pull quay.io/frrouting/frr:10.2.1
+routescope-labs install ospfv2/ospf-bfd
+```
+
+Then start it from routescope's lab menu. Look at it, and fail the link:
+
+```sh
+# in the VM
+docker exec clab-ospf-bfd-ospfd ospf-cli -c 'show ospf neighbor | display json'   # "bfd": "up"
+docker exec clab-ospf-bfd-ospfd bfd4r-cli --pretty show.sessions
+docker exec clab-ospf-bfd-frr vtysh -c 'show bfd peers'
+sudo containerlab tools netem set -n clab-ospf-bfd-ospfd -i eth1 --loss 100   # the neighbor goes Down within a second
+sudo containerlab tools netem set -n clab-ospf-bfd-ospfd -i eth1 --loss 0
+```
+
+`test/lab/bfd_test.sh` runs the whole check from `~/ospfv2`: it replaces a running `ospf-bfd` lab.
 
 ## The BGP labs
 

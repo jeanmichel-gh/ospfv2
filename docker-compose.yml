@@ -30,7 +30,11 @@
 # not an empty folder Docker makes as root.
 
 x-ospfv2: &ospfv2
-  build: .
+  # bfd4r is a sibling checkout (Dockerfile).
+  build:
+    context: .
+    additional_contexts:
+      bfd4r: ../bfd4r
   image: ospfv2:latest
   cap_drop: [ALL]
   cap_add: [NET_RAW]

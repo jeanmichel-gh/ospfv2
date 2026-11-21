@@ -7,6 +7,7 @@ require_relative 'fib'
 require_relative 'daemon/system'
 require_relative 'daemon/views'
 require_relative 'daemon/events'
+require_relative 'daemon/bfd'
 
 module OSPFv2
   # ospfd: runs the router core from a configuration file and answers the
@@ -30,7 +31,8 @@ module OSPFv2
     # Its own timers by name, for show timers.
     def timers = { link_recheck: @recheck }.compact
 
-    attr_reader :loop, :running, :candidate, :instance, :started_at, :broken_file, :fib, :fib_error, :events
+    attr_reader :loop, :running, :candidate, :instance, :started_at, :broken_file, :fib, :fib_error, :events,
+                :bfd_link
 
     # In-memory kernel table: what a Daemon installs into unless told
     # otherwise, so tests and embedding never touch the host. bin/ospfd
@@ -41,12 +43,22 @@ module OSPFv2
       Fib::Netlink.new(protocol: protocol, table: table)
     end
 
+    # bfdd4r's client, from bfd4r. bin/ospfd passes it. Without it, a
+    # Daemon runs no BFD: tests and embedding never look for a bfdd4r.
+    BFD_CLIENT = lambda do |name|
+      require 'bfd/client'
+      BFD::Client.new(name)
+    end
+
     # transport: ->(ifname, ip) { a Transport } for each non-passive interface
     # fib:       ->(protocol:, table:) { a Fib backend }
+    # bfd:       ->(client_name) { a BFD::Client }, or nil for no BFD
     def initialize(config_path:, loop: nil, system: System.new, logger: nil,
                    transport: ->(ifname, ip) { Transport::RawSocket.new(ip, interface: ifname) },
-                   fib: MEMORY_FIB)
+                   fib: MEMORY_FIB, bfd: nil)
       @config_path = config_path
+      @bfd_factory = bfd
+      @bfd_link = nil
       @loop = loop || EventLoop.new
       @system = system
       @logger = logger
@@ -95,6 +107,8 @@ module OSPFv2
         @instance&.stop # its routes leave the kernel with it
         stop_fib
       end
+      # After the router: its neighbors going Down let their sessions go.
+      @bfd_link&.stop
       @loop.stop if @loop.running?
       self
     end
@@ -293,10 +307,34 @@ module OSPFv2
       end
       apply_kernel(model.kernel)
       apply_areas(model.areas)
+      apply_bfd(model.interfaces)
       sync_interfaces
       apply_virtual_links(model.virtual_links)
       @export = model.export
       export_routes
+    end
+
+    # BFD for the router's neighbors (Core::Bfd), once an interface asks
+    # for it, so an ospfd without bfd4r runs when none does. One link to
+    # bfdd4r for the life of the daemon; its events reach the router on
+    # the loop, whichever router runs by then. Before the interfaces are
+    # added, so their neighbors are seen from the first hello.
+    def apply_bfd(interfaces)
+      names = interfaces.select { |_, o| o[:bfd] }.keys
+      return if names.empty? || @instance.bfd
+      unless @bfd_factory
+        log(:warn, "bfd-liveness-detection on #{names.join(', ')}: this ospfd runs without a BFD client") unless names == @no_bfd_told
+        @no_bfd_told = names
+        return
+      end
+      @bfd_link ||= BfdLink.new(@bfd_factory.call('ospfd'), loop: @loop) do |events|
+        @loop.post { @instance&.bfd&.handle(events) }
+      end
+      Core::Bfd.new(@instance, @bfd_link)
+    rescue LoadError => e
+      log(:error, "bfd-liveness-detection on #{names.join(', ')}: cannot load bfd4r (#{e.message}); running without BFD")
+      @bfd_factory = nil
+      @no_bfd_told = names
     end
 
     # Area options (stub, NSSA). Becoming or ceasing to be a stub or NSSA
@@ -494,7 +532,7 @@ module OSPFv2
     end
 
     # Options an interface takes without being restarted.
-    LIVE = %i[auth cost].freeze
+    LIVE = %i[auth cost bfd].freeze
 
     def same_except_live?(applied, want, link)
       applied[:address] == link.address && applied[:link_mtu] == link.mtu &&
@@ -511,6 +549,10 @@ module OSPFv2
       if have[:cost] != want[:cost]
         iface.cost = want[:cost] || Core::Interface::DEFAULTS[:cost]
         log(:info, "interface #{name}: cost #{iface.cost}")
+      end
+      if have[:bfd] != want[:bfd]
+        iface.bfd = want[:bfd]
+        log(:info, "interface #{name}: BFD #{want[:bfd] ? 'on' : 'off'}")
       end
       @applied[name] = want.merge(address: have[:address], link_mtu: have[:link_mtu])
     end

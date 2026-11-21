@@ -238,7 +238,11 @@ module OSPFv2
           dead_in: dead_in&.ceil, role: @master.nil? ? nil : (master? ? :slave : :master),
           ls_request: @ls_request.size, retransmit: @retransmit.size, db_summary: @db_summary.size,
           uptime: (now - @last_change).floor, state_changes: @state_changes
-        }
+        }.tap do |h|
+          # BFD's state when the interface runs BFD: "up" or "down".
+          bfd = instance.bfd&.state_of(self)
+          h[:bfd] = bfd if bfd
+        end
       end
 
       # Its timers by name, for show timers.

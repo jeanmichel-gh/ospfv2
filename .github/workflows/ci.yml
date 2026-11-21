@@ -31,9 +31,18 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        ruby: ['3.2', '3.3', '3.4', '4.0']
+        # bfd4r needs Ruby 3.3 (its gemspec), so ospfv2 does too.
+        ruby: ['3.3', '3.4', '4.0']
     steps:
       - uses: actions/checkout@v4
+      # bfd4r is a path dependency (../bfd4r in the Gemfile, a build
+      # context for the image), so it goes beside this repository.
+      - uses: actions/checkout@v4
+        with:
+          repository: jeanmichel-gh/bfd4r
+          path: bfd4r
+          persist-credentials: false
+      - run: mv bfd4r ../bfd4r
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: ${{ matrix.ruby }}
@@ -48,6 +57,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      # bfd4r is a path dependency (../bfd4r in the Gemfile, a build
+      # context for the image), so it goes beside this repository.
+      - uses: actions/checkout@v4
+        with:
+          repository: jeanmichel-gh/bfd4r
+          path: bfd4r
+          persist-credentials: false
+      - run: mv bfd4r ../bfd4r
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.3'
@@ -84,8 +101,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - run: docker build --target test .
-      - run: docker build -t ospfv2 . && docker run --rm ospfv2 check /app/examples/grid.yml
+      # bfd4r is a path dependency (../bfd4r in the Gemfile, a build
+      # context for the image), so it goes beside this repository.
+      - uses: actions/checkout@v4
+        with:
+          repository: jeanmichel-gh/bfd4r
+          path: bfd4r
+          persist-credentials: false
+      - run: mv bfd4r ../bfd4r
+      - run: docker build --target test --build-context bfd4r=../bfd4r .
+      - run: docker build -t ospfv2 --build-context bfd4r=../bfd4r . && docker run --rm ospfv2 check /app/examples/grid.yml
 
   # The router lab from docker-compose.yml, end to end, as in the user
   # guide: a lab folder from "ospfv2 lab new", sim, frr and ospfd up,
@@ -97,6 +122,14 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      # bfd4r is a path dependency (../bfd4r in the Gemfile, a build
+      # context for the image), so it goes beside this repository.
+      - uses: actions/checkout@v4
+        with:
+          repository: jeanmichel-gh/bfd4r
+          path: bfd4r
+          persist-credentials: false
+      - run: mv bfd4r ../bfd4r
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.3'
@@ -110,12 +143,44 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+      # bfd4r is a path dependency (../bfd4r in the Gemfile, a build
+      # context for the image), so it goes beside this repository.
+      - uses: actions/checkout@v4
+        with:
+          repository: jeanmichel-gh/bfd4r
+          path: bfd4r
+          persist-credentials: false
+      - run: mv bfd4r ../bfd4r
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.3'
       - run: bash -c "$(curl -sL https://get.containerlab.dev)"
       - run: test/lab/pull.sh quay.io/frrouting/frr:10.2.1
       - run: test/lab/clab_test.sh
+
+  # BFD with FRR: routescope/labs/ospf-bfd, its gate. BFD Up on both and
+  # the neighbor Full; the link at 100% loss, the neighbor Down in under a
+  # second on both, with "BFD down" on ospfd.
+  bfd:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      # bfd4r is a path dependency (../bfd4r in the Gemfile, a build
+      # context for the image), so it goes beside this repository.
+      - uses: actions/checkout@v4
+        with:
+          repository: jeanmichel-gh/bfd4r
+          path: bfd4r
+          persist-credentials: false
+      - run: mv bfd4r ../bfd4r
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+      - run: bash -c "$(curl -sL https://get.containerlab.dev)"
+      - run: test/lab/pull.sh quay.io/frrouting/frr:10.2.1
+      - run: test/lab/bfd_test.sh
 
   # The BGP labs: three iBGP speakers in one AS (FRR, FRR, BIRD), then an
   # OSPF domain redistributed into BGP and carried into that AS.
@@ -125,6 +190,14 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+      # bfd4r is a path dependency (../bfd4r in the Gemfile, a build
+      # context for the image), so it goes beside this repository.
+      - uses: actions/checkout@v4
+        with:
+          repository: jeanmichel-gh/bfd4r
+          path: bfd4r
+          persist-credentials: false
+      - run: mv bfd4r ../bfd4r
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.3'
@@ -143,6 +216,14 @@ jobs:
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
+      # bfd4r is a path dependency (../bfd4r in the Gemfile, a build
+      # context for the image), so it goes beside this repository.
+      - uses: actions/checkout@v4
+        with:
+          repository: jeanmichel-gh/bfd4r
+          path: bfd4r
+          persist-credentials: false
+      - run: mv bfd4r ../bfd4r
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.3'

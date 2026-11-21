@@ -170,7 +170,7 @@ If QEMU will not start and its error mentions the address size or IPA, add `,hig
 
 ## Ruby, Docker and the repo
 
-ospfv2 uses the Ruby standard library only, so there are no gems to install. Ruby 3.2 or newer is enough.
+ospfv2 uses the Ruby standard library and one gem of its own, bfd4r, for BFD. bfd4r is not published: it is cloned beside ospfv2, where the image build and the `Gemfile` find it. Ruby 3.3 or newer is enough.
 
 ### In the VM
 
@@ -223,6 +223,7 @@ Then get the code:
 # in the VM
 ruby -v                                   # 3.3 on Ubuntu 26.04
 git clone https://github.com/jeanmichel-gh/ospfv2.git
+git clone https://github.com/jeanmichel-gh/bfd4r.git   # beside it: the image build reads ../bfd4r
 cd ospfv2
 ```
 
@@ -230,7 +231,7 @@ To run the unit tests (optional, about a minute):
 
 ```sh
 # in the VM, from ~/ospfv2
-ruby -Ilib -Itest -e 'Dir["test/unit/**/*_test.rb"].each { |f| require "./#{f}" }'
+ruby -Ilib -I../bfd4r -Itest -e 'Dir["test/unit/**/*_test.rb"].each { |f| require "./#{f}" }'
 ```
 
 If it says it cannot load `test/unit`, run `sudo gem install test-unit` and try again.
@@ -246,12 +247,12 @@ It prints `ok` or `FAIL` per check, and on a failure the routers' neighbors and 
 
 ### On the Mac
 
-Only for the demo and for `ospf-cli`. Any Ruby 3.2 or newer works; with [rv](https://github.com/spinel-coop/rv):
+Only for the demo and for `ospf-cli`. Any Ruby 3.3 or newer works; with [rv](https://github.com/spinel-coop/rv):
 
 ```sh
 cd ~/path/to/ospfv2                 # your clone
 git pull
-rv ruby list                        # need 3.2 or newer
+rv ruby list                        # need 3.3 or newer
 rv ruby install latest              # only if the list has none
 ruby -v
 ```
@@ -302,7 +303,7 @@ The repo's `Dockerfile` builds one image for the demo, the simulator and `ospfd`
 ```sh
 # in the VM
 cd ~/ospfv2
-docker build -t ospfv2 .                       # about a minute the first time
+docker build -t ospfv2 --build-context bfd4r=../bfd4r .                       # about a minute the first time
 docker images ospfv2                           # the image and its size
 docker run --rm ospfv2 --help                  # ospfv2 1.0.0 and its commands
 docker run --rm ospfv2 check /app/examples/grid.yml
@@ -332,15 +333,15 @@ Build again after each `git pull`; Docker reuses the unchanged layers, so it tak
 
 #### Run the tests in the image
 
-The `Dockerfile` has three stages: `base` (Ruby 4.0 and the code), `test` (base plus the tests, run by a `RUN` step) and `runtime` (base plus the entrypoint, the image you use). `docker build -t ospfv2 .` builds `runtime` and skips the tests. `--target test` builds the `test` stage instead, so the tests run in the same Ruby, Debian and arm64 image you ship. A failing test fails the build. CI runs the same command.
+The `Dockerfile` has three stages: `base` (Ruby 4.0 and the code), `test` (base plus the tests, run by a `RUN` step) and `runtime` (base plus the entrypoint, the image you use). `docker build -t ospfv2 --build-context bfd4r=../bfd4r .` builds `runtime` and skips the tests. `--target test` builds the `test` stage instead, so the tests run in the same Ruby, Debian and arm64 image you ship. A failing test fails the build. CI runs the same command.
 
 Docker caches each step. When nothing changed it prints `CACHED` and the tests do not run again; `--no-cache` forces them.
 
 ```sh
 # in the VM, from ~/ospfv2
-docker build --target test --progress=plain -t ospfv2:test .              # tests, with every output line
-docker build --target test --progress=plain --no-cache -t ospfv2:test .   # run them again even if nothing changed
-docker build --build-arg RUBY_VERSION=3.4 -t ospfv2:ruby3.4 .   # the image on another Ruby
+docker build --target test --progress=plain --build-context bfd4r=../bfd4r -t ospfv2:test .              # tests, with every output line
+docker build --target test --progress=plain --no-cache --build-context bfd4r=../bfd4r -t ospfv2:test .   # run them again even if nothing changed
+docker build --build-arg RUBY_VERSION=3.4 --build-context bfd4r=../bfd4r -t ospfv2:ruby3.4 .   # the image on another Ruby
 ```
 
 The `-t ospfv2:test` tag makes the test image show in `docker images`. Without a tag it is a dangling image, which `docker images` hides; `docker images -a` lists those as `<untagged>`. You do not need the test image afterwards: `docker rmi ospfv2:test` removes it, and `docker image prune` removes the untagged ones.
@@ -655,7 +656,7 @@ In the VM, from `~/ospfv2`:
 
 ```sh
 # in the VM, from ~/ospfv2
-git pull && docker build -t ospfv2 .           # update code and image
+git pull && docker build -t ospfv2 --build-context bfd4r=../bfd4r .           # update code and image
 bin/ospfv2 demo --web 0.0.0.0:8080             # demo, http://localhost:8080 on the Mac
 routescope-labs install ospfv2/ospf-lab        # your own lab folder, once
 export LAB=~/labs/ospfv2/ospf-lab              # which lab folder compose uses

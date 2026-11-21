@@ -19,10 +19,14 @@ ospfv2 is a pure Ruby OSPFv2 implementation (RFC 2328) with two modes.
 It also ships the router labs that routescope, the lab console, runs, and
 `ospfv2 capture`, the dissector routescope's packet pane reads.
 
-The runtime uses the Ruby standard library only. The gemspec declares
-`irb` and `reline`, which left the default gems, and nothing else. **Do not
-add a runtime gem.** routescope has its own gems; ospfv2 does not borrow
-them.
+The runtime uses the Ruby standard library and the owner's own gems,
+brought in by path. The gemspec declares `irb` and `reline`, which left
+the default gems, and `bfd4r`, the owner's BFD library: the `Gemfile` takes
+it from `../bfd4r`, the image from the build context
+`--build-context bfd4r=../bfd4r`, as isis takes datalink-socket. **Add no
+other runtime gem.** routescope has its own gems; ospfv2 does not borrow
+them. Owner's decision, 2026-11-21 (routescope `docs/design/bfd-clients.md`,
+decision 1).
 
 ## The rule the rest follow from
 
@@ -64,15 +68,17 @@ infra/               shared by both modes: event loop, clocks, scheduler,
 core/                the router. instance.rb is one router; interface,
                      neighbor, area, virtual_link, lsdb, spf,
                      lsdb_topology (the LSDB as nodes, for BGP-LS),
-                     spf_scheduler (RFC 8405), auth, and wire.rb, the
-                     packet codec; lsa.rb holds LSAs as raw bytes
+                     spf_scheduler (RFC 8405), auth, bfd (which BFD
+                     sessions to want, what a failure does), and wire.rb,
+                     the packet codec; lsa.rb holds LSAs as raw bytes
 fib.rb, fib/         routes into the kernel: Manager decides, a backend
                      installs. netlink.rb on Linux, memory.rb in tests
 config/              the Junos style configuration: schema.rb is the
                      tree of statements, tree.rb parses set lines,
                      model.rb checks a commit, policy.rb export policies
 daemon.rb, daemon/   ospfd: the core on the real clock, the management
-                     API (JSON lines on a Unix socket), views, events
+                     API (JSON lines on a Unix socket), views, events,
+                     bfd.rb: the thread that polls bfd4r's BFD::Client
 command_line/        ospf-cli: the command grammar, the shell, the
                      Junos and IOS formatters, the socket client
 
@@ -96,7 +102,7 @@ test/integration/    two simulators over the in-memory segment, and the
                      FRR interop tests in network namespaces
 test/support/        the FRR namespace harness, netlink probe, and
                      routescope_vocabulary.rb: what routescope reads from ospfd
-test/lab/            the lab tests, in shell: compose, clab, srl, bgp; pull.sh,
+test/lab/            the lab tests, in shell: compose, clab, srl, bgp, bfd; pull.sh,
                      the image pulls CI makes, retried
 examples/            grid.yml, and links from the old template paths to
                      routescope/labs, for one release
@@ -163,6 +169,8 @@ others the code cites:
 | 5709 | HMAC-SHA authentication | `core/auth.rb` |
 | 8405 | SPF back-off | `core/spf_scheduler.rb` |
 | 9552 | BGP-LS: the LSDB as nodes for a Producer | `core/lsdb_topology.rb` |
+| 5880 | BFD; its timers are in microseconds | `core/bfd.rb`, through bfd4r |
+| 5882 | BFD clients: 4.1 no waiting, 4.2 AdminDown, 10.1.2 OSPF | `core/bfd.rb` |
 | 5250 | opaque LSAs | `lsa/opaque.rb`, dissector |
 | 3630 | TE LSAs | `lsa/traffic_engineering.rb`, `lsa/tlv/` |
 | 4915 | multi-topology metrics | `ie/`, `lsa/external.rb` |
@@ -193,13 +201,14 @@ plan and its decisions are in `docs/console-plan.md` and
 **A lab is a folder**: `lab.yml` or `NAME.clab.yml`, plus one config per
 node, an `ABOUT.md` and a `.gitignore` for runtime state. The labs live in
 `routescope/labs/<lab>/`, named for the lab: ospf-lab, ospf-ring,
-ospf-srl, bgp-ibgp, ospf-bgp, isis-bgp. Each is complete as committed; no
+ospf-srl, bgp-ibgp, ospf-bgp, isis-bgp, ospf-bfd. Each is complete as committed; no
 step generates files. routescope's `routescope-labs install ospfv2/<lab>`
 copies one into `~/labs/ospfv2/<lab>` (routescope's
 `docs/design/labs-layout.md`). `ospfv2 lab new DIR` stays one release: it
 copies from `routescope/labs/`, makes a git repository, and prints the
 `routescope-labs` line. Flags pick the lab: none for the compose lab,
-`--containerlab`, `--srlinux`, `--bgp`, `--ospf-bgp`, `--isis-bgp`. The
+`--containerlab`, `--srlinux`, `--bgp`, `--ospf-bgp`, `--isis-bgp`; ospf-bfd,
+newer, has no flag (`CLI::LABS`). The
 old `examples/` paths are symlinks for that release. routescope runs
 compose labs with this repo's `docker-compose.yml`.
 
@@ -225,7 +234,9 @@ bgp4r's own docs. `docs/lab-commands.md` is the runbook for all of them.
 
 ## Testing
 
-Ruby 3.2, 3.3, 3.4 and 4.0 are tested in CI. Tests use test-unit.
+Ruby 3.3, 3.4 and 4.0 are tested in CI; bfd4r needs 3.3. Tests use
+test-unit. bfd4r must be checked out beside this repository, at
+`../bfd4r`, for `bundle` and for the image.
 
 The full unit suite:
 
@@ -233,9 +244,9 @@ The full unit suite:
 bundle exec rake test:unit
 ```
 
-It needs no root and no network, and takes about 20 seconds. Measured
-2026-11-10 on Ruby 3.3.8: 664 tests, 6992 assertions, all passing, with
-one omission (a test that needs root). Copy counts out of a run, never
+It needs no root and no network, and takes under a minute. Measured
+2026-11-21 on Ruby 3.3.8: 724 tests, 7380 assertions, all passing, with
+one omission (a test that needs root), in 46 seconds. Copy counts out of a run, never
 work them out.
 
 The other tiers:
@@ -246,10 +257,11 @@ bundle exec rake test:integration            # two simulators over the in-memory
 bundle exec ruby -Ilib -Itest test/unit/core/spf_test.rb   # one file
 sudo -E env "PATH=$PATH" OSPFV2_FRR=1 bundle exec ruby -Ilib -Itest test/integration/frr_interop_test.rb
 test/lab/lab_test.sh                         # the compose lab end to end; Docker, minutes
+test/lab/bfd_test.sh                         # the BFD interop lab with FRR, and its gate; containerlab
 ```
 
 The FRR tests need root, iproute2 and FRR, and run only with
-`OSPFV2_FRR=1`. Without it they skip: `rake test` measured 674 tests, 25
+`OSPFV2_FRR=1`. Without it they skip: `rake test` measured 762 tests, 25
 of them omitted, on the same day. The lab scripts replace a lab you
 are running; start yours again afterwards. CI runs every tier, in
 `.github/workflows/ci.yml`; a draft pull request runs the unit tests
@@ -345,6 +357,16 @@ From `docs/console-plan.md`, "Changes needed in ospfv2", and
 | Simulator: add and withdraw externals and summaries at runtime | Done, the topology's own | `POST /api/routes/withdraw`, `/advertise`; no new prefixes, by the owner's choice |
 | Simulator: a streaming event endpoint | Done | `GET /api/events/stream`; `GET /api/info` lists the routes. routescope reads neither yet |
 
+### BFD, step 6c of routescope's `docs/design/bfd-clients.md`
+
+* Built: `bfd-liveness-detection` on an interface, `Core::Bfd`, the
+  `bfd` field in `show.neighbors` and the `bfd` event kind, the image
+  with bfdd4r, and the interop lab `routescope/labs/ospf-bfd` with FRR.
+  The simulator keeps no BFD.
+* Not built: Junos's other options (`full-neighbors-only`,
+  `minimum-receive-interval`, `transmit-interval`, authentication), ospf-cli
+  forms that show the BFD session, BFD on virtual links.
+
 ### ospf-cli
 
 * **Issue #16, `edit`, `up` and `top` in configuration mode. Not
@@ -432,7 +454,19 @@ decision may change one.
   `ip` binary, no native extension. The manager speaks route operations,
   so another backend can sit behind it.
 
+**2026-11-21. BFD through bfd4r; the owner's gems by path.**
+
+* ospfd asks `bfdd4r`, one per network namespace, for its sessions,
+  through bfd4r's `BFD::Client`. `core/bfd.rb` holds the rules on the
+  loop; `daemon/bfd.rb` is the one thread that polls the client and
+  posts what it hears. The image's entrypoint is `with-bfdd4r`.
+* "Standard library only" became "and the owner's own gems, by path".
+* Premise: one BFD daemon and one client for isisd, ospfd and bgp4rd
+  (routescope `docs/design/bfd.md`, `bfd-clients.md`), so each router
+  does not carry its own BFD.
+
 **routescope's decisions, from `docs/console-plan.md`.** routescope is a
 separate repo. ospfv2 gets the APIs it needs as normal features. SPF
 observability lives in ospfd, and ospf-cli and the console both read it.
-ospfv2 stays standard library only.
+ospfv2 stays standard library only, with the owner's own gems since
+2026-11-21 (above).

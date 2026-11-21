@@ -19,7 +19,7 @@ Gem::Specification.new do |spec|
   DESC
   spec.homepage      = 'https://github.com/jeanmichel-gh/ospfv2'
   spec.license       = 'GPL-3.0-or-later'
-  spec.required_ruby_version = '>= 3.1'
+  spec.required_ruby_version = '>= 3.3' # bfd4r's
 
   spec.metadata['source_code_uri'] = spec.homepage
   spec.metadata['changelog_uri']   = "#{spec.homepage}/blob/master/changelog.txt"
@@ -35,4 +35,7 @@ Gem::Specification.new do |spec|
   spec.add_dependency 'irb', '>= 1.6'
   # Line editing for ospf-cli. Default gem up to Ruby 3.4, bundled after.
   spec.add_dependency 'reline', '>= 0.3'
+  # BFD for ospfd's neighbors: BFD::Client, and bfdd4r in the image. The
+  # owner's own gem, not published yet: the Gemfile takes it by path.
+  spec.add_dependency 'bfd4r'
 end

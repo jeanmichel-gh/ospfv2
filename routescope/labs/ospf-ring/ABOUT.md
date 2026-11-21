@@ -30,6 +30,6 @@ Measured on 2026-11-14 with all four routers up:
 - **Adjacencies:** the simulator Full with FRR, the DR, on the LAN; the three ring links Full, point to point.
 - **Timers:** hello 2 s and dead 8 s on every link.
 
-Images: `ospfv2:latest` and `ospfv2-bird:latest`, built in the ospfv2 checkout (`docker build -t ospfv2 . && docker compose --profile bird build bird`), and FRR (`docker pull quay.io/frrouting/frr:10.2.1`).
+Images: `ospfv2:latest` and `ospfv2-bird:latest`, built in the ospfv2 checkout (`docker build -t ospfv2 --build-context bfd4r=../bfd4r . && docker compose --profile bird build bird`), and FRR (`docker pull quay.io/frrouting/frr:10.2.1`).
 
 Start it from routescope's Labs panel, or in this folder: `sudo containerlab deploy -t ospf-ring.clab.yml`.

@@ -1,0 +1,39 @@
+# BFD interop: ospfd and FRR on one point-to-point link, each running BFD
+# for its OSPF neighbor. ospfd asks bfdd4r for the session (bfd4r), FRR
+# asks its bfdd. With 300 ms and a multiplier of 3, FRR's defaults and
+# bfdd4r's floor, a link that stops carrying packets takes the neighbor
+# down within 900 ms on both, where OSPF's dead interval would take 8 s.
+#
+#   ospfd 1.1.1.1  eth1 --- 10.0.12.0/30 --- eth1  frr 2.2.2.2
+#
+# Images: ospfv2:latest, built in ~/ospfv2 with bfd4r beside it:
+#   docker build -t ospfv2 --build-context bfd4r=../bfd4r .
+# and FRR (docker pull quay.io/frrouting/frr:10.2.1). Then, in this folder:
+#   sudo containerlab deploy -t ospf-bfd.clab.yml
+# routescope serves it from ~/labs/ospfv2/ospf-bfd once installed:
+#   routescope-labs install ospfv2/ospf-bfd
+name: ospf-bfd
+
+topology:
+  nodes:
+    ospfd:
+      kind: linux
+      image: ospfv2:latest
+      binds: [ospfd:/etc/ospfv2]
+      # bfdd4r beside ospfd: the image's entrypoint does it, and a lab
+      # that sets its own entrypoint puts with-bfdd4r first.
+      entrypoint: with-bfdd4r ospfd
+      cmd: ""
+      exec:
+        - ip addr add 10.0.12.1/30 dev eth1
+        - ip addr add 1.1.1.1/32 dev lo
+    frr:
+      kind: linux
+      image: quay.io/frrouting/frr:10.2.1
+      binds: [frr:/etc/frr]
+      # frr.conf has it too, but FRR starts before its link exists and
+      # can miss it when it appears. Set once the link is wired.
+      exec:
+        - sh -c "ip addr add 10.0.12.2/30 dev eth1 2>/dev/null || true"
+  links:
+    - { endpoints: ["ospfd:eth1", "frr:eth1"] }
