@@ -800,7 +800,8 @@ Each later, with its own spec:
 - persistent Adj-SIDs (the P flag);
 - multi-topology (MT-ID other than 0);
 - algorithms other than 0, and flex-algo (P9);
-- SRv6;
+- SRv6 (RFC 9513), which is for OSPFv3 and needs OSPFv3 first; ospfd
+  is OSPFv2, IPv4 only;
 - SR-LDP interworking;
 - BGP-LS SR for OSPF: `core/lsdb_topology.rb` gains SIDs when bgp4r's
   Producer asks for OSPF ones;
