@@ -1,7 +1,8 @@
 # Segment routing in ospfd
 
-Status: draft, 2026-11-25, waiting for the owner's approval. No code
-until then.
+Status: approved by the owner 2026-11-25, merged in #65. Not built.
+The open questions at the end keep the answers this document gives
+until the owner changes them.
 
 This is P7 in routescope's `docs/protocol-coverage.md`: SR in OSPF. It
 comes after IS-IS (P1) because fewer SP cores run OSPF, and it reuses

@@ -446,6 +446,22 @@ BDR. Item 5 above is done; item 6 is done for retransmission per
 neighbor, not for the LSU size. It replaces the "start order" item in
 routescope's plan: the user guide's ExStart line was this bug.
 
+### SR in OSPF, P7 in routescope's `docs/protocol-coverage.md`
+
+Specified in `docs/design/sr-ospf.md` (approved 2026-11-25, #65). Its
+nine open questions keep the draft's answers until the owner changes
+them. The build order:
+
+| Step | What | Status |
+| --- | --- | --- |
+| 0 | `validation.rb`, `OSPFv2::Fault`, `/api/fault` on the simulator | Not started |
+| 1 | Opaque LSAs (RFC 5250): the O bit in DDs, types 9 to 11, a link-scope database | Not started |
+| 2 | Router Information (RFC 7770), with SR-Algorithm, SRGB and SRLB | Not started |
+| 3 | Extended prefix and link LSAs (RFC 7684) | Not started |
+| 4 | SR-MPLS (RFC 8665): SIDs, the label table, label routes by netlink | Not started |
+| 5 | The simulator sends SR LSAs | Not started |
+| 6 | TI-LFA | Its own spec, later |
+
 ### Noted for later, from the owner, 2026-11-13
 
 Not designed yet; routescope's `CLAUDE.md`, "Where the work is going",
