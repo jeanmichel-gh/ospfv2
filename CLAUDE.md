@@ -448,8 +448,9 @@ routescope's plan: the user guide's ExStart line was this bug.
 
 ### SR in OSPF, P7 in routescope's `docs/protocol-coverage.md`
 
-Specified in `docs/design/sr-ospf.md` (merged 2026-11-25, #65). No code
-yet: its nine open questions wait for the owner. The build order:
+Specified in `docs/design/sr-ospf.md` (approved 2026-11-25, #65). Its
+nine open questions keep the draft's answers until the owner changes
+them. The build order:
 
 | Step | What | Status |
 | --- | --- | --- |
