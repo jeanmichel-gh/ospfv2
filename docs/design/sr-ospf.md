@@ -448,9 +448,9 @@ Additive, and listed in `api.info`:
   `area` in place of `level`.
 - `show.fib`: label routes against the kernel, as IP routes are.
 - `show.topology`: each prefix's `sid` and each router's `srgb`.
-- New event kinds: `sr_finding` and `label_change`, if routescope wants
-  them; otherwise the `spf` event carries the label diff. Decided in
-  routescope's spec.
+- A new event kind, `sr_finding`. No `label_change`: routescope re-reads
+  the labels on an `spf` event (its `docs/design/sr-ospf-views.md`).
+  The shapes of these calls are in "Answers for routescope", below.
 - ospf-cli: `show ospf segment-routing`, `show mpls label` in Junos
   form, and the IOS forms.
 
@@ -521,6 +521,168 @@ today (routescope `docs/sr-mpls.md`):
   runs SR in IS-IS or OSPF", from `show.segment_routing` on ospfd and
   the RI LSA on FRR.
 - Scenarios: `mpls_label` works as is; `ospf_route` gains `label`.
+
+routescope's spec is `docs/design/sr-ospf-views.md` (routescope #319).
+It recorded these on FRR 10.2.1; the interop step checks against them:
+
+- FRR sends two Adj-SIDs per adjacency without TI-LFA: one with flags
+  0xe0 (B, V, L) and one with 0x60 (V, L).
+- With SR off, `show ip ospf database segment-routing json` prints the
+  text "Segment Routing is disabled on this router", not JSON.
+- `show ip ospf database json` lists FRR's opaque LSAs under
+  `areaLocalOpaqueLsa`.
+- FRR's label routes have kernel protocol `ospf`.
+
+## Answers for routescope
+
+routescope's `docs/design/sr-ospf-views.md`, "Questions for ospfv2",
+asks eight questions about calls this spec names. These are the
+answers. Every shape is additive; nothing that exists is renamed. Where
+a call exists today, what it gives was read from the code at ospfv2
+`5b005c5`, 2026-11-25.
+
+1. **`show.segment_routing`**, one object:
+
+   ```json
+   {
+     "enabled": true,
+     "srgb": [{ "start": 16000, "size": 8000 }],
+     "srlb": { "start": 15000, "size": 1000 },
+     "adj_sids": [
+       {
+         "interface": "eth1",
+         "neighbor": "10.255.0.2",
+         "address": "10.0.12.2",
+         "label": 15000,
+         "flags": ["V", "L"],
+         "weight": 0,
+         "lan": false
+       }
+     ],
+     "nodes": [
+       {
+         "area": "0.0.0.0",
+         "router_id": "10.255.0.2",
+         "self": false,
+         "srgb": [{ "start": 17000, "size": 8000 }],
+         "srlb": { "start": 15000, "size": 1000 },
+         "algorithms": [0],
+         "node_sid": { "prefix": "10.255.0.2/32", "index": 2, "label": 16002 }
+       }
+     ],
+     "findings": []
+   }
+   ```
+
+   A node row is keyed by area and router ID. There is one for every SR
+   router SPF reaches, ours included (`self: true`), with its SRLB and
+   Node-SID, as isisd gives them from isis #92. `node_sid.label` is the
+   label this router takes it in, from our SRGB. A router with no SRLB
+   has no `srlb` key. The Adj-SIDs are ours only, one row per interface
+   and neighbor router ID; `lan: true` marks a LAN Adj-SID.
+
+2. **`show.database` with `detail: true`** gives decoded TLVs, never
+   raw octets, for opaque types 4, 7 and 8. Flags are the RFC's
+   letters, as isisd gives them. An unknown TLV, or an opaque type
+   ospfd does not decode, gives `type` and `hex`. The decoding lives in
+   `Core::Lsa#detail`, so the simulator's `GET /api/lsdb?detail=1` gives
+   the same shape.
+
+   ```json
+   {
+     "opaque_type": 4,
+     "opaque_id": 0,
+     "tlvs": [
+       { "type": 1, "name": "informational-capabilities", "bits": [] },
+       { "type": 8, "name": "sr-algorithm", "algorithms": [0] },
+       { "type": 9, "name": "sid-label-range", "size": 8000, "label": 16000 },
+       { "type": 14, "name": "srlb", "size": 1000, "label": 15000 }
+     ]
+   }
+   ```
+
+   ```json
+   {
+     "opaque_type": 7,
+     "opaque_id": 1,
+     "tlvs": [
+       {
+         "type": 1,
+         "name": "extended-prefix",
+         "route_type": 1,
+         "prefix": "10.255.0.1/32",
+         "af": 0,
+         "flags": ["N"],
+         "sub_tlvs": [
+           { "type": 2, "name": "prefix-sid", "flags": [], "mt_id": 0, "algorithm": 0, "index": 1 }
+         ]
+       }
+     ]
+   }
+   ```
+
+   ```json
+   {
+     "opaque_type": 8,
+     "opaque_id": 3,
+     "tlvs": [
+       {
+         "type": 1,
+         "name": "extended-link",
+         "link_type": "p2p",
+         "link_id": "10.255.0.2",
+         "link_data": "10.0.12.1",
+         "sub_tlvs": [
+           { "type": 2, "name": "adj-sid", "flags": ["V", "L"], "mt_id": 0, "weight": 0, "label": 15000 }
+         ]
+       }
+     ]
+   }
+   ```
+
+   A SID is `index` when V and L are clear and `label` when both are
+   set. An invalid pair gives `value` and `finding`. A LAN Adj-SID adds
+   `neighbor`. `name` is the registry name with hyphens, the same word
+   as the dissector's `key` (answer 7).
+
+3. **The kernel protocol id** is `protocol` in `show.fib`, and
+   `fib.protocol` in `show.overview`, today (`daemon/views.rb`, `fib`
+   and `fib_summary`). It is 89 unless `routing-options kernel
+   protocol` sets another. Label routes take the same id.
+
+4. **`POST /api/fault`** on the simulator takes `name`, the catalog
+   entry, and the parameters that entry names: `router` (a topology
+   router's name), `prefix`, `index`, `neighbor`, `area`. An unknown
+   name or a missing parameter is a 400 whose `error` lists what it
+   takes. `GET /api/info` lists the route: its list comes from the table
+   that serves the routes (`web/server.rb`, `ROUTES`).
+
+5. **`GET /api/lsdb` for types 9 to 11.** The simulator keeps its own
+   names, printed from `LsType` today: `type` is `link_local`, `area`
+   or `domain`, and `type_name` is `OpaqLoca`, `OpaqArea` or `OpaqAS`.
+   Its rows gain `opaque_type` and `opaque_id`, as ospfd's do.
+
+6. **The simulator's SIDs** are in `GET /api/state`, on the nodes of
+   `graph`: a simulated router with SR gains `srgb` (a list of
+   `{start, size}`, as in answer 1) and `sid`, its loopback's index.
+   Without SR, the nodes are as today.
+
+7. **The dissector** decodes the RI, extended prefix and extended link
+   TLVs and their sub-TLVs as nested fields with offsets, as it does a
+   router-LSA's links. Each TLV and sub-TLV field carries `key` beside
+   `name`, nothing renamed, as isis #135 asks: `router-information`,
+   `sr-algorithm`, `sid-label-range`, `srlb`, `extended-prefix`,
+   `prefix-sid`, `extended-link`, `adj-sid`, `lan-adj-sid`. Other TLVs
+   stay one hex field. This comes with step 3's codec.
+
+8. **The `sr_finding` event**: kind `sr_finding`, level `warn`, and
+   `data` with `finding` (its name in `validation.rb`), `rfc` (the
+   section, as `"RFC 8665 5"`), `action` (what was done: `ignored` or
+   `no_label`), `area`, `router_id` (the LSA's advertising router), and
+   `lsa`: `{type, ls_id, advr}`, the fields `show.database` rows carry,
+   so the timeline can link to it. One event when a finding first
+   appears, not one per SPF run. It goes into `api.info`'s
+   `event_kinds` and the README's table.
 
 ## Labs
 
