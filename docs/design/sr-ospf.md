@@ -325,12 +325,17 @@ neighbor without O is measured, not assumed, and the test records it.
   flushed, a changed one a new instance; opaque turned off; no SPF run.
   The O-bit filter and the SPF guard were each taken out, and their
   tests failed.
-- **Interop with FRR**, in network namespaces (`frr_interop_test.rb`):
-  both opaque, each lists the other's type 10; FRR opaque and ospfd
-  not, Full as before. They run in CI's `interop-frr` job, on
-  Ubuntu's FRR. On ospflab, AppArmor's `ospfd` profile stops FRR in a
-  namespace, so they were not run there. The gate against 10.2.1 in
-  a container lab waits for step 8's labs.
+- **Interop with FRR**, in network namespaces (`frr_interop_test.rb`),
+  run in CI's `interop-frr` job on Ubuntu 26.04's FRR, 10.5.1:
+  - both opaque: Full, and each lists the other's type 10;
+  - FRR opaque (`capability opaque`, `router-info area`) and ospfd
+    not: Full, with no SeqNumberMismatch. Measured: FRR sets O in its
+    DDs and offers no opaque LSA to a neighbor that does not set O.
+    The ExStart loop the draft feared does not happen with this FRR.
+
+  On ospflab, AppArmor's `ospfd` profile stops FRR in a namespace, so
+  they were not run there. The gate against 10.2.1 in a container lab
+  waits for step 8's labs.
 
 ### Step 2: Router Information (RFC 7770)
 

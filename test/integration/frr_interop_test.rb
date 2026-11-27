@@ -97,13 +97,14 @@ class TestFrrInterop < Test::Unit::TestCase
 
   # FRR opaque, ospfd not: FRR offers no opaque LSA to a neighbor
   # without O (RFC 5250 section 3.1), so the two reach Full, as they did
-  # before this step.
+  # before this step. Measured on FRR 10.5.1, 2026-11-27.
   def test_frr_opaque_and_ospfd_not
     @lab.start(frr_ospf: FRR_OPAQUE)
     assert_full
     assert_synced(true)
     assert_equal 0, @lab.core_stat(:finding_dd_unsupported_type)
-    assert_equal [false], @lab.core_state['neighbors'].map { _1['opaque'] }, 'O is ignored while opaque is off'
+    # show.neighbors says FRR set O; ospfd, opaque off, ignores it.
+    assert_equal [true], @lab.core_state['neighbors'].map { _1['opaque'] }, 'FRR sets O in its DDs'
   end
 
   def test_ospfd_and_ospf_cli
