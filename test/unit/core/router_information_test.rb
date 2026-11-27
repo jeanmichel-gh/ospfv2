@@ -58,6 +58,21 @@ class TestCoreRouterInformation < Test::Unit::TestCase
     assert_equal body, RI::Body.new(b).encode
   end
 
+  # FRR 10.5.1's RI octets, from CI's interop job (2026-11-27): its
+  # SR-Algorithm TLV is padded with 0xff, which RFC 7770 section 2.3
+  # allows ("undefined bits"). They go through the codec unchanged.
+  FRR_RI = '00010004100000000008000100ffffff0009000c001f40000001000300465000000e000c0003e800000100030036b000'
+
+  def test_frr_s_octets_unchanged
+    octets = [FRR_RI].pack('H*')
+    b = RI::Body.new(octets)
+    assert_equal octets, b.encode
+    assert_equal octets, RI::Body.new(b).encode
+    assert_equal [0x1000_0000, [0], [18_000, 8_000], [14_000, 1_000]],
+                 [b.capabilities, b.algorithms, *[RI::SidLabelRange, RI::Srlb].map { |k| b.ranges(k).map { [_1.first, _1.size] }.first }]
+    assert_equal '0008000100000000', RI::SrAlgorithm.new(algorithms: [0]).to_shex, 'built: zeros'
+  end
+
   # RFC 8665 section 3.2's example: three ranges, kept in their order.
   def test_ranges_keep_their_order
     b = RI.build(algorithms: [0], srgb: [[100, 100], [1000, 100], [500, 100]])

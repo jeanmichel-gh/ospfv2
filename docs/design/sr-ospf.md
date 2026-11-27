@@ -419,6 +419,11 @@ neighbor without O is measured, not assumed, and the test records it.
   `segment-routing on` and a global and local block on FRR, FRR's JSON
   shows ospfd's SRGB and SRLB, ospfd reads FRR's, and FRR's RI octets
   go through ospfd's codec unchanged.
+- **Padding, measured.** FRR 10.5.1 pads its SR-Algorithm TLV with
+  `ff ff ff`, not zeros. RFC 7770 section 2.3 allows it: the padding
+  "is composed of undefined bits". The first CI run failed on it, since
+  the codec re-encoded zeros. A parsed TLV now keeps the padding it came
+  with; a built one pads with zeros. FRR's octets are a unit test.
 - **Not done here:** RFC 8665 section 3.2's example as labels (index
   100 is label 1000) is step 4's calculation.
 

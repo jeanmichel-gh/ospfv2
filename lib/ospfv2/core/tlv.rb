@@ -27,7 +27,8 @@ module OSPFv2
           raise Error, "#{octets.bytesize - at} octets left, less than a TLV header" if octets.bytesize - at < 4
           type, len = octets.byteslice(at, 4).unpack('nn')
           raise Error, "TLV #{type} of length #{len} runs past its end" if at + 4 + len > octets.bytesize
-          out << registry.fetch(type, Unknown).new(octets.byteslice(at, 4 + len))
+          # With its padding, kept as it came (below).
+          out << registry.fetch(type, Unknown).new(octets.byteslice(at, 4 + ((len + 3) & ~3)))
           at += 4 + ((len + 3) & ~3)
         end
         out
@@ -60,7 +61,14 @@ module OSPFv2
 
       def type = self.class::TYPE
 
-      def encode = Tlv.wrap(type, value)
+      # The padding is "composed of undefined bits" (RFC 7770 section 2.3):
+      # FRR 10.5.1 pads its SR-Algorithm TLV with 0xff. A parsed TLV sends
+      # back the padding it came with; a built one, zeros.
+      def encode
+        v = value.b
+        pad = @pad&.bytesize == -v.bytesize % 4 ? @pad : "\0" * (-v.bytesize % 4)
+        [type, v.bytesize].pack('nn') + v + pad
+      end
 
       def to_hash = { type: type }.merge(fields)
 
@@ -78,6 +86,7 @@ module OSPFv2
         raise Error, 'a TLV needs 4 octets' if octets.bytesize < 4
         _, len = octets.unpack('nn')
         raise Error, "TLV of length #{len} in #{octets.bytesize - 4} octets" if len > octets.bytesize - 4
+        @pad = octets.byteslice(4 + len, -len % 4) if octets.bytesize >= 4 + len + (-len % 4)
         decode(octets.byteslice(4, len))
       end
 
