@@ -207,6 +207,8 @@ module OSPFv2
           container 'protocols', help: 'Routing protocols' do
             container 'ospf', help: 'OSPF version 2' do
               leaf 'export', NAME, help: 'Policy choosing routes to advertise as AS externals'
+              # ospfd's own, as FRR's capability opaque: Junos has no statement for it.
+              flag 'opaque', help: 'Opaque LSAs (RFC 5250): set the O bit in DDs, hold and flood types 9 to 11'
               list 'area', key: AREA, help: 'OSPF area' do
                 container 'virtual-link', help: 'Virtual links to area border routers (backbone only)' do
                   list 'neighbor-id', key: IPV4, help: 'Router id of the other end' do

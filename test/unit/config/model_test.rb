@@ -35,6 +35,11 @@ class TestConfigModel < Test::Unit::TestCase
     assert_equal({ area: '0.0.0.1', type: :broadcast, passive: true }, m.interfaces['lo'])
   end
 
+  def test_opaque
+    assert_equal false, model.opaque
+    assert_equal true, model('set protocols ospf opaque').opaque
+  end
+
   def test_authentication_specs_build
     m = model('set protocols ospf area 0 interface a authentication simple-password pw',
               'set protocols ospf area 0 interface b authentication md5 1 key k1',

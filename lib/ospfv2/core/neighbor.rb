@@ -13,9 +13,10 @@ module OSPFv2
       RANK = STATES.each_with_index.to_h.freeze
 
       # LSA types this router understands. Anything else in a DD is a
-      # SeqNumberMismatch (RFC 2328 10.6). We do not set the O bit, so
-      # compliant neighbors do not offer opaque LSAs.
+      # SeqNumberMismatch (RFC 2328 10.6). The opaque types join them while
+      # opaque is on (RFC 5250).
       SUPPORTED_TYPES = [1, 2, 3, 4, 5, 7].freeze
+      OPAQUE_TYPES = [9, 10, 11].freeze
 
       attr_reader :iface, :router_id, :address, :state, :priority, :dr, :bdr, :options,
                   :ls_request, :retransmit, :dd_seq, :last_change, :state_changes
@@ -176,7 +177,7 @@ module OSPFv2
         lsas = []
         lsr.requests.each do |type, id, advr|
           # No AS-external LSAs over a virtual link (RFC 2328 10.3).
-          lsa = instance.lsdb_for(type, @iface.area)&.[]([type, id, advr]) unless type == 5 && @iface.virtual?
+          lsa = instance.lsdb_for(type, @iface.area, @iface)&.[]([type, id, advr]) unless [5, 11].include?(type) && @iface.virtual?
           unless lsa
             bad_ls_req("no #{LsaFields::TYPES.fetch(type, type)} #{Addr.to_s(id)} #{Addr.to_s(advr)}")
             return
@@ -234,13 +235,18 @@ module OSPFv2
         end
       end
 
+      # Did it set the O bit in its DDs (RFC 5250 section 3.1)? Only while
+      # opaque is on here: off, nothing opaque is held or sent to it.
+      def opaque? = instance.opaque? && @options.anybits?(Instance::O_BIT)
+
       def summary
         {
           router_id: Addr.to_s(@router_id), address: Addr.to_s(@address), interface: @iface.name,
           state: @state, priority: @priority, dr: Addr.to_s(@dr), bdr: Addr.to_s(@bdr),
           dead_in: dead_in&.ceil, role: @master.nil? ? nil : (master? ? :slave : :master),
           ls_request: @ls_request.size, retransmit: @retransmit.size, db_summary: @db_summary.size,
-          uptime: (now - @last_change).floor, state_changes: @state_changes
+          uptime: (now - @last_change).floor, state_changes: @state_changes,
+          opaque: @options.anybits?(Instance::O_BIT)
         }.tap do |h|
           # BFD's state when the interface runs BFD: "up" or "down".
           bfd = instance.bfd&.state_of(self)
@@ -321,20 +327,24 @@ module OSPFv2
       def accept_dd(dd)
         @last_rcvd_dd = [dd.flags, dd.options, dd.seq]
         dd.headers.each do |h|
-          unless SUPPORTED_TYPES.include?(h.type)
+          unless SUPPORTED_TYPES.include?(h.type) || (instance.opaque? && OPAQUE_TYPES.include?(h.type))
             seq_number_mismatch("unsupported LSA type #{h.type}", finding: :dd_unsupported_type)
             return
           end
-          next if h.type == 5 && @iface.virtual? # never over virtual links (10.6)
+          next if [5, 11].include?(h.type) && @iface.virtual? # never over virtual links (10.6; RFC 5250 3.2)
           if h.type == 5 && !@iface.area.external_capable?
             seq_number_mismatch('AS-external LSA offered in a stub area or NSSA', finding: :dd_as_external_in_stub) # RFC 2328 10.6
+            return
+          end
+          if h.type == 11 && !@iface.area.external_capable?
+            seq_number_mismatch('type 11 opaque LSA offered in a stub area or NSSA', finding: :dd_opaque_as_in_stub) # RFC 5250 3
             return
           end
           if h.type == 7 && !@iface.area.nssa?
             seq_number_mismatch('type 7 LSA offered outside an NSSA', finding: :dd_nssa_outside_nssa)
             return
           end
-          ours = instance.lsdb_for(h.type, @iface.area)&.[](h.key)
+          ours = instance.lsdb_for(h.type, @iface.area, @iface)&.[](h.key)
           @ls_request[h.key] = h if ours.nil? || h.newer_than?(ours)
         end
 
@@ -357,8 +367,10 @@ module OSPFv2
 
       def negotiation_done
         @db_summary = []
-        instance.lsdbs_for(@iface.area, virtual: @iface.virtual?).each do |db|
+        instance.lsdbs_for(@iface.area, virtual: @iface.virtual?, iface: @iface).each do |db|
           db.each do |lsa|
+            # RFC 5250 section 3.1: opaque LSAs only to a neighbor that sets O.
+            next if OPAQUE_TYPES.include?(lsa.type) && !opaque?
             if lsa.max_age?
               add_retransmit(lsa) # RFC 2328 10.3: MaxAge LSAs go here instead
             else
@@ -394,7 +406,7 @@ module OSPFv2
       end
 
       def send_dd(flags, headers, seq = @dd_seq)
-        dd = Wire::DatabaseDescription.new(mtu: @iface.virtual? ? 0 : @iface.mtu, options: @iface.options, flags: flags,
+        dd = Wire::DatabaseDescription.new(mtu: @iface.virtual? ? 0 : @iface.mtu, options: @iface.dd_options, flags: flags,
                                            seq: seq, headers: headers)
         @last_sent_dd = dd
         # The initial DD carries no summary, so more is still to come.
@@ -440,7 +452,7 @@ module OSPFv2
           break if sent > due_by
           lsa = @retransmit[key]
           # Send the database copy so the age is current.
-          cur = instance.lsdb_for(key[0], @iface.area)&.[](key)
+          cur = instance.lsdb_for(key[0], @iface.area, @iface)&.[](key)
           lsa = cur if cur&.same_instance?(lsa)
           break if !lsas.empty? && lsas.sum(&:length) + lsa.length > room
           lsas << lsa

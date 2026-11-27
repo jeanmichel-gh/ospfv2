@@ -81,7 +81,9 @@ class FrrLab
   # core_interface: extra keys for the core interface (auth:, type:, ...)
   # p2p: point-to-point on both sides
   # ospfd: run bin/ospfd with these set lines instead of the bare core
-  def start(frr_interface: [], core_interface: {}, p2p: false, ospfd: nil)
+  # +frr_ospf+: more lines under FRR's router ospf. +core+: more of
+  # core_runner's config (opaque, opaque_lsas).
+  def start(frr_interface: [], core_interface: {}, p2p: false, ospfd: nil, frr_ospf: [], core: {})
     cleanup
     sh "ip netns add #{@frr_ns}"
     sh "ip netns add #{@core_ns}"
@@ -94,11 +96,11 @@ class FrrLab
       sh "ip -n #{ns} link set veth0 up"
     end
     sh "ip -n #{@core_ns} addr add 1.1.1.1/32 dev lo"
-    start_frr(frr_interface + (p2p ? ['ip ospf network point-to-point'] : []))
+    start_frr(frr_interface + (p2p ? ['ip ospf network point-to-point'] : []), frr_ospf)
     if ospfd
       start_ospfd(ospfd)
     else
-      start_core(core_interface.merge(p2p ? { type: 'p2p' } : {}))
+      start_core(core_interface.merge(p2p ? { type: 'p2p' } : {}), core)
     end
     self
   end
@@ -164,6 +166,12 @@ class FrrLab
     rows.sort
   end
 
+  # [ls_id, advr] of every type 10 FRR holds in area 0.
+  def frr_opaque_area
+    area = frr_json('show ip ospf database opaque-area').dig('areaLocalOpaqueLsa', 'areas', '0.0.0.0') || []
+    area.map { |l| [l['linkStateId'] || l['lsId'], l['advertisingRouter'] || l['advertisedRouter']] }.sort
+  end
+
   # Runs ospf-cli commands against the ospfd started by start(ospfd:).
   def cli(*commands)
     args = commands.flat_map { |c| ['-c', c] }
@@ -197,7 +205,7 @@ class FrrLab
 
   def state_file = File.join(@dir, 'state.json')
 
-  def start_frr(iface_lines)
+  def start_frr(iface_lines, ospf_lines = [])
     FileUtils.mkdir_p([@run, @etc])
     conf = File.join(@etc, 'frr.conf')
     File.write(conf, <<~CONF)
@@ -210,6 +218,7 @@ class FrrLab
        ospf router-id 2.2.2.2
        network 10.0.12.0/24 area 0
        network 2.2.2.2/32 area 0
+      #{ospf_lines.map { |l| " #{l}" }.join("\n")}
     CONF
     sh "chown -R frr:frr #{@run} #{@etc}"
     %w[zebra ospfd].each do |d|
@@ -217,9 +226,9 @@ class FrrLab
     end
   end
 
-  def start_core(iface)
+  def start_core(iface, more = {})
     cfg = { router_id: '1.1.1.1',
-            interfaces: [{ name: 'veth0', address: '10.0.12.1/24', hello: 1, dead: 4, **iface }] }
+            interfaces: [{ name: 'veth0', address: '10.0.12.1/24', hello: 1, dead: 4, **iface }], **more }
     File.write(File.join(@dir, 'core.json'), JSON.generate(cfg))
     @core_pid = Process.spawn('ip', 'netns', 'exec', @core_ns, RbConfig.ruby, "-I#{ROOT}/lib",
                               "#{ROOT}/test/support/core_runner.rb", File.join(@dir, 'core.json'), state_file,

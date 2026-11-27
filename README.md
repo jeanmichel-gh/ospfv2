@@ -347,6 +347,26 @@ The statement alone takes bfdd4r's timers. What it does (RFC 5882):
 `show.neighbors` gives each neighbor's session as `bfd`: `up` or `down`, absent when its
 interface runs no BFD. `routescope/labs/ospf-bfd` is the interop check with FRR.
 
+### Opaque LSAs
+
+`opaque` turns on opaque LSAs (RFC 5250). It is ospfd's own statement, as FRR's
+`capability opaque`; Junos has none.
+
+```
+set protocols ospf opaque
+```
+
+With it, ospfd sets the O bit in its DDs (not in Hellos), and holds and floods types 9,
+10 and 11, each in its scope: a type 9 on its link, a type 10 in its area, a type 11
+through the AS but not into a stub area or NSSA. It sends them only to neighbors that
+set O. Without it, every packet is as before, and an opaque LSA is dropped as an
+unknown type. Turning it on or off takes every adjacency down, so they form again.
+
+`show.database` gives opaque rows `scope` `link`, `area` or `as`, `opaque_type` and
+`opaque_id`; a link row has `interface`. `show.neighbors` gives `opaque`: whether the
+neighbor set O in its DDs. ospfd originates no opaque LSA of its own yet: the Router
+Information LSA comes with SR (`docs/design/sr-ospf.md`).
+
 ### Show commands
 
 Junos forms print Junos style, IOS forms print IOS style.

@@ -35,7 +35,7 @@ module OSPFv2
         197 => 'openfabric (FRR)', 198 => 'srte (FRR)'
       }.freeze
 
-      attr_reader :router_id, :interfaces, :warnings, :kernel, :export, :areas, :virtual_links
+      attr_reader :router_id, :interfaces, :warnings, :kernel, :export, :areas, :virtual_links, :opaque
 
       def initialize(tree)
         @errors = []
@@ -58,6 +58,7 @@ module OSPFv2
                        'one whose other end is more than a hop away cannot come up'
         end
         @export = export_policy(data)
+        @opaque = data.dig('protocols', 'ospf', 'opaque') == true
         @warnings << 'no OSPF interfaces configured' if @interfaces.empty? && @errors.empty?
         raise Error, @errors.join("\n") unless @errors.empty?
         freeze

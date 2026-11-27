@@ -77,6 +77,36 @@ class TestFrrInterop < Test::Unit::TestCase
     assert_synced(true)
   end
 
+  # ---- opaque LSAs (RFC 5250; docs/design/sr-ospf.md, step 1)
+
+  FRR_OPAQUE = ['capability opaque', 'router-info area'].freeze
+  # A Router Information LSA with only its capabilities TLV (RFC 7770
+  # section 2.4), opaque type 4, ID 0.
+  RI = { type: 10, area: '0.0.0.0', opaque_type: 4, opaque_id: 0, body: '0001000400000000' }.freeze
+
+  # Both opaque: Full, and each lists the other's type 10.
+  def test_opaque_lsas_both_ways
+    @lab.start(frr_ospf: FRR_OPAQUE, core: { opaque: true, opaque_lsas: [RI] })
+    assert_full
+    ok = @lab.wait_for(20) do
+      @lab.core_lsdb.include?([10, '4.0.0.0', '2.2.2.2']) && @lab.frr_opaque_area.include?(['4.0.0.0', '1.1.1.1'])
+    end
+    assert ok, "core #{@lab.core_lsdb.inspect}\nfrr  #{@lab.frr_opaque_area.inspect}\n#{@lab.core_log.lines.last(20).join}"
+    assert_equal [true], @lab.core_state['neighbors'].map { _1['opaque'] }, 'FRR set O in its DDs'
+  end
+
+  # FRR opaque, ospfd not: FRR offers no opaque LSA to a neighbor
+  # without O (RFC 5250 section 3.1), so the two reach Full, as they did
+  # before this step. Measured on FRR 10.5.1, 2026-11-27.
+  def test_frr_opaque_and_ospfd_not
+    @lab.start(frr_ospf: FRR_OPAQUE)
+    assert_full
+    assert_synced(true)
+    assert_equal 0, @lab.core_stat(:finding_dd_unsupported_type)
+    # show.neighbors says FRR set O; ospfd, opaque off, ignores it.
+    assert_equal [true], @lab.core_state['neighbors'].map { _1['opaque'] }, 'FRR sets O in its DDs'
+  end
+
   def test_ospfd_and_ospf_cli
     @lab.start(frr_interface: MD5, ospfd: [
                  'set routing-options router-id 1.1.1.1',

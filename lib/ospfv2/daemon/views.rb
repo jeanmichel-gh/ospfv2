@@ -26,7 +26,7 @@ module OSPFv2
                 lsas: a.lsdb.size, checksum_sum: format('0x%x', a.lsdb.sum(&:checksum)) }
             end,
             neighbors: { total: r.neighbors.size, full: states.fetch(:full, 0) },
-            external_lsas: r.as_lsdb.size, abr: r.abr?, asbr: r.asbr?, exported: r.externals.size,
+            external_lsas: r.as_lsdb.count { _1.type == 5 }, abr: r.abr?, asbr: r.asbr?, exported: r.externals.size,
             spf: { runs: r.spf.runs, last_ago: r.spf_log.last && ago(r.spf_log.last.time), routes: r.routes.size },
             fib: fib_summary,
             lsa_originated: r.stats[:lsa_originated], lsa_installed: r.stats[:lsa_installed]
@@ -56,12 +56,17 @@ module OSPFv2
       def database(detail: false)
         on_loop do |r|
           next [] unless r
-          r.database.map do |area, l|
-            row = { area: area&.id_s, scope: area ? :area : :as, type: l.type, type_name: l.type_name,
+          rows = r.database.map { |area, l| [area, l, nil] } + r.link_database.map { |i, l| [i.area, l, i] }
+          rows.map do |area, l, iface|
+            scope = iface ? :link : (area ? :area : :as)
+            row = { area: area&.id_s, scope: scope, type: l.type, type_name: l.type_name,
                     ls_id: Core::Addr.to_s(l.ls_id), advr: Core::Addr.to_s(l.advr),
                     seq: format('0x%08x', l.seq & 0xffff_ffff), age: l.age, options: format('0x%02x', l.options),
                     checksum: format('0x%04x', l.checksum), length: l.length, self: l.advr == r.router_id,
                     spf_run: r.spf_run_of_lsa(l.key, format('0x%08x', l.seq & 0xffff_ffff)) }
+            row[:interface] = iface.name if iface
+            # RFC 5250 section 3: the link state ID is an opaque type and an ID.
+            row.merge!(opaque_type: l.ls_id >> 24, opaque_id: l.ls_id & 0xff_ffff) if l.type >= 9
             row[:detail] = l.detail if detail
             row
           end

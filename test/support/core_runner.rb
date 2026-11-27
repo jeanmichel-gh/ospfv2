@@ -21,6 +21,10 @@
 # "externals": [{"prefix": "203.0.113.0/24", "metric": 7, "type": 1, "tag": 9}]
 # are advertised as AS-external-LSAs.
 #
+# "opaque": true turns on opaque LSAs (RFC 5250), and "opaque_lsas":
+# [{"type": 10, "area": "0.0.0.0", "opaque_type": 4, "opaque_id": 0,
+# "body": "00010004..."}] originates them, the body in hex.
+#
 # With "fib": true the routes go into the namespace's kernel table over
 # netlink (protocol 89, main table), and SIGTERM withdraws them.
 #
@@ -78,7 +82,12 @@ end
 (config[:virtual_links] || []).each do |v|
   router.add_virtual_link(neighbor: v.fetch(:neighbor), transit_area: v.fetch(:transit_area))
 end
+loop_.call { router.opaque = true } if config[:opaque]
 loop_.call { router.start }
+if config[:opaque_lsas]
+  list = config[:opaque_lsas].map { |o| o.merge(body: [o.fetch(:body)].pack('H*')) }
+  loop_.call { router.opaque_lsas = list }
+end
 if config[:externals]
   ext = config[:externals].map do |e|
     ip, len = e.fetch(:prefix).split('/')
@@ -100,7 +109,7 @@ stop = false
 until stop
   state = loop_.call do
     {
-      neighbors: router.neighbor_summaries.map { |n| n.slice(:router_id, :address, :state) },
+      neighbors: router.neighbor_summaries.map { |n| n.slice(:router_id, :address, :state, :opaque) },
       lsdb: router.database.map { |_, l| [l.type, OSPFv2::Core::Addr.to_s(l.ls_id), OSPFv2::Core::Addr.to_s(l.advr)] }.sort,
       stats: router.interfaces.values.to_h { |i| [i.name, i.stats] },
       routes: router.routes.values.to_h do |r|
