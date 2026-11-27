@@ -26,7 +26,8 @@
 # "body": "00010004..."}] originates them, the body in hex. "sr":
 # {"algorithms": [0], "srgb": [[16000, 8000]], "srlb": [[15000, 1000]]}
 # puts SR's TLVs in its Router Information LSA. STATE's
-# router_information is area 0's, as Instance#router_information reads it.
+# router_information, extended_prefixes and extended_links are area 0's, as
+# the Instance methods of those names read them.
 #
 # With "fib": true the routes go into the namespace's kernel table over
 # netlink (protocol 89, main table), and SIGTERM withdraws them.
@@ -130,7 +131,9 @@ until stop
           reasons: r.reasons.first(3).map(&:to_s) }
       end,
       externals: router.as_lsdb.live.map { |l| l.bytes.unpack1('H*') },
-      router_information: router.opaque? ? router.router_information(0) : {}
+      router_information: router.opaque? ? router.router_information(0) : {},
+      extended_prefixes: router.opaque? ? router.extended_prefixes(0) : {},
+      extended_links: router.opaque? ? router.extended_links(0) : {}
     }
   end
   tmp = "#{state_file}.tmp"

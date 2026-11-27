@@ -369,7 +369,9 @@ neighbor set O in its DDs.
 With opaque on, ospfd sends a Router Information LSA (RFC 7770) in each area: type 10,
 4.0.0.0, with the capabilities TLV and no bits set. With SR (`docs/design/sr-ospf.md`)
 it adds the SR-Algorithm, SID/Label Range and SRLB TLVs. `show.database` with
-`detail` decodes an RI LSA's TLVs; an unknown TLV is kept as `type` and `value`.
+`detail` decodes an RI LSA's TLVs, and an extended prefix or extended link LSA's
+(RFC 7684) with their Prefix-SID, Adj-SID and LAN Adj-SID sub-TLVs; an unknown TLV is
+kept as `type` and `value`.
 
 ### Show commands
 

@@ -6,6 +6,7 @@ require_relative 'addr'
 require_relative 'lsa'
 require_relative 'validation'
 require_relative 'router_information'
+require_relative 'extended'
 require_relative 'lsdb'
 require_relative 'wire'
 require_relative 'neighbor'
@@ -338,6 +339,65 @@ module OSPFv2
                        srlb: usable.(RouterInformation::Srlb))
           end
           [rid, row]
+        end
+      end
+
+      # Each router's extended prefixes in +area+ (RFC 7684 section 2):
+      # its type 10s there, and the type 11s.
+      #   { router id => { prefixes: { "p/len" => { route_type:, flags:, opaque_id:, sids: [] } }, findings: [] } }
+      # A prefix in several LSAs of one router takes the lowest opaque ID;
+      # twice in one LSA, the first (2.1). A SID a finding ignores is left
+      # out (RFC 8665 section 5).
+      def extended_prefixes(area)
+        read_extended(area, ExtendedPrefix) do |body, out, oid|
+          body.prefixes.each do |t|
+            next if out.key?(t.prefix_s) && out[t.prefix_s][:opaque_id] <= oid
+            sids = t.sids.select { |s| s.flags.anybits?(ExtendedPrefix::PrefixSid::V) == s.flags.anybits?(ExtendedPrefix::PrefixSid::L) }
+            out[t.prefix_s] = { route_type: t.route_type, flags: t.flags, opaque_id: oid,
+                                sids: sids.map { _1.to_hash.except(:type) } }
+          end
+        end.transform_values { |r| { prefixes: r[:items], findings: r[:findings] } }
+      end
+
+      # Each router's extended links in +area+ (RFC 7684 section 3), by
+      # [link type, link ID, link data]; the lowest opaque ID for a link
+      # in several LSAs, the first Extended Link TLV of one (3.1).
+      #   { router id => { links: [{ link_type:, link_id:, link_data:, opaque_id:, adj_sids: [], lan_adj_sids: [] }], findings: [] } }
+      def extended_links(area)
+        read_extended(area, ExtendedLink) do |body, out, oid|
+          t = body.links.first or next
+          next if out.key?(t.key) && out[t.key][:opaque_id] <= oid
+          out[t.key] = { link_type: t.link_type, link_id: Addr.to_s(t.link_id), link_data: Addr.to_s(t.link_data),
+                         opaque_id: oid, adj_sids: t.adj_sids.map { _1.to_hash.except(:type) },
+                         lan_adj_sids: t.lan_adj_sids.map { _1.to_hash.except(:type) } }
+        end.transform_values { |r| { links: r[:items].values, findings: r[:findings] } }
+      end
+
+      # The opaque LSAs of +kind+'s opaque type in +area+ (and the AS's
+      # type 11s), each router's in opaque ID order, decoded; the block
+      # fills that router's items from each body. An LSA a finding
+      # ignores under the policy is left out.
+      def read_extended(area, kind)
+        area = @areas[Addr.to_i(area)] unless area.is_a?(Area)
+        return {} unless area
+        lsas = (area.lsdb.live.select { _1.type == 10 } + @as_lsdb.live.select { _1.type == 11 })
+               .select { (_1.ls_id >> 24) == kind::OPAQUE_TYPE }
+        lsas.sort_by { [_1.advr, _1.ls_id & 0xff_ffff, _1.type] }.group_by(&:advr).to_h do |advr, list|
+          rid = Addr.to_s(advr)
+          items = {}
+          findings = []
+          list.each do |l|
+            f = Validation.opaque(kind::OPAQUE_TYPE, l.body, rid)
+            findings.concat(f)
+            next if f.any? { Validation.action(_1, @receive_policy) == :ignore_lsa }
+            body = begin
+              kind::Body.new(l.body)
+            rescue Tlv::Error
+              next
+            end
+            yield body, items, l.ls_id & 0xff_ffff
+          end
+          [rid, { items: items, findings: findings.map(&:to_hash) }]
         end
       end
 

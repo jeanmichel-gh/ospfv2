@@ -95,6 +95,18 @@ module OSPFv2
                description: 'a type 11 opaque LSA received in a stub area or an NSSA',
                actions: always(:drop_lsa)),
 
+      # ---- The extended LSAs (RFC 7684)
+      Rule.new(name: :prefix_tlv_twice, group: :opaque,
+               clause: 'RFC 7684 section 2.1: "If this TLV is advertised multiple times for the same prefix in the ' \
+                       'same OSPFv2 Extended Prefix Opaque LSA, only the first instance of the TLV is used"',
+               description: 'an extended prefix LSA with two Extended Prefix TLVs for one prefix',
+               actions: { rfc: :use_first, strict: :ignore_lsa, lenient: :use_first }),
+      Rule.new(name: :link_tlv_twice, group: :opaque,
+               clause: 'RFC 7684 section 3.1: "Only one OSPFv2 Extended Link TLV SHALL be advertised in each OSPFv2 ' \
+                       'Extended Link Opaque LSA"; with several, "only the first instance of the TLV is used"',
+               description: 'an extended link LSA with two Extended Link TLVs',
+               actions: { rfc: :use_first, strict: :ignore_lsa, lenient: :use_first }),
+
       # ---- SR (RFC 8665), on the RI and extended LSAs
       Rule.new(name: :sr_algorithm_twice, group: :sr,
                clause: 'RFC 8665 section 3.1: "When multiple SR-Algorithm TLVs are received from a given router, ' \
@@ -163,8 +175,11 @@ module OSPFv2
     def opaque(opaque_type, body, subject)
       case opaque_type
       when OPAQUE_RI then router_information(body, subject)
-      when OPAQUE_EXT_PREFIX then extended(body, subject, 1, 8) { |sub| prefix_sid(sub, subject) }
-      when OPAQUE_EXT_LINK then extended(body, subject, 1, 12)
+      when OPAQUE_EXT_PREFIX
+        found = extended(body, subject, 1, 8) { |sub| prefix_sid(sub, subject) }
+        found + twice(body, subject, :prefix_tlv_twice) { |v| v.byteslice(1, 1) + v.byteslice(4, 4).to_s }
+      when OPAQUE_EXT_LINK
+        extended(body, subject, 1, 12) + twice(body, subject, :link_tlv_twice) { |_| :link }
       else []
       end
     end
@@ -221,6 +236,17 @@ module OSPFv2
         return overrun("in TLV #{type}: #{bad}", subject) if bad
         block_given? ? subs.flat_map { yield _1 } : []
       end
+    end
+
+    # The same TLV 1 twice in one extended LSA: the block gives what makes
+    # two the same (a prefix and its length; any two links).
+    def twice(body, subject, name)
+      list, bad = tlvs(body)
+      return [] if bad
+      keys = list.select { _1[0] == 1 && _1[1].bytesize >= 8 }.map { yield _1[1] }
+      dup = keys.tally.values.max.to_i
+      return [] if dup < 2
+      [finding(name, subject, "#{dup} #{name == :link_tlv_twice ? 'Extended Link TLVs' : 'Extended Prefix TLVs for one prefix'}")]
     end
 
     V_FLAG = 0x08
