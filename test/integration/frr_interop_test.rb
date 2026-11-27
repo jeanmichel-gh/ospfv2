@@ -177,7 +177,11 @@ class TestFrrInterop < Test::Unit::TestCase
     assert ok, "FRR's view of 1.1.1.1: #{node.inspect}\n#{@lab.vtysh('show ip ospf database segment-routing json')}"
     assert_equal [16_000, 8_000, 15_000, 1_000], node.values_at('srgbLabel', 'srgbSize', 'srlbLabel', 'srlbSize')
     assert_equal [['1.1.1.1/32', 1]], node['extendedPrefix'].map { _1.values_at('prefix', 'sid') }
-    assert(node['extendedLink'].all? { _1['sid'].between?(15_000, 15_999) }, node['extendedLink'].inspect)
+    # FRR 10.5.1 lists ospfd's one Adj-SID, and a second entry with sid 0
+    # and next hop 0.0.0.0: an empty slot where FRR keeps a backup
+    # Adj-SID, which ospfd does not send (measured 2026-11-27).
+    sids = node['extendedLink'].map { _1['sid'] }
+    assert_equal [15_000], sids.reject(&:zero?), node['extendedLink'].inspect
     notify("FRR's SR node 1.1.1.1: #{JSON.generate(node)}")
   end
 

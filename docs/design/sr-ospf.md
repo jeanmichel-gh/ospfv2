@@ -639,9 +639,12 @@ set protocols ospf area 0.0.0.0 interface eth1 no-adjacency-sid
   (the DR's LAN Adj-SIDs; the BDR's Adj-SID to the DR and LAN Adj-SID
   to the DROther), SR off. The model's defaults and refusals, and the
   daemon from the statement to a peer's reading.
-- **Interop with FRR** (in CI): FRR's `show ip ospf database
-  segment-routing json` lists ospfd with its SRGB, SRLB, Node-SID and
-  an Adj-SID from its SRLB.
+- **Interop with FRR** (in CI, FRR 10.5.1): FRR's `show ip ospf
+  database segment-routing json` lists ospfd with its SRGB, SRLB,
+  Node-SID and its Adj-SID, 15000. FRR also lists, for the same link, a
+  second entry with `sid` 0 and next hop 0.0.0.0: an empty slot for the
+  backup Adj-SID FRR itself sends and ospfd does not. Measured on the
+  first CI run, whose test expected none.
 
 #### Calculation
 
