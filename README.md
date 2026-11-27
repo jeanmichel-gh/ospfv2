@@ -364,8 +364,12 @@ unknown type. Turning it on or off takes every adjacency down, so they form agai
 
 `show.database` gives opaque rows `scope` `link`, `area` or `as`, `opaque_type` and
 `opaque_id`; a link row has `interface`. `show.neighbors` gives `opaque`: whether the
-neighbor set O in its DDs. ospfd originates no opaque LSA of its own yet: the Router
-Information LSA comes with SR (`docs/design/sr-ospf.md`).
+neighbor set O in its DDs.
+
+With opaque on, ospfd sends a Router Information LSA (RFC 7770) in each area: type 10,
+4.0.0.0, with the capabilities TLV and no bits set. With SR (`docs/design/sr-ospf.md`)
+it adds the SR-Algorithm, SID/Label Range and SRLB TLVs. `show.database` with
+`detail` decodes an RI LSA's TLVs; an unknown TLV is kept as `type` and `value`.
 
 ### Show commands
 

@@ -2,6 +2,7 @@
 
 require 'test/unit'
 require 'support/frr_lab'
+require 'ospfv2/core'
 
 # The core router against FRRouting's ospfd over real raw sockets, one
 # network namespace each. Opt in with OSPFV2_FRR=1 as root with FRR
@@ -80,13 +81,10 @@ class TestFrrInterop < Test::Unit::TestCase
   # ---- opaque LSAs (RFC 5250; docs/design/sr-ospf.md, step 1)
 
   FRR_OPAQUE = ['capability opaque', 'router-info area'].freeze
-  # A Router Information LSA with only its capabilities TLV (RFC 7770
-  # section 2.4), opaque type 4, ID 0.
-  RI = { type: 10, area: '0.0.0.0', opaque_type: 4, opaque_id: 0, body: '0001000400000000' }.freeze
-
-  # Both opaque: Full, and each lists the other's type 10.
+  # Both opaque: Full, and each lists the other's Router Information
+  # LSA, the type 10 4.0.0.0 that each sends (ospfd's since step 2).
   def test_opaque_lsas_both_ways
-    @lab.start(frr_ospf: FRR_OPAQUE, core: { opaque: true, opaque_lsas: [RI] })
+    @lab.start(frr_ospf: FRR_OPAQUE, core: { opaque: true })
     assert_full
     ok = @lab.wait_for(20) do
       @lab.core_lsdb.include?([10, '4.0.0.0', '2.2.2.2']) && @lab.frr_opaque_area.include?(['4.0.0.0', '1.1.1.1'])
@@ -105,6 +103,34 @@ class TestFrrInterop < Test::Unit::TestCase
     assert_equal 0, @lab.core_stat(:finding_dd_unsupported_type)
     # show.neighbors says FRR set O; ospfd, opaque off, ignores it.
     assert_equal [true], @lab.core_state['neighbors'].map { _1['opaque'] }, 'FRR sets O in its DDs'
+  end
+
+  # ---- Router Information (RFC 7770; docs/design/sr-ospf.md, step 2)
+
+  FRR_SR = FRR_OPAQUE + ['segment-routing on', 'segment-routing global-block 18000 25999 local-block 14000 14999']
+  CORE_SR = { algorithms: [0], srgb: [[16_000, 8_000]], srlb: [[15_000, 1_000]] }.freeze
+
+  # Each decodes the other's: FRR lists ospfd's SRGB and SRLB in its own
+  # JSON; ospfd reads FRR's, and FRR's octets go through ospfd's codec
+  # unchanged.
+  def test_router_information_both_ways
+    @lab.start(frr_ospf: FRR_SR, core: { opaque: true, sr: CORE_SR })
+    assert_full
+    ours = nil
+    ok = @lab.wait_for(20) do
+      ours = @lab.frr_json('show ip ospf database opaque-area 4.0.0.0 adv-router 1.1.1.1')
+                 .dig('areaLocalOpaqueLsa', 'areas', '0.0.0.0', 0, 'opaqueValues', 'routerInformation')
+      theirs = @lab.core_state.dig('router_information', '2.2.2.2')
+      ours&.dig('segmentRouting', 'srgb') && theirs&.dig('algorithms')
+    end
+    assert ok, "frr #{ours.inspect}\ncore #{@lab.core_state['router_information'].inspect}"
+    assert_equal({ 'upperBound' => 23_999, 'lowerBound' => 16_000 }, ours.dig('segmentRouting', 'srgb'))
+    assert_equal({ 'upperBound' => 15_999, 'lowerBound' => 15_000 }, ours.dig('segmentRouting', 'srlb'))
+    theirs = @lab.core_state.dig('router_information', '2.2.2.2')
+    assert_equal [[0], [[18_000, 8_000]], [[14_000, 1_000]], []], theirs.values_at('algorithms', 'srgb', 'srlb', 'findings')
+    hex = @lab.core_state.dig('lsas', '0.0.0.0').find { _1[0, 40].then { |h| h[6, 2] == '0a' && h[8, 8] == '04000000' && h[16, 8] == '02020202' } }
+    lsa = OSPFv2::Core::Lsa.new([hex].pack('H*'))
+    assert_equal lsa.body, OSPFv2::Core::RouterInformation::Body.new(lsa.body).encode, "FRR's RI: #{lsa.body.unpack1('H*')}"
   end
 
   def test_ospfd_and_ospf_cli

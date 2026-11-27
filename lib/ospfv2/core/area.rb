@@ -87,6 +87,11 @@ module OSPFv2
             @instance.flush_own(self, key)
           end
         end
+        if (ri = @instance.ri_spec)
+          @instance.originate(self, ri)
+        else
+          @instance.flush_own(self, [10, Instance::RI_ID, @instance.router_id])
+        end
         @instance.opaque_specs_for(self).each { |spec| @instance.originate(self, spec) }
       end
 
@@ -100,7 +105,12 @@ module OSPFv2
         when 3, 4 then @summaries.key?(key)
         when 5 then @instance.externals.key?(key)
         when 7 then @nssa_lsas.key?(key)
-        when 10, 11 then !@instance.opaque_spec(self, key).nil?
+        when 10, 11
+          if key[0] == 10 && ls_id == Instance::RI_ID && key[2] == @instance.router_id
+            !@instance.ri_spec.nil?
+          else
+            !@instance.opaque_spec(self, key).nil?
+          end
         else false
         end
       end
@@ -112,7 +122,8 @@ module OSPFv2
         when 3, 4 then @summaries[key]
         when 5 then @instance.externals[key]
         when 7 then @nssa_lsas[key]
-        when 10, 11 then @instance.opaque_spec(self, key)
+        when 10, 11
+          key[0] == 10 && key[1] == Instance::RI_ID && key[2] == @instance.router_id ? @instance.ri_spec : @instance.opaque_spec(self, key)
         end
       end
 

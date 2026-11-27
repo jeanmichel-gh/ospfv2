@@ -3,6 +3,8 @@
 require_relative 'addr'
 require_relative '../infra/ospf_constants'
 
+require_relative 'router_information'
+
 module OSPFv2
   module Core
     # Fletcher checksum over an LSA without its age (RFC 2328 12.1.7).
@@ -271,6 +273,16 @@ module OSPFv2
       # router flags and links, network mask and attached routers, summary
       # and external mask, metric, type, forwarding address and tag. Other
       # types give {}. A body that does not decode gives { error: }.
+      # An opaque LSA's body: the Router Information LSA decoded, others
+      # by their opaque type and ID only. A malformed body says why.
+      def opaque_detail
+        d = { opaque_type: @ls_id >> 24, opaque_id: @ls_id & 0xff_ffff }
+        return d unless d[:opaque_type] == RouterInformation::OPAQUE_TYPE
+        d.merge(RouterInformation::Body.new(body).to_hash)
+      rescue Tlv::Error => e
+        d.merge(error: e.message)
+      end
+
       def detail
         case type
         when 1
@@ -290,6 +302,7 @@ module OSPFv2
             d.merge!(external_type: metric >> 31 == 1 ? 2 : 1, forwarding: Addr.to_s(fwd), tag: tag)
           end
           d
+        when 9, 10, 11 then opaque_detail
         else {}
         end
       rescue Error => e

@@ -23,7 +23,10 @@
 #
 # "opaque": true turns on opaque LSAs (RFC 5250), and "opaque_lsas":
 # [{"type": 10, "area": "0.0.0.0", "opaque_type": 4, "opaque_id": 0,
-# "body": "00010004..."}] originates them, the body in hex.
+# "body": "00010004..."}] originates them, the body in hex. "sr":
+# {"algorithms": [0], "srgb": [[16000, 8000]], "srlb": [[15000, 1000]]}
+# puts SR's TLVs in its Router Information LSA. STATE's
+# router_information is area 0's, as Instance#router_information reads it.
 #
 # With "fib": true the routes go into the namespace's kernel table over
 # netlink (protocol 89, main table), and SIGTERM withdraws them.
@@ -83,6 +86,7 @@ end
   router.add_virtual_link(neighbor: v.fetch(:neighbor), transit_area: v.fetch(:transit_area))
 end
 loop_.call { router.opaque = true } if config[:opaque]
+loop_.call { router.sr_capabilities = config[:sr] } if config[:sr]
 loop_.call { router.start }
 if config[:opaque_lsas]
   list = config[:opaque_lsas].map { |o| o.merge(body: [o.fetch(:body)].pack('H*')) }
@@ -125,7 +129,8 @@ until stop
         { n: r.n, delay: r.delay, triggered_at: r.triggered_at&.utc&.iso8601(3), time: r.time.utc.iso8601(3),
           reasons: r.reasons.first(3).map(&:to_s) }
       end,
-      externals: router.as_lsdb.live.map { |l| l.bytes.unpack1('H*') }
+      externals: router.as_lsdb.live.map { |l| l.bytes.unpack1('H*') },
+      router_information: router.opaque? ? router.router_information(0) : {}
     }
   end
   tmp = "#{state_file}.tmp"

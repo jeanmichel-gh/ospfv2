@@ -32,6 +32,8 @@ module OSPFv2
        ->(c) { [10, opaque_id(RI, 0), Fault.router_information(c, srgb: [c[:srgb][0], 0])] }],
       [:srlb_range_zero, :srlb_range_zero, 'a Router Information LSA whose SR Local Block has size 0',
        ->(c) { [10, opaque_id(RI, 0), Fault.router_information(c, srlb: [c[:srlb][0], 0])] }],
+      [:range_two_sid_labels, :range_two_sid_labels, 'a Router Information LSA whose SID/Label Range has two SID/Label sub-TLVs',
+       ->(c) { [10, opaque_id(RI, 0), Fault.router_information(c, srgb_subs: 2)] }],
       [:prefix_sid_vl_invalid, :prefix_sid_vl_invalid, 'an extended prefix LSA whose Prefix-SID has V set and L clear',
        ->(c) { [10, opaque_id(EXT_PREFIX, 1), Fault.extended_prefix(c, flags: V_FLAG)] }],
       [:tlv_overrun, :tlv_overrun, 'an extended prefix LSA whose Prefix-SID sub-TLV runs 4 octets past its TLV',
@@ -89,13 +91,14 @@ module OSPFv2
     def sid_label(label) = tlv(1, three(label))
 
     # RFC 8665 sections 3.2 (type 9) and 3.3 (type 14).
-    def range(type, (first, size)) = tlv(type, three(size) + "\0" + sid_label(first))
+    def range(type, (first, size), subs: 1) = tlv(type, three(size) + "\0" + (sid_label(first) * subs))
 
     # A Router Information body: capabilities (RFC 7770 section 2.4),
     # then each SR-Algorithm TLV (8665 section 3.1), the SRGB and the
     # SRLB. A correct one with no options.
-    def router_information(c, algorithms: [[0]], srgb: c[:srgb], srlb: c[:srlb])
-      tlv(1, [0].pack('N')) + algorithms.map { tlv(8, _1.pack('C*')) }.join + range(9, srgb) + range(14, srlb)
+    def router_information(c, algorithms: [[0]], srgb: c[:srgb], srlb: c[:srlb], srgb_subs: 1)
+      tlv(1, [0].pack('N')) + algorithms.map { tlv(8, _1.pack('C*')) }.join + range(9, srgb, subs: srgb_subs) +
+        range(14, srlb)
     end
 
     # An extended prefix body (RFC 7684 section 2.1): the router ID's /32,

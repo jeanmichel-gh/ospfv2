@@ -5,6 +5,7 @@ require_relative '../infra/event_loop'
 require_relative 'addr'
 require_relative 'lsa'
 require_relative 'validation'
+require_relative 'router_information'
 require_relative 'lsdb'
 require_relative 'wire'
 require_relative 'neighbor'
@@ -55,6 +56,9 @@ module OSPFv2
       OPAQUE = [9, 10, 11].freeze
       # The O bit, set in DD options only (RFC 5250 section 3.1).
       O_BIT = 0x40
+      # Our Router Information LSA's link state ID: opaque type 4, ID 0
+      # (RFC 7770 section 2.1).
+      RI_ID = RouterInformation::OPAQUE_TYPE << 24
 
       attr_reader :router_id, :receive_policy, :loop, :areas, :interfaces, :as_lsdb, :random, :events, :stats,
                   :route_table, :spf, :spf_log, :externals, :virtual_links
@@ -78,6 +82,7 @@ module OSPFv2
         @receive_policy = Validation.policy(receive_policy)
         @opaque = false
         @opaque_specs = {} # [area id or nil, key] => { type:, ls_id:, body:, options: }
+        @sr_capabilities = nil
         @loop = loop
         @random = random
         @logger = logger
@@ -246,8 +251,12 @@ module OSPFv2
       def opaque=(on)
         on = on ? true : false
         return if on == @opaque
-        self.opaque_lsas = [] unless on
+        unless on
+          self.opaque_lsas = []
+          @areas.each_value { |a| flush_own(a, [10, RI_ID, @router_id]) }
+        end
         @opaque = on
+        @areas.each_value(&:schedule_origination) if on && @running
         unless on
           ([@as_lsdb] + @areas.values.map(&:lsdb) + @interfaces.values.map(&:link_lsdb)).each do |db|
             db.map(&:key).select { OPAQUE.include?(_1[0]) }.each { db.delete(_1) }
@@ -271,6 +280,7 @@ module OSPFv2
           raise ArgumentError, "opaque type #{ot}: 0 to 255" unless ot.between?(0, 255)
           raise ArgumentError, "opaque ID #{oid}: 0 to 16777215" unless oid.between?(0, 0xff_ffff)
           ls_id = (ot << 24) | oid
+          raise ArgumentError, 'the Router Information LSA 4.0.0.0 is ospfd\'s own' if type == 10 && ls_id == RI_ID
           aid = type == 10 ? Addr.to_i(o.fetch(:area)) : nil
           [[aid, [type, ls_id, @router_id]], { type: type, ls_id: ls_id, body: o.fetch(:body).b }]
         end
@@ -282,6 +292,53 @@ module OSPFv2
           flush_own(a, key) if a
         end
         want.each_key { |aid, _| opaque_area(aid)&.schedule_origination }
+      end
+
+      # SR's TLVs in our RI LSA, or nil for none (step 4 sets them from
+      # the configuration):
+      #   { algorithms: [0], srgb: [[16000, 8000]], srlb: [[15000, 1000]] }
+      attr_reader :sr_capabilities
+
+      def sr_capabilities=(sr)
+        @sr_capabilities = sr&.slice(:algorithms, :srgb, :srlb)
+        @areas.each_value(&:schedule_origination) if @running
+      end
+
+      # Our RI LSA in each area while opaque is on (RFC 7770): the
+      # capabilities TLV, then SR's TLVs when set.
+      def ri_spec
+        return nil unless @opaque
+        { type: 10, ls_id: RI_ID, body: RouterInformation.build(**(@sr_capabilities || {})).encode }
+      end
+
+      # Each router's Router Information in +area+, by router ID (RFC
+      # 7770; RFC 8665 section 3), under the receive policy:
+      #   { router_id:, capabilities:, algorithms:, srgb: [[first, size]], srlb:, findings: [] }
+      # Of several RI LSAs from one router, the lowest opaque ID with an
+      # SR-Algorithm TLV gives SR's values (8665 section 3.1). algorithms
+      # nil: not SR capable. A range that a finding ignores is left out.
+      def router_information(area)
+        area = @areas[Addr.to_i(area)] unless area.is_a?(Area)
+        return {} unless area
+        ris = area.lsdb.live.select { _1.type == 10 && (_1.ls_id >> 24) == RouterInformation::OPAQUE_TYPE }
+        ris.sort_by { [_1.advr, _1.ls_id & 0xff_ffff] }.group_by(&:advr).to_h do |advr, list|
+          rid = Addr.to_s(advr)
+          findings = list.flat_map { Validation.opaque(RouterInformation::OPAQUE_TYPE, _1.body, rid) }
+          bodies = list.filter_map do |l|
+            RouterInformation::Body.new(l.body)
+          rescue Tlv::Error
+            nil
+          end
+          row = { router_id: rid, capabilities: bodies.first&.capabilities, algorithms: nil, srgb: [], srlb: [],
+                  findings: findings.map(&:to_hash) }
+          sr = bodies.find(&:algorithms)
+          if sr && findings.none? { Validation.action(_1, @receive_policy) == :ignore_router }
+            usable = ->(k) { sr.ranges(k).select { _1.size.positive? && _1.sid_labels == 1 }.map { |r| [r.first, r.size] } }
+            row.merge!(algorithms: sr.algorithms, srgb: usable.(RouterInformation::SidLabelRange),
+                       srlb: usable.(RouterInformation::Srlb))
+          end
+          [rid, row]
+        end
       end
 
       # Our opaque LSAs in +area+: its type 10s, and the type 11s while it
@@ -330,6 +387,14 @@ module OSPFv2
         end
         return [:nssa_outside_nssa, 'type 7 LSA outside an NSSA'] if type == 7
         [:unsupported_lsa_type, "unsupported type #{type}"]
+      end
+
+      # The overrun Validation finds in an opaque LSA ospfd reads (RI,
+      # extended prefix, extended link), or nil. Its action is :drop_lsa
+      # under every policy.
+      def malformed(lsa)
+        f = Validation.opaque(lsa.ls_id >> 24, lsa.body, Addr.to_s(lsa.advr)).find { _1.name == :tlv_overrun }
+        f && "malformed #{lsa.id_string}: #{f.detail}"
       end
 
       # Databases summarized in DDs; AS-external LSAs never go over
@@ -432,6 +497,13 @@ module OSPFv2
           unless db
             finding, why = unstored(lsa.type, iface)
             iface.drop(:lsa, "#{why} from #{nbr}", finding: finding)
+            next
+          end
+          # RFC 7684 section 5, RFC 8665 section 9: a TLV past its end
+          # makes the LSA malformed; it is not stored, acknowledged or
+          # reflooded.
+          if OPAQUE.include?(lsa.type) && (bad = malformed(lsa))
+            iface.drop(:lsa, "#{bad} from #{nbr}", finding: :tlv_overrun)
             next
           end
           cur = db[lsa.key]
