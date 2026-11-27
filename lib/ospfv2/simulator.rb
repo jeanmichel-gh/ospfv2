@@ -7,6 +7,7 @@ require 'stringio'
 require_relative '../ospfv2'
 require_relative 'topology'
 require_relative 'core/lsa'
+require_relative 'fault'
 
 module OSPFv2
   # Runs a Topology: builds its link state database, brings up the
@@ -74,6 +75,7 @@ module OSPFv2
       @min_ls_interval = min_ls_interval.to_f
       @last_sent = {}    # key => monotonic time its last instance went out
       @held = {}         # key => { due:, floor:, why: }, an instance MinLSInterval holds
+      @faults = {}       # [type, ls_id, advr] => the last fault LSA sent (OSPFv2::Fault)
       @releaser = nil    # the thread that sends held instances when due
       @log = log || StringIO.new
       build_lsdb
@@ -278,6 +280,58 @@ module OSPFv2
     end
 
     def min_ls_interval = @min_ls_interval
+
+    # ---- faults (OSPFv2::Fault, docs/design/sr-ospf.md step 0)
+
+    # A fault LSA as the neighbor floods it: its own octets, never
+    # re-encoded, since an entry is wrong on purpose.
+    FaultLsa = Struct.new(:lsa) do
+      def encode = lsa.bytes
+      def to_s = "fault LSA type #{lsa.type} #{Core::Addr.to_s(lsa.ls_id)} from #{Core::Addr.to_s(lsa.advr)}"
+    end
+
+    # Floods the catalog's entry +name+, from +router+ (the simulator's
+    # router ID when nil). It is not in the simulator's database: it is
+    # sent once, a newer instance each time, and fault_clear flushes it.
+    def fault(name, router: nil)
+      entry = Fault.entry(name)
+      synchronize do
+        advr = router ? Core::Addr.to_s(Core::Addr.to_i(router)) : rid_s(settings.router_id)
+        type, ls_id, = entry[:build].call(Fault.context(router_id: advr))
+        last = @faults[[type, ls_id, advr]]
+        lsa = Fault.lsa(name, router_id: advr, seq: last ? last.seq + 1 : 0x8000_0001)
+        @faults[[type, ls_id, advr]] = lsa
+        sent = @neighbor&.adjacent? ? true : false
+        @neighbor.flood([FaultLsa.new(lsa)]) if sent
+        row = fault_row(name, lsa).merge(finding: entry[:finding], expect: entry[:expect], rfc: entry[:rfc], sent: sent)
+        event :lsdb, "fault #{name}: #{entry[:description]}#{sent ? '' : ', not sent: no adjacency'}", row
+        row
+      end
+    end
+
+    # Flushes every fault LSA sent (RFC 2328 14.1: MaxAge).
+    def fault_clear
+      synchronize do
+        lsas = @faults.values.map { _1.with_age(OSPFv2::MaxAge) }
+        @faults.clear
+        @neighbor.flood(lsas.map { FaultLsa.new(_1) }) if @neighbor&.adjacent? && !lsas.empty?
+        event :lsdb, "faults cleared: #{plural(lsas.size, 'LSA')} flushed", cleared: lsas.size
+        { cleared: lsas.size }
+      end
+    end
+
+    # The catalog, and the fault LSAs sent and not cleared.
+    def faults
+      synchronize do
+        { catalog: Fault.catalog.map { _1.except(:build) },
+          sent: @faults.map { |_, l| fault_row(nil, l) } }
+      end
+    end
+
+    def fault_row(name, l)
+      { case: name, type: l.type, id: Core::Addr.to_s(l.ls_id), advr: Core::Addr.to_s(l.advr),
+        seq: format('0x%08x', l.seq & 0xffff_ffff), hex: l.bytes.unpack1('H*') }.compact
+    end
 
     # ---- one LSA, and the topology's routes (docs/design/sim-lsa-actions.md)
 

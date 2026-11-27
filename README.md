@@ -149,6 +149,9 @@ The dashboard listens on 127.0.0.1 unless you pass an address. The JSON API behi
 | POST | `/api/lsa/refresh`, `/api/lsa/flush` | one LSA the simulator originates: `{"type":"router","id":"0.1.0.1","advr":"0.1.0.1"}` |
 | POST | `/api/routes/withdraw`, `/api/routes/advertise` | one of the topology's externals or summaries: `{"router":"edge","prefix":"50.0.0.0/24"}` |
 | POST | `/api/min-ls-interval` | `{"seconds":2}`, from 0 to 5 |
+| POST | `/api/fault` | floods one LSA of the fault catalog (`OSPFv2::Fault`), from the simulator's router ID or `router`: `{"case":"sid_label_range_zero","router":"10.255.0.7"}`. It answers the finding the entry makes, what the RFC expects, its text and whether it was sent |
+| POST | `/api/fault/clear` | flushes every fault LSA sent, at MaxAge |
+| GET | `/api/faults` | the catalog, and the fault LSAs sent and not cleared |
 
 POST requests need an `X-OSPFv2: 1` header. It stops other web pages from driving the
 simulator through your browser.
@@ -417,7 +420,7 @@ time, a level, a kind, a message and, for most kinds, structured `data`:
 | `neighbor` | A neighbor appears or changes state | `router_id`, `address`, `from`, `to`, `event` |
 | `interface` | An interface changes state or is removed | `from`, `to`, `event` |
 | `dr` | The DR or BDR changes | `dr`, `bdr` |
-| `drop` | A packet is dropped | `what`, `reason` |
+| `drop` | A packet is dropped | `what`, `reason`, and `finding` when a rule of `core/validation.rb` says why |
 | `spf` | Every SPF run | `duration_ms`, `routes`, `added`, `changed`, `removed`, `reasons`, `prefixes` (the first 50, `+`, `~` or `-` in front) |
 | `routes` | An SPF run changed routes | `added`, `changed`, `removed` |
 | `spf_skipped` | SPF skipped a bad LSA | `why` |

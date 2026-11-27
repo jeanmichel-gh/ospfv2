@@ -70,7 +70,11 @@ core/                the router. instance.rb is one router; interface,
                      lsdb_topology (the LSDB as nodes, for BGP-LS),
                      spf_scheduler (RFC 8405), auth, bfd (which BFD
                      sessions to want, what a failure does), and wire.rb,
-                     the packet codec; lsa.rb holds LSAs as raw bytes
+                     the packet codec; lsa.rb holds LSAs as raw bytes;
+                     validation.rb names what ospfd finds wrong, with
+                     the RFC text and each receive policy's action
+fault.rb             OSPFv2::Fault: opaque and SR LSAs wrong on purpose,
+                     one per Validation rule; the simulator floods them
 fib.rb, fib/         routes into the kernel: Manager decides, a backend
                      installs. netlink.rb on Linux, memory.rb in tests
 config/              the Junos style configuration: schema.rb is the
@@ -172,7 +176,8 @@ others the code cites:
 | 9552 | BGP-LS: the LSDB as nodes for a Producer | `core/lsdb_topology.rb` |
 | 5880 | BFD; its timers are in microseconds | `core/bfd.rb`, through bfd4r |
 | 5882 | BFD clients: 4.1 no waiting, 4.2 AdminDown, 10.1.2 OSPF | `core/bfd.rb` |
-| 5250 | opaque LSAs | `lsa/opaque.rb`, dissector |
+| 5250 | opaque LSAs | `lsa/opaque.rb`, dissector, `core/validation.rb` |
+| 7684, 7770, 8665 | extended LSAs, Router Information, SR | `core/validation.rb`, `fault.rb` |
 | 3630 | TE LSAs | `lsa/traffic_engineering.rb`, `lsa/tlv/` |
 | 4915 | multi-topology metrics | `ie/`, `lsa/external.rb` |
 | 1071 | the packet checksum | `core/wire.rb`, `core/auth.rb` |
@@ -454,7 +459,7 @@ them. The build order:
 
 | Step | What | Status |
 | --- | --- | --- |
-| 0 | `validation.rb`, `OSPFv2::Fault`, `/api/fault` on the simulator | Not started |
+| 0 | `validation.rb`, `OSPFv2::Fault`, `/api/fault` on the simulator | This change |
 | 1 | Opaque LSAs (RFC 5250): the O bit in DDs, types 9 to 11, a link-scope database | Not started |
 | 2 | Router Information (RFC 7770), with SR-Algorithm, SRGB and SRLB | Not started |
 | 3 | Extended prefix and link LSAs (RFC 7684) | Not started |

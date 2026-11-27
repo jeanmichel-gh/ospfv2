@@ -127,8 +127,11 @@ module OSPFv2
         change(:down, event) unless @state == :down
       end
 
-      def seq_number_mismatch(reason)
+      # +finding+: the Validation rule that says why, counted on the
+      # interface.
+      def seq_number_mismatch(reason, finding: nil)
         return unless at_least?(:exchange)
+        @iface.found(finding) if finding
         start_exstart("SeqNumberMismatch (#{reason})")
       end
 
@@ -319,16 +322,16 @@ module OSPFv2
         @last_rcvd_dd = [dd.flags, dd.options, dd.seq]
         dd.headers.each do |h|
           unless SUPPORTED_TYPES.include?(h.type)
-            seq_number_mismatch("unsupported LSA type #{h.type}")
+            seq_number_mismatch("unsupported LSA type #{h.type}", finding: :dd_unsupported_type)
             return
           end
           next if h.type == 5 && @iface.virtual? # never over virtual links (10.6)
           if h.type == 5 && !@iface.area.external_capable?
-            seq_number_mismatch('AS-external LSA offered in a stub area or NSSA') # RFC 2328 10.6
+            seq_number_mismatch('AS-external LSA offered in a stub area or NSSA', finding: :dd_as_external_in_stub) # RFC 2328 10.6
             return
           end
           if h.type == 7 && !@iface.area.nssa?
-            seq_number_mismatch('type 7 LSA offered outside an NSSA')
+            seq_number_mismatch('type 7 LSA offered outside an NSSA', finding: :dd_nssa_outside_nssa)
             return
           end
           ours = instance.lsdb_for(h.type, @iface.area)&.[](h.key)
