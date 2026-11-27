@@ -68,8 +68,8 @@ class TestDaemon < Test::Unit::TestCase
     @loop.run_until(120) { peer_full? }
     assert @d.instance.opaque?
     @peer.opaque_lsas = [{ type: 10, area: '0.0.0.0', opaque_type: 4, opaque_id: 7, body: "\0\1\0\4\0\0\0\0".b }]
-    @loop.run_until(30) { @d.views.database.any? { _1[:type] == 10 } }
-    row = @d.views.database.find { _1[:type] == 10 }
+    @loop.run_until(30) { @d.views.database.any? { _1[:ls_id] == '4.0.0.7' } }
+    row = @d.views.database.find { _1[:ls_id] == '4.0.0.7' }
     assert_equal ['0.0.0.0', :area, '4.0.0.7', 4, 7, '2.2.2.2', '0x42'],
                  row.values_at(:area, :scope, :ls_id, :opaque_type, :opaque_id, :advr, :options)
     refute @d.views.database.find { _1[:type] == 1 }.key?(:opaque_type), 'other rows gain no column'

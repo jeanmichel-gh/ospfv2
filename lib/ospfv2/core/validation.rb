@@ -110,6 +110,12 @@ module OSPFv2
                clause: 'RFC 8665 section 3.3: the SRLB range size "MUST be greater than 0"',
                description: 'an SR Local Block TLV with a range size of 0',
                actions: { rfc: :ignore_range, strict: :ignore_router, lenient: :ignore_range }),
+      # Which first label to take cannot be told, so no policy uses it.
+      Rule.new(name: :range_two_sid_labels, group: :sr,
+               clause: 'RFC 8665 section 3.2: "If more than one SID/Label Sub-TLV is present, the SID/Label Range ' \
+                       'TLV MUST be ignored"; section 3.3, the same for the SRLB TLV',
+               description: 'a SID/Label Range or SRLB TLV with two SID/Label sub-TLVs',
+               actions: always(:ignore_range)),
       # Which of index and label it is cannot be told, so lenient ignores it too.
       Rule.new(name: :prefix_sid_vl_invalid, group: :sr,
                clause: 'RFC 8665 section 5: "any SID Advertisement received with an invalid setting for V- and ' \
@@ -191,11 +197,14 @@ module OSPFv2
       list.each do |type, value|
         next unless [9, 14].include?(type)
         return overrun("TLV #{type} of length #{value.bytesize}, less than its 4-octet range", subject) if value.bytesize < 4
-        _, bad = tlvs(value.byteslice(4..))
+        subs, bad = tlvs(value.byteslice(4..))
         return overrun("in TLV #{type}: #{bad}", subject) if bad
+        what = type == 9 ? 'SID/Label Range' : 'SRLB'
         size = ("\0".b + value.byteslice(0, 3)).unpack1('N')
         name = type == 9 ? :sid_label_range_zero : :srlb_range_zero
-        found << finding(name, subject, "#{type == 9 ? 'SID/Label Range' : 'SRLB'} of size 0") if size.zero?
+        found << finding(name, subject, "#{what} of size 0") if size.zero?
+        labels = subs.count { _1[0] == 1 }
+        found << finding(:range_two_sid_labels, subject, "#{what} with #{labels} SID/Label sub-TLVs") if labels > 1
       end
       found
     end

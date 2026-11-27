@@ -367,6 +367,66 @@ neighbor without O is measured, not assumed, and the test records it.
 - RFC 8476's Node MSD TLV is not sent. FRR's isisd sends one; whether
   ospfd should is open question 6.
 
+#### As built, step 2
+
+- **The codec** is `core/tlv.rb` and `core/router_information.rb`,
+  built to protocol-conventions part 1. Each TLV is built from field
+  values, a Hash, its octets or another instance, and all four give the
+  same `encode`. Each has `to_hash`, `to_s` and `to_shex`. Types come
+  from a registry (`RouterInformation::TLVS`, `SUB_TLVS`), and an
+  unknown one is kept as `Tlv::Unknown` with its octets. Building
+  never validates. Step 3's TLVs use the same base.
+- **Ours.** While opaque is on, each area has our RI LSA: type 10,
+  4.0.0.0, the capabilities TLV with no bits set. `Instance#sr_capabilities=`
+  adds SR-Algorithm, one SID/Label Range per SRGB range in order, and
+  one SRLB TLV per range; step 4 sets it from the configuration.
+  `opaque_lsas=` refuses 4.0.0.0: it is ospfd's own. Turning opaque
+  off flushes it.
+- **Reading.** `Instance#router_information(area)` gives each router's
+  capabilities, algorithms, SRGB, SRLB and findings, under the receive
+  policy:
+  - of several RI LSAs from one router, the lowest opaque ID with an
+    SR-Algorithm TLV gives SR's values;
+  - only the first SR-Algorithm TLV counts (`sr_algorithm_twice`,
+    `:use_first`); under `:strict` the router is left out of SR;
+  - a range of size 0, or with two SID/Label sub-TLVs, is left out;
+  - no SR-Algorithm TLV: `algorithms` nil, not SR capable (RFC 8665
+    section 3.1).
+
+  Reachability (RFC 5250 section 3.1) is left to step 4's calculation,
+  which reads only routers SPF reaches.
+- **A new rule, `range_two_sid_labels`** (RFC 8665 sections 3.2 and
+  3.3), with its fault catalog entry. Overlapping ranges follow RFC
+  8660's procedure; that is step 4's, with the labels.
+- **A malformed opaque LSA is dropped on receipt.** An RI, extended
+  prefix or extended link LSA with a TLV past its end is not stored,
+  acknowledged or reflooded (`tlv_overrun`, RFC 7684 section 5), as
+  step 0 said step 1 would act on it.
+- **`show.database` with `detail`** decodes an RI body: `opaque_type`,
+  `opaque_id` and the TLVs' `to_hash`. A malformed body gives `error`.
+- **MinLSArrival.** A flush that comes within a second of the LSA it
+  flushes is discarded by the receiver (RFC 2328 13 (5a)), which then
+  keeps the LSA until MaxAge. Turning opaque off can leave a
+  neighbor's copy of our RI so; the tests wait past MinLSArrival.
+- **The tests** (`test/unit/core/router_information_test.rb`): each
+  TLV four ways against octets worked out from the RFCs; an unknown
+  TLV (RFC 9350's FAD, type 16) kept; RFC 8665 section 3.2's three
+  ranges kept in order; ours in the area and flushed; SR's TLVs sent
+  and read; each finding's effect under `:rfc`, and `:strict`'s; a
+  malformed one dropped. The step 1 tests moved from opaque type 4 to
+  type 1, since 4.0.0.0 is now ospfd's.
+- **Interop with FRR** (`frr_interop_test.rb`, in CI): with
+  `segment-routing on` and a global and local block on FRR, FRR's JSON
+  shows ospfd's SRGB and SRLB, ospfd reads FRR's, and FRR's RI octets
+  go through ospfd's codec unchanged.
+- **Padding, measured.** FRR 10.5.1 pads its SR-Algorithm TLV with
+  `ff ff ff`, not zeros. RFC 7770 section 2.3 allows it: the padding
+  "is composed of undefined bits". The first CI run failed on it, since
+  the codec re-encoded zeros. A parsed TLV now keeps the padding it came
+  with; a built one pads with zeros. FRR's octets are a unit test.
+- **Not done here:** RFC 8665 section 3.2's example as labels (index
+  100 is label 1000) is step 4's calculation.
+
 ### Step 3: extended prefix and extended link (RFC 7684)
 
 - **Extended prefix LSA**: opaque type 7, LS type 10 or 11 (section 2).

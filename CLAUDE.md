@@ -72,7 +72,9 @@ core/                the router. instance.rb is one router; interface,
                      sessions to want, what a failure does), and wire.rb,
                      the packet codec; lsa.rb holds LSAs as raw bytes;
                      validation.rb names what ospfd finds wrong, with
-                     the RFC text and each receive policy's action
+                     the RFC text and each receive policy's action;
+                     tlv.rb, opaque LSAs' TLVs (a registry, Unknown
+                     kept), router_information.rb the RI LSA's
 fault.rb             OSPFv2::Fault: opaque and SR LSAs wrong on purpose,
                      one per Validation rule; the simulator floods them
 fib.rb, fib/         routes into the kernel: Manager decides, a backend
@@ -177,7 +179,7 @@ others the code cites:
 | 5880 | BFD; its timers are in microseconds | `core/bfd.rb`, through bfd4r |
 | 5882 | BFD clients: 4.1 no waiting, 4.2 AdminDown, 10.1.2 OSPF | `core/bfd.rb` |
 | 5250 | opaque LSAs | `lsa/opaque.rb`, dissector, `core/validation.rb` |
-| 7684, 7770, 8665 | extended LSAs, Router Information, SR | `core/validation.rb`, `fault.rb` |
+| 7684, 7770, 8665 | extended LSAs, Router Information, SR | `core/validation.rb`, `fault.rb`, `core/tlv.rb`, `core/router_information.rb` |
 | 3630 | TE LSAs | `lsa/traffic_engineering.rb`, `lsa/tlv/` |
 | 4915 | multi-topology metrics | `ie/`, `lsa/external.rb` |
 | 1071 | the packet checksum | `core/wire.rb`, `core/auth.rb` |
@@ -460,8 +462,8 @@ them. The build order:
 | Step | What | Status |
 | --- | --- | --- |
 | 0 | `validation.rb`, `OSPFv2::Fault`, `/api/fault` on the simulator | Done, #68 |
-| 1 | Opaque LSAs (RFC 5250): the O bit in DDs, types 9 to 11, a link-scope database | This change |
-| 2 | Router Information (RFC 7770), with SR-Algorithm, SRGB and SRLB | Not started |
+| 1 | Opaque LSAs (RFC 5250): the O bit in DDs, types 9 to 11, a link-scope database | Done, #69 |
+| 2 | Router Information (RFC 7770), with SR-Algorithm, SRGB and SRLB | This change |
 | 3 | Extended prefix and link LSAs (RFC 7684) | Not started |
 | 4 | SR-MPLS (RFC 8665): SIDs, the label table, label routes by netlink | Not started |
 | 5 | The simulator sends SR LSAs | Not started |

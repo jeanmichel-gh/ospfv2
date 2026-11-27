@@ -13,7 +13,7 @@ class TestCoreOpaque < Test::Unit::TestCase
 
   A = ->(s) { Addr.to_i(s) }
   P2P = { type: :p2p }.freeze
-  RI = A['4.0.0.0'] # opaque type 4, ID 0
+  TE = A['1.0.0.0'] # opaque type 1 (TE), ID 0; the RI LSA, 4.0.0.0, is ospfd's own
 
   def setup
     @lab = CoreLab.new
@@ -34,11 +34,11 @@ class TestCoreOpaque < Test::Unit::TestCase
     assert @lab.run_until(120) { @lab.full?(@a, @b) && @lab.full?(@b, @c) }
   end
 
-  def ri(body = "\x00\x01\x00\x04\x00\x00\x00\x00".b, area: '0.0.0.0', type: 10)
-    [{ type: type, area: area, opaque_type: 4, opaque_id: 0, body: body }.compact]
+  def te(body = "\x00\x01\x00\x04\x00\x00\x00\x00".b, area: '0.0.0.0', type: 10)
+    [{ type: type, area: area, opaque_type: 1, opaque_id: 0, body: body }.compact]
   end
 
-  def has?(r, type, ls_id = RI, advr = '1.1.1.1', db: nil)
+  def has?(r, type, ls_id = TE, advr = '1.1.1.1', db: nil)
     db ||= type == 11 ? r.as_lsdb : r.areas.values.first.lsdb
     !db[[type, ls_id, A[advr]]].nil?
   end
@@ -65,9 +65,9 @@ class TestCoreOpaque < Test::Unit::TestCase
   def test_a_type_10_floods_through_the_area
     line
     up
-    @a.opaque_lsas = ri
+    @a.opaque_lsas = te
     assert @lab.run_until(30) { has?(@c, 10) }
-    l = @c.areas[0].lsdb[[10, RI, A['1.1.1.1']]]
+    l = @c.areas[0].lsdb[[10, TE, A['1.1.1.1']]]
     assert_equal 0x42, l.options, 'E and O'
     assert @lab.run_until(30) { @lab.quiet?(@a, @b, @c) }
   end
@@ -78,7 +78,7 @@ class TestCoreOpaque < Test::Unit::TestCase
     @a.start
     @b.start
     assert @lab.run_until(60) { @lab.full?(@a, @b) }
-    @a.opaque_lsas = ri
+    @a.opaque_lsas = te
     assert @lab.run_until(30) { has?(@b, 10) }
     @c.start
     assert @lab.run_until(60) { @lab.full?(@b, @c) }
@@ -90,7 +90,7 @@ class TestCoreOpaque < Test::Unit::TestCase
   def test_a_neighbor_without_o_gets_none
     line(opaque: %w[a b])
     up
-    @a.opaque_lsas = ri
+    @a.opaque_lsas = te
     assert @lab.run_until(30) { has?(@b, 10) }
     @lab.advance(10)
     refute @lab.neighbor(@b, '3.3.3.3').opaque?
@@ -103,7 +103,7 @@ class TestCoreOpaque < Test::Unit::TestCase
     line(areas: [0, 1])
     [@b, @c].each { |r| r.area_options = { 1 => { stub: {} } } }
     up
-    @a.opaque_lsas = ri(area: nil, type: 11)
+    @a.opaque_lsas = te(area: nil, type: 11)
     assert @lab.run_until(30) { has?(@b, 11) }
     @lab.advance(10)
     refute has?(@c, 11), 'RFC 5250 section 3.1: not flooded into a stub area'
@@ -113,7 +113,7 @@ class TestCoreOpaque < Test::Unit::TestCase
   def test_a_type_9_stays_on_its_interface
     line
     up
-    lsa = Lsa.build(type: 9, ls_id: RI, advr: '1.1.1.1', seq: Lsa::INITIAL_SEQ, body: "\0\1\0\4\0\0\0\0".b, options: 0x42)
+    lsa = Lsa.build(type: 9, ls_id: TE, advr: '1.1.1.1', seq: Lsa::INITIAL_SEQ, body: "\0\1\0\4\0\0\0\0".b, options: 0x42)
     @b.receive_update(@lab.neighbor(@b, '1.1.1.1'), Wire::LinkStateUpdate.new(lsas: [lsa]))
     @lab.advance(10)
     assert_not_nil @b.interfaces['eth0'].link_lsdb[lsa.key]
@@ -127,7 +127,7 @@ class TestCoreOpaque < Test::Unit::TestCase
     [@a, @b, @c].each { |r| r.area_options = { 1 => { stub: {} } } }
     up
     nbr = @lab.neighbor(@b, '1.1.1.1')
-    h = Lsa.build(type: 11, ls_id: RI, advr: '1.1.1.1', seq: Lsa::INITIAL_SEQ, body: ''.b).header
+    h = Lsa.build(type: 11, ls_id: TE, advr: '1.1.1.1', seq: Lsa::INITIAL_SEQ, body: ''.b).header
     nbr.send(:accept_dd, Wire::DatabaseDescription.new(mtu: 1500, options: 0x40, flags: 0, seq: 1, headers: [h]))
     assert_equal 1, @b.interfaces['eth0'].stats[:finding_dd_opaque_as_in_stub]
   end
@@ -135,16 +135,16 @@ class TestCoreOpaque < Test::Unit::TestCase
   def test_with_opaque_off_a_type_10_is_an_unknown_type
     line(opaque: [])
     up
-    lsa = Lsa.build(type: 10, ls_id: RI, advr: '1.1.1.1', seq: Lsa::INITIAL_SEQ, body: ''.b)
+    lsa = Lsa.build(type: 10, ls_id: TE, advr: '1.1.1.1', seq: Lsa::INITIAL_SEQ, body: ''.b)
     @b.receive_update(@lab.neighbor(@b, '1.1.1.1'), Wire::LinkStateUpdate.new(lsas: [lsa]))
     assert_equal 1, @b.interfaces['eth0'].stats[:finding_unsupported_lsa_type]
-    assert_raise(ArgumentError) { @a.opaque_lsas = ri }
+    assert_raise(ArgumentError) { @a.opaque_lsas = te }
   end
 
   def test_one_withdrawn_is_flushed_everywhere
     line
     up
-    @a.opaque_lsas = ri
+    @a.opaque_lsas = te
     assert @lab.run_until(30) { has?(@c, 10) }
     @a.opaque_lsas = []
     assert @lab.run_until(60) { !has?(@c, 10) && !has?(@a, 10) }
@@ -153,19 +153,19 @@ class TestCoreOpaque < Test::Unit::TestCase
   def test_a_changed_body_is_a_new_instance
     line
     up
-    @a.opaque_lsas = ri
+    @a.opaque_lsas = te
     assert @lab.run_until(30) { has?(@c, 10) }
-    seq = @c.areas[0].lsdb[[10, RI, A['1.1.1.1']]].seq
+    seq = @c.areas[0].lsdb[[10, TE, A['1.1.1.1']]].seq
     @lab.advance(OSPFv2::MinLSInterval)
-    @a.opaque_lsas = ri("\x00\x01\x00\x04\x10\x00\x00\x00".b)
-    assert @lab.run_until(30) { @c.areas[0].lsdb[[10, RI, A['1.1.1.1']]].seq == seq + 1 }
+    @a.opaque_lsas = te("\x00\x01\x00\x04\x10\x00\x00\x00".b)
+    assert @lab.run_until(30) { @c.areas[0].lsdb[[10, TE, A['1.1.1.1']]].seq == seq + 1 }
   end
 
   # Off again: every adjacency forms anew without O, and what was held goes.
   def test_opaque_turned_off
     line
     up
-    @a.opaque_lsas = ri
+    @a.opaque_lsas = te
     assert @lab.run_until(30) { has?(@c, 10) }
     @b.opaque = false
     refute has?(@b, 10)
@@ -179,7 +179,7 @@ class TestCoreOpaque < Test::Unit::TestCase
     up
     @lab.advance(30)
     runs = @c.spf.runs
-    @a.opaque_lsas = ri
+    @a.opaque_lsas = te
     assert @lab.run_until(30) { has?(@c, 10) }
     @lab.advance(10)
     assert_equal runs, @c.spf.runs
