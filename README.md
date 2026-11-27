@@ -347,6 +347,35 @@ The statement alone takes bfdd4r's timers. What it does (RFC 5882):
 `show.neighbors` gives each neighbor's session as `bfd`: `up` or `down`, absent when its
 interface runs no BFD. `routescope/labs/ospf-bfd` is the interop check with FRR.
 
+### Segment routing (SR-MPLS)
+
+`source-packet-routing` turns on SR-MPLS (RFC 8665), and opaque with it.
+
+```
+set protocols ospf source-packet-routing srgb start-label 16000 index-range 8000
+set protocols ospf source-packet-routing srlb start-label 15000 index-range 1000
+set protocols ospf source-packet-routing node-segment ipv4-index 1
+set protocols ospf area 0 interface lo passive
+set protocols ospf area 0 interface eth1 no-adjacency-sid
+```
+
+| Statement | Default |
+| --- | --- |
+| `srgb start-label`, `index-range` | 16000, 8000 labels: the Segment Routing Global Block |
+| `srlb start-label`, `index-range` | 15000, 1000 labels: the local block Adj-SIDs come from |
+| `node-segment ipv4-index` | none: the Node-SID on the router ID's /32, which a passive interface must hold |
+| `no-adjacency-sid` on an interface | Adj-SIDs on: no Adj-SID for the neighbors there |
+
+`node-segment ipv4-index` is Junos's statement. Juniper's OSPF page has no `srgb`,
+`srlb` or `no-adjacency-sid`; they are ospfd's own, as FRR's `global-block` and
+`local-block`. A commit is refused when the blocks overlap, pass label 1048575, or the
+index is past the SRGB.
+
+ospfd then sends, in each area: its SRGB, SRLB and algorithm 0 in the Router
+Information LSA; its Node-SID in an extended prefix LSA (in the loopback's area); and an
+Adj-SID for each adjacency in an extended link LSA, a LAN Adj-SID on a broadcast link.
+The label calculation and the label routes come next (`docs/design/sr-ospf.md`, step 4).
+
 ### Opaque LSAs
 
 `opaque` turns on opaque LSAs (RFC 5250). It is ospfd's own statement, as FRR's

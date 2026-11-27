@@ -465,8 +465,8 @@ them. The build order:
 | 0 | `validation.rb`, `OSPFv2::Fault`, `/api/fault` on the simulator | Done, #68 |
 | 1 | Opaque LSAs (RFC 5250): the O bit in DDs, types 9 to 11, a link-scope database | Done, #69 |
 | 2 | Router Information (RFC 7770), with SR-Algorithm, SRGB and SRLB | Done, #70 |
-| 3 | Extended prefix and link LSAs (RFC 7684) | This change: codec and reading; origination is step 4's |
-| 4 | SR-MPLS (RFC 8665): SIDs, the label table, label routes by netlink | Not started |
+| 3 | Extended prefix and link LSAs (RFC 7684) | Done, #71: codec and reading; origination is step 4's |
+| 4 | SR-MPLS (RFC 8665): SIDs, the label table, label routes by netlink | Configuration and origination: this change. Calculation and API, then forwarding, not started |
 | 5 | The simulator sends SR LSAs | Not started |
 | 6 | TI-LFA | Its own spec, later |
 

@@ -160,6 +160,27 @@ class TestFrrInterop < Test::Unit::TestCase
     end
   end
 
+  # ---- SR-MPLS origination (docs/design/sr-ospf.md, step 4, PR 4)
+
+  # FRR's SR database lists ospfd with its SRGB and SRLB, its Node-SID
+  # (index 1 on 1.1.1.1/32) and an Adj-SID from ospfd's SRLB.
+  def test_frr_reads_ospfd_s_sr
+    @lab.start(frr_ospf: FRR_SR + ['segment-routing prefix 2.2.2.2/32 index 2'],
+               core: { opaque: true, passive: ['lo', '1.1.1.1/32'],
+                       segment_routing: { srgb: [16_000, 8_000], srlb: [15_000, 1_000], index: 1 } })
+    assert_full
+    node = nil
+    ok = @lab.wait_for(30) do
+      node = Array(@lab.frr_json('show ip ospf database segment-routing')['srNodes']).find { _1['routerID'] == '1.1.1.1' }
+      node && Array(node['extendedPrefix']).any? && Array(node['extendedLink']).any?
+    end
+    assert ok, "FRR's view of 1.1.1.1: #{node.inspect}\n#{@lab.vtysh('show ip ospf database segment-routing json')}"
+    assert_equal [16_000, 8_000, 15_000, 1_000], node.values_at('srgbLabel', 'srgbSize', 'srlbLabel', 'srlbSize')
+    assert_equal [['1.1.1.1/32', 1]], node['extendedPrefix'].map { _1.values_at('prefix', 'sid') }
+    assert(node['extendedLink'].all? { _1['sid'].between?(15_000, 15_999) }, node['extendedLink'].inspect)
+    notify("FRR's SR node 1.1.1.1: #{JSON.generate(node)}")
+  end
+
   def test_ospfd_and_ospf_cli
     @lab.start(frr_interface: MD5, ospfd: [
                  'set routing-options router-id 1.1.1.1',
