@@ -3,6 +3,7 @@
 require_relative 'wire'
 require_relative 'auth'
 require_relative 'neighbor'
+require_relative 'lsdb'
 
 module OSPFv2
   module Core
@@ -67,7 +68,11 @@ module OSPFv2
         @delayed_acks = []
         @crypto_seqs = {} # router id => highest cryptographic sequence number accepted
         @stats = Hash.new(0)
+        # The type 9 opaque LSAs of this link (RFC 5250 section 3.1).
+        @link_lsdb = Lsdb.new(instance.loop.clock)
       end
+
+      attr_reader :link_lsdb
 
       def loop = @instance.loop
 
@@ -116,6 +121,11 @@ module OSPFv2
       # E bit unless the area is a stub (RFC 2328 A.2).
       def options = @area.options
 
+      # The options in our DDs: the O bit as well while opaque is on. Not in
+      # Hellos (RFC 5250 section 3.1: it "SHOULD NOT be set" in other
+      # packets).
+      def dd_options = @instance.opaque? ? options | Instance::O_BIT : options
+
       # Its timers by name, for show timers.
       def timers = { hello: @hello_timer, wait: @wait_timer, delayed_ack: @ack_timer }.compact
 
@@ -153,6 +163,8 @@ module OSPFv2
         @neighbors.values.each { |n| n.kill('InterfaceDown') }
         @going_down = false
         @neighbors.clear
+        # A link's LSAs go with it: no neighbor is left to flood them to.
+        @link_lsdb.map(&:key).each { @link_lsdb.delete(_1) }
         @crypto_seqs.clear
         @delayed_acks.clear
         @dr = @bdr = 0

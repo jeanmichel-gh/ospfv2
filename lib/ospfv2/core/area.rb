@@ -87,6 +87,7 @@ module OSPFv2
             @instance.flush_own(self, key)
           end
         end
+        @instance.opaque_specs_for(self).each { |spec| @instance.originate(self, spec) }
       end
 
       # Does this router still want an LSA with +key+ in this area? Used
@@ -99,6 +100,7 @@ module OSPFv2
         when 3, 4 then @summaries.key?(key)
         when 5 then @instance.externals.key?(key)
         when 7 then @nssa_lsas.key?(key)
+        when 10, 11 then !@instance.opaque_spec(self, key).nil?
         else false
         end
       end
@@ -110,6 +112,7 @@ module OSPFv2
         when 3, 4 then @summaries[key]
         when 5 then @instance.externals[key]
         when 7 then @nssa_lsas[key]
+        when 10, 11 then @instance.opaque_spec(self, key)
         end
       end
 

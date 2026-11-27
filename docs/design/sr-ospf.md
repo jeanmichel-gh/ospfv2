@@ -271,6 +271,67 @@ lists one ospfd originated. Before this step, the same pair loops in
 ExStart if FRR offers a type 10 in its DD; whether it does to a
 neighbor without O is measured, not assumed, and the test records it.
 
+#### As built, step 1
+
+- **The statement** is `set protocols ospf opaque`, ospfd's own, as
+  FRR's `capability opaque` (open question 1's draft answer: by a
+  statement too). Junos has none. Step 4 turns opaque on with SR.
+- **Turning it on or off** (`Instance#opaque=`) takes every adjacency
+  down, so each forms again with the new DD options. Off, the opaque
+  LSAs held are dropped, and ours flushed first.
+- **The O bit** is in `Interface#dd_options`, not `options`, so Hellos
+  stay as they were. `Neighbor#opaque?` reads the neighbor's DD
+  options, and is false while opaque is off here.
+- **Scopes.** `AREA_SCOPE` gains 10 and `AS_SCOPE` 11. `lsdb_for`
+  gives nil for 9 to 11 while opaque is off, so they stay unknown types
+  (RFC 2328 section 13 (2)). Each `Interface` has a `link_lsdb` for its
+  type 9s; it is emptied when the interface goes down. The helpers that
+  took an area (`scope_interfaces`, `scope_key`, `flood`, `flush`,
+  `exchanging?`, `drop_old_retransmits`, `sweep_db`) take the interface
+  too, for a type 9.
+- **The summary list** follows RFC 5250 section 3.2: the interface's
+  type 9s join the area's and the AS's databases, and opaque LSAs are
+  left out for a neighbor that did not set O.
+- **Flooding** skips a neighbor without O for an opaque LSA, so it is on
+  no retransmission list of one (RFC 5250 section 3.1).
+- **A type 11 offered in a DD in a stub area** is a SeqNumberMismatch,
+  with the new finding `dd_opaque_as_in_stub` (RFC 5250 section 3).
+  It is in the `rfc2328` group, the receive path's checks: a DD
+  carries headers, not an LSA, so it has no catalog entry. A type 11
+  received over a virtual link is dropped as `as_external_over_virtual_link`,
+  as a type 5 is: RFC 5250 section 3.2 leaves both out of a virtual
+  neighbor's summary.
+- **Our own opaque LSAs** come from `Instance#opaque_lsas=`, as
+  `externals=`: types 10 and 11, by opaque type and ID, new and changed
+  ones originated, the rest flushed. They go through `originate`,
+  refresh every LSRefreshTime and flush at shutdown. Their options
+  carry O as well. No statement originates one: step 2 does, with the
+  RI LSA. Type 9 is not originated; nothing here needs one.
+- **SPF** does not run for an opaque LSA, and the externals SPF reads
+  are the type 5s only. RFC 5250 section 5 (a type 11 used only while
+  its originator is reachable) waits for the first reader of a type 11.
+- **`show.database`** rows for 9 to 11 gain `opaque_type` and
+  `opaque_id`; a type 9 row has `scope` `link` and `interface`.
+  `show.neighbors` gains `opaque`. `show.overview`'s `external_lsas`
+  counts type 5s only, as its name says.
+- **ospf-cli** prints opaque rows with their type number (9, 10, 11).
+  Junos's and IOS's own names for them are left for a later change,
+  checked against their documentation.
+- **The tests**, on the fake clock (`test/unit/core/opaque_test.rb`):
+  the O bit in DDs and not in Hellos; DDs as before with opaque off; a
+  type 10 flooded and learned by the database exchange; none to a
+  neighbor without O; a type 11 kept out of a stub area; a type 9 kept
+  on its interface; a DD's type 11 in a stub area; a withdrawn LSA
+  flushed, a changed one a new instance; opaque turned off; no SPF run.
+  The O-bit filter and the SPF guard were each taken out, and their
+  tests failed.
+- **Interop with FRR**, in network namespaces (`frr_interop_test.rb`):
+  both opaque, each lists the other's type 10; FRR opaque and ospfd
+  not, Full as before. They run in CI's `interop-frr` job, on
+  Ubuntu's FRR. On ospflab, AppArmor's `ospfd` profile stops FRR in a
+  namespace, so they were not run there. The gate against 10.2.1 in
+  a container lab waits for step 8's labs.
+
 ### Step 2: Router Information (RFC 7770)
 
 - One RI LSA, type 10, opaque type 4, opaque ID 0, per area (RFC 7770

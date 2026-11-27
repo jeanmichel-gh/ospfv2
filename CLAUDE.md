@@ -459,8 +459,8 @@ them. The build order:
 
 | Step | What | Status |
 | --- | --- | --- |
-| 0 | `validation.rb`, `OSPFv2::Fault`, `/api/fault` on the simulator | This change |
-| 1 | Opaque LSAs (RFC 5250): the O bit in DDs, types 9 to 11, a link-scope database | Not started |
+| 0 | `validation.rb`, `OSPFv2::Fault`, `/api/fault` on the simulator | Done, #68 |
+| 1 | Opaque LSAs (RFC 5250): the O bit in DDs, types 9 to 11, a link-scope database | This change |
 | 2 | Router Information (RFC 7770), with SR-Algorithm, SRGB and SRLB | Not started |
 | 3 | Extended prefix and link LSAs (RFC 7684) | Not started |
 | 4 | SR-MPLS (RFC 8665): SIDs, the label table, label routes by netlink | Not started |

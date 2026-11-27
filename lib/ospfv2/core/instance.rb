@@ -48,8 +48,13 @@ module OSPFv2
       # delay it waited (:initial, :short, :long, :now).
       SpfRun = Struct.new(:n, :time, :triggered_at, :delay, :reasons, :duration, :fib_duration, :fib_done_at, :routes, :diff,
                           keyword_init: true)
-      AS_SCOPE = [5].freeze
-      AREA_SCOPE = [1, 2, 3, 4, 7].freeze
+      # Types 9 to 11 are opaque (RFC 5250 section 3): 9 link-local, 10
+      # area-local, 11 AS-wide. They are held only while opaque is on.
+      AS_SCOPE = [5, 11].freeze
+      AREA_SCOPE = [1, 2, 3, 4, 7, 10].freeze
+      OPAQUE = [9, 10, 11].freeze
+      # The O bit, set in DD options only (RFC 5250 section 3.1).
+      O_BIT = 0x40
 
       attr_reader :router_id, :receive_policy, :loop, :areas, :interfaces, :as_lsdb, :random, :events, :stats,
                   :route_table, :spf, :spf_log, :externals, :virtual_links
@@ -71,6 +76,8 @@ module OSPFv2
                      receive_policy: :rfc)
         @router_id = Addr.to_i(router_id)
         @receive_policy = Validation.policy(receive_policy)
+        @opaque = false
+        @opaque_specs = {} # [area id or nil, key] => { type:, ls_id:, body:, options: }
         @loop = loop
         @random = random
         @logger = logger
@@ -229,11 +236,81 @@ module OSPFv2
       # Routes as { [prefix, len] => Spf::Route }.
       def routes = @route_table.routes
 
+      # ---- opaque LSAs (RFC 5250) ----
+
+      def opaque? = @opaque
+
+      # Turns opaque on or off. A change takes every adjacency down, so
+      # each forms again with the new DD options; off, the opaque LSAs
+      # held are dropped and ours flushed first.
+      def opaque=(on)
+        on = on ? true : false
+        return if on == @opaque
+        self.opaque_lsas = [] unless on
+        @opaque = on
+        unless on
+          ([@as_lsdb] + @areas.values.map(&:lsdb) + @interfaces.values.map(&:link_lsdb)).each do |db|
+            db.map(&:key).select { OPAQUE.include?(_1[0]) }.each { db.delete(_1) }
+          end
+        end
+        neighbors.each { |n| n.kill(on ? 'opaque on' : 'opaque off') }
+      end
+
+      # Sets the opaque LSAs we originate, as externals= does externals:
+      #   [{ type: 10, area: '0.0.0.0', opaque_type: 4, opaque_id: 0, body: }]
+      #   [{ type: 11, opaque_type: 4, opaque_id: 0, body: }]
+      # New and changed ones are originated, the rest flushed. Type 9 is
+      # not originated yet: nothing here needs one.
+      def opaque_lsas=(list)
+        raise ArgumentError, 'opaque is off' unless @opaque || list.empty?
+        want = list.to_h do |o|
+          type = o.fetch(:type)
+          raise ArgumentError, "type #{type}: ospfd originates opaque types 10 and 11" unless [10, 11].include?(type)
+          ot = o.fetch(:opaque_type)
+          oid = o.fetch(:opaque_id)
+          raise ArgumentError, "opaque type #{ot}: 0 to 255" unless ot.between?(0, 255)
+          raise ArgumentError, "opaque ID #{oid}: 0 to 16777215" unless oid.between?(0, 0xff_ffff)
+          ls_id = (ot << 24) | oid
+          aid = type == 10 ? Addr.to_i(o.fetch(:area)) : nil
+          [[aid, [type, ls_id, @router_id]], { type: type, ls_id: ls_id, body: o.fetch(:body).b }]
+        end
+        old = @opaque_specs
+        @opaque_specs = want
+        return unless @running
+        (old.keys - want.keys).each do |aid, key|
+          a = opaque_area(aid)
+          flush_own(a, key) if a
+        end
+        want.each_key { |aid, _| opaque_area(aid)&.schedule_origination }
+      end
+
+      # Our opaque LSAs in +area+: its type 10s, and the type 11s while it
+      # is the first area that takes externals.
+      def opaque_specs_for(area)
+        @opaque_specs.filter_map do |(aid, _), spec|
+          spec if aid == area.id || (aid.nil? && opaque_area(nil).equal?(area))
+        end
+      end
+
+      def opaque_spec(area, key) = @opaque_specs[[key[0] == 11 ? nil : area.id, key]]
+
+      # The area an opaque LSA of ours goes into; for a type 11 (+aid+
+      # nil), any area that takes externals, as for type 5.
+      def opaque_area(aid) = aid ? @areas[aid] : @areas.values.find(&:external_capable?)
+
+      # Every type 9 we hold: [interface, LSA].
+      def link_database
+        @interfaces.values.flat_map { |i| i.link_lsdb.map { |l| [i, l] } }
+      end
+
       # ---- scopes ----
 
       # The database for LSA +type+ in +area+; nil if none (externals in a
-      # stub area, RFC 2328 3.6).
-      def lsdb_for(type, area)
+      # stub area, RFC 2328 3.6; opaque while opaque is off). A type 9's
+      # is its interface's (RFC 5250 section 3.1).
+      def lsdb_for(type, area, iface = nil)
+        return nil if OPAQUE.include?(type) && !@opaque
+        return iface&.link_lsdb if type == 9
         return (area&.external_capable? == false ? nil : @as_lsdb) if AS_SCOPE.include?(type)
         return (area.nssa? ? area.lsdb : nil) if type == 7
         return area.lsdb if AREA_SCOPE.include?(type)
@@ -243,23 +320,29 @@ module OSPFv2
       # Why an LSA of +type+ received on +iface+ has no database: the
       # Validation rule and the text. Every policy drops it (validation.rb).
       def unstored(type, iface)
+        return [:as_external_over_virtual_link, 'type 11 opaque LSA over a virtual link'] if type == 11 && iface.virtual?
+        # RFC 5250 section 3.1, opaque on or off.
+        return [:opaque_as_in_stub, 'type 11 opaque LSA in a stub area or NSSA'] if type == 11 && !iface.area.external_capable?
+        return [:unsupported_lsa_type, "unsupported type #{type}, opaque is off"] if OPAQUE.include?(type) && !@opaque
         if AS_SCOPE.include?(type)
           return iface.virtual? ? [:as_external_over_virtual_link, 'AS-external LSA over a virtual link'] :
                                   [:as_external_in_stub, 'AS-external LSA in a stub area or NSSA']
         end
         return [:nssa_outside_nssa, 'type 7 LSA outside an NSSA'] if type == 7
-        # RFC 5250 section 3.1. ospfd holds no opaque LSA yet (step 1).
-        return [:opaque_as_in_stub, 'type 11 opaque LSA in a stub area or NSSA'] if type == 11 && !iface.area.external_capable?
         [:unsupported_lsa_type, "unsupported type #{type}"]
       end
 
       # Databases summarized in DDs; AS-external LSAs never go over
-      # virtual links (RFC 2328 10.3).
-      def lsdbs_for(area, virtual: false)
-        area.external_capable? && !virtual ? [area.lsdb, @as_lsdb] : [area.lsdb]
+      # virtual links (RFC 2328 10.3). RFC 5250 section 3.2 adds the
+      # interface's type 9s, and types 10 and 11 with the others; the
+      # neighbor's summary leaves opaque out when it does not set O.
+      def lsdbs_for(area, virtual: false, iface: nil)
+        dbs = area.external_capable? && !virtual ? [area.lsdb, @as_lsdb] : [area.lsdb]
+        @opaque && iface ? dbs + [iface.link_lsdb] : dbs
       end
 
-      def scope_interfaces(type, area)
+      def scope_interfaces(type, area, iface = nil)
+        return iface ? [iface] : [] if type == 9
         return area.interfaces unless AS_SCOPE.include?(type)
         @interfaces.values.select { |i| i.area.external_capable? && !i.virtual? }
       end
@@ -344,7 +427,7 @@ module OSPFv2
             iface.drop(:lsa, "bad checksum on #{lsa.id_string} from #{nbr}")
             next
           end
-          db = lsdb_for(lsa.type, area)
+          db = lsdb_for(lsa.type, area, iface)
           db = nil if iface.virtual? && AS_SCOPE.include?(lsa.type)
           unless db
             finding, why = unstored(lsa.type, iface)
@@ -354,7 +437,7 @@ module OSPFv2
           cur = db[lsa.key]
 
           # (4) A MaxAge LSA we do not have, with nobody mid-exchange.
-          if lsa.max_age? && cur.nil? && !exchanging?(lsa.type, area)
+          if lsa.max_age? && cur.nil? && !exchanging?(lsa.type, area, iface)
             iface.direct_ack(lsa, nbr)
             next
           end
@@ -364,14 +447,14 @@ module OSPFv2
             next if cur && db.since_installed(lsa.key) < OSPFv2::MinLSArrival && lsa.advr != @router_id
 
             flooded_back = flood(lsa, area, from: nbr)
-            drop_old_retransmits(lsa, area)
+            drop_old_retransmits(lsa, area, iface)
             arriving(source: 'neighbor', router_id: Addr.to_s(nbr.router_id), address: Addr.to_s(nbr.address),
                      interface: iface.name) { db.install(lsa) }
             @stats[:lsa_installed] += 1
             unless flooded_back
               iface.delayed_ack(lsa) if !iface.backup? || nbr.address == iface.dr
             end
-            self_originated(lsa, area) if self_originated?(lsa)
+            self_originated(lsa, area, iface) if self_originated?(lsa)
           elsif nbr.ls_request.key?(lsa.key)
             nbr.bad_ls_req("#{lsa.id_string} is not newer than ours")
             return
@@ -386,7 +469,7 @@ module OSPFv2
             # (8) Ours is newer: send it back, at most once per MinLSArrival,
             # and never a MaxSequenceNumber flush.
             next if cur.max_age? && cur.seq == LsaFields::MAX_SEQ
-            sk = scope_key(area, lsa.key)
+            sk = scope_key(area, lsa.key, iface)
             last = @sent_back[sk]
             next if last && @loop.now - last < OSPFv2::MinLSArrival
             @sent_back[sk] = @loop.now
@@ -399,14 +482,18 @@ module OSPFv2
 
       # Floods +lsa+ out of every interface in its scope. +from+ is the
       # neighbor it came from, or nil when we originated it. Returns true
-      # when it went back out of the receiving interface.
-      def flood(lsa, area, from: nil)
+      # when it went back out of the receiving interface. A type 9 floods
+      # on +iface+, or on the interface it came in on. An opaque LSA goes
+      # on the lists of neighbors that set O only (RFC 5250 section 3.1).
+      def flood(lsa, area, from: nil, iface: nil)
         flooded_back = false
-        scope_interfaces(lsa.type, area).each do |iface|
+        opaque = OPAQUE.include?(lsa.type)
+        scope_interfaces(lsa.type, area, iface || from&.iface).each do |iface|
           next unless iface.up? && !iface.passive?
           added = false
           iface.neighbors.values.each do |n|
             next unless n.at_least?(:exchange)
+            next if opaque && !n.opaque?
             if (req = n.ls_request[lsa.key])
               cmp = lsa.compare(req)
               next if cmp.negative?
@@ -439,6 +526,7 @@ module OSPFv2
         db = own_db(spec[:type], area)
         cur = db[key]
         options = spec[:options] || (AS_SCOPE.include?(spec[:type]) ? 0x02 : area.lsa_options)
+        options |= O_BIT if OPAQUE.include?(spec[:type])
         unchanged = @own[sk] && cur && !cur.max_age? && cur.body == spec[:body] && cur.options == options
         return if unchanged && !force
 
@@ -491,7 +579,8 @@ module OSPFv2
         @interfaces.values.map(&:summary)
       end
 
-      # Every LSA we hold, with its area (nil for AS scope).
+      # Every LSA we hold but type 9s (link_database), with its area (nil
+      # for AS scope).
       def database
         rows = @areas.values.flat_map { |a| a.lsdb.map { |l| [a, l] } }
         rows + @as_lsdb.map { |l| [nil, l] }
@@ -505,7 +594,8 @@ module OSPFv2
         return unless @running
         started = @loop.clock.wall
         t0 = Process.clock_gettime(Process::CLOCK_MONOTONIC)
-        table = Spf.run(router_id: @router_id, areas: spf_areas, externals: @as_lsdb.live, max_paths: @max_paths)
+        table = Spf.run(router_id: @router_id, areas: spf_areas, externals: @as_lsdb.live.select { _1.type == 5 },
+                         max_paths: @max_paths)
         @stats[:spf_runs] += 1
         # Our summaries and externals that this run re-originates are told
         # in the topology events at its end, not one by one.
@@ -838,6 +928,8 @@ module OSPFv2
 
       def lsdb_changed(lsa, _old, area = nil)
         return unless @running
+        # No reader of opaque LSAs runs SPF yet.
+        return if OPAQUE.include?(lsa.type)
         # SPF never uses our own summaries and externals: no run for them,
         # but show.topology lists them.
         if lsa.advr == @router_id && [3, 4, 5, 7].include?(lsa.type)
@@ -960,12 +1052,18 @@ module OSPFv2
         { kind: 'lsa', area: area && Addr.to_s(area), type: type, ls_id: Addr.to_s(ls_id), advr: Addr.to_s(advr) }
       end
 
-      def scope_key(area, key) = [AS_SCOPE.include?(key[0]) ? nil : area.id, *key]
+      def scope_key(area, key, iface = nil)
+        return ["link #{iface&.name}", *key] if key[0] == 9
+        [AS_SCOPE.include?(key[0]) ? nil : area.id, *key]
+      end
 
       # Where our own LSA of +type+ lives: the AS database for externals,
       # whatever the area (it may have become a stub or NSSA since), else
       # the area's.
       def own_db(type, area) = AS_SCOPE.include?(type) ? @as_lsdb : area.lsdb
+
+      # The database an LSA of +type+ is in: +iface+'s for a type 9.
+      def db_of(type, area, iface) = type == 9 ? iface.link_lsdb : own_db(type, area)
 
       def install_own(area, lsa)
         db = own_db(lsa.type, area)
@@ -986,21 +1084,21 @@ module OSPFv2
         flood(lsa, area)
       end
 
-      def flush(cur, area)
+      def flush(cur, area, iface = nil)
         lsa = cur.with_age(OSPFv2::MaxAge)
-        arriving(source: lsa.advr == @router_id ? 'self' : 'flush') { own_db(lsa.type, area).install(lsa) }
+        arriving(source: lsa.advr == @router_id ? 'self' : 'flush') { db_of(lsa.type, area, iface).install(lsa) }
         # A flush is a new instance too: the next origination waits
         # MinLSInterval, or routers two hops away drop it (13 step 5a).
-        @last_origination[scope_key(area, lsa.key)] = @loop.now if lsa.advr == @router_id
+        @last_origination[scope_key(area, lsa.key, iface)] = @loop.now if lsa.advr == @router_id
         log(:info, nil, "flushing #{lsa.id_string}", kind: :lsa, change: 'flush', **lsa.instance_fields)
-        drop_old_retransmits(lsa, area)
-        flood(lsa, area)
+        drop_old_retransmits(lsa, area, iface)
+        flood(lsa, area, iface: iface)
       end
 
       # RFC 2328 13.4: one of our own LSAs came back newer than ours.
-      def self_originated(lsa, area)
+      def self_originated(lsa, area, iface = nil)
         key = lsa.key
-        sk = scope_key(area, key)
+        sk = scope_key(area, key, iface)
         if lsa.advr == @router_id && area.wants?(key) && !@own.dig(sk, :wrap)
           # Jump past the sequence number that came back, now rather than
           # after MinLSInterval.
@@ -1009,7 +1107,7 @@ module OSPFv2
           @last_origination.delete(sk)
           originate(area, area.spec_for(key), force: true)
         elsif !lsa.max_age?
-          flush(lsa, area)
+          flush(lsa, area, iface)
         end
       end
 
@@ -1017,16 +1115,16 @@ module OSPFv2
         lsa.advr == @router_id || (lsa.type == 2 && @interfaces.each_value.any? { |i| i.address == lsa.ls_id })
       end
 
-      def exchanging?(type, area)
-        scope_interfaces(type, area).any? do |i|
+      def exchanging?(type, area, iface = nil)
+        scope_interfaces(type, area, iface).any? do |i|
           i.neighbors.each_value.any? { |n| %i[exchange loading].include?(n.state) }
         end
       end
 
       # RFC 2328 13 (5c): older instances of this LSA leave every
       # retransmission list.
-      def drop_old_retransmits(lsa, area)
-        scope_interfaces(lsa.type, area).each do |i|
+      def drop_old_retransmits(lsa, area, iface = nil)
+        scope_interfaces(lsa.type, area, iface).each do |i|
           i.neighbors.each_value do |n|
             old = n.retransmit[lsa.key]
             n.remove_retransmit(lsa.key) if old && !old.same_instance?(lsa)
@@ -1039,9 +1137,10 @@ module OSPFv2
       def sweep
         sweep_db(@as_lsdb, @areas.values.first) if @areas.any?
         @areas.each_value { |a| sweep_db(a.lsdb, a) }
+        @interfaces.each_value { |i| sweep_db(i.link_lsdb, i.area, i) if i.link_lsdb.size.positive? }
       end
 
-      def sweep_db(db, area)
+      def sweep_db(db, area, iface = nil)
         db.max_age_entries.each do |e|
           key = e.key
           if e.lsa.age < OSPFv2::MaxAge && !e.aged_out
@@ -1049,13 +1148,13 @@ module OSPFv2
             log(:info, nil, "#{e.lsa.id_string} reached MaxAge", kind: :lsa, change: 'maxage', **e.lsa.instance_fields)
             @spf.trigger(:maxage, e.lsa.id_string, lsa: e.lsa.instance_fields.merge(type: e.lsa.type, age: e.lsa.age),
                                                    source: { source: 'maxage' })
-            flood(db.current(e), area)
+            flood(db.current(e), area, iface: iface)
           end
-          next if exchanging?(key[0], area)
-          next if scope_interfaces(key[0], area).any? { |i| i.neighbors.each_value.any? { |n| n.retransmitting?(key) } }
+          next if exchanging?(key[0], area, iface)
+          next if scope_interfaces(key[0], area, iface).any? { |i| i.neighbors.each_value.any? { |n| n.retransmitting?(key) } }
           db.delete(key)
-          if (o = @own[scope_key(area, key)]) && o[:wrap]
-            @own.delete(scope_key(area, key))
+          if (o = @own[scope_key(area, key, iface)]) && o[:wrap]
+            @own.delete(scope_key(area, key, iface))
             spec = area.spec_for(key)
             originate(area, spec) if spec
           end

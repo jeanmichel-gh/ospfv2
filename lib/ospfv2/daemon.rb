@@ -306,6 +306,7 @@ module OSPFv2
         @fib&.attach(@instance)
       end
       apply_kernel(model.kernel)
+      @instance.opaque = model.opaque
       apply_areas(model.areas)
       apply_bfd(model.interfaces)
       sync_interfaces

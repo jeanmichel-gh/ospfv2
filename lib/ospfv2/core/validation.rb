@@ -29,8 +29,8 @@ module OSPFv2
   #   :use           the value is used as it is.
   module Validation
     POLICIES = %i[rfc strict lenient].freeze
-    # :rfc2328 rules are the inline drops this spec touches; :opaque and
-    # :sr rules each have an entry in OSPFv2::Fault.
+    # :rfc2328 rules are the receive path's checks on packets this spec
+    # touches; :opaque and :sr rules each have an entry in OSPFv2::Fault.
     GROUPS = %i[rfc2328 opaque sr].freeze
 
     Rule = Struct.new(:name, :group, :clause, :description, :actions, keyword_init: true)
@@ -78,6 +78,14 @@ module OSPFv2
       Rule.new(name: :dd_nssa_outside_nssa, group: :rfc2328,
                clause: 'RFC 3101 section 2.3: "Type-7 LSAs are only flooded within the originating NSSA"',
                description: 'a DD that offers a type 7 LSA outside an NSSA',
+               actions: always(:seq_mismatch)),
+
+      # A DD carries headers, not an LSA, so this one has no catalog entry;
+      # its text is RFC 5250's.
+      Rule.new(name: :dd_opaque_as_in_stub, group: :rfc2328,
+               clause: 'RFC 5250 section 3: "if a type-11 Opaque LSA is received in a stub area or NSSA from a ' \
+                       'neighboring router within the stub area or NSSA, the LSA is rejected"',
+               description: 'a DD that offers a type 11 opaque LSA in a stub area or an NSSA',
                actions: always(:seq_mismatch)),
 
       # ---- Opaque LSAs (RFC 5250)
