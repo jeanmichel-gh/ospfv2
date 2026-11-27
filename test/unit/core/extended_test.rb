@@ -44,6 +44,24 @@ class TestCoreExtended < Test::Unit::TestCase
     assert XL::AdjSid.new(flags: 0xe0, sid: 1).backup?
   end
 
+  # FRR 10.5.1's, from CI's interop job (2026-11-27): its loopback with
+  # index 2, and its transit link to ospfd, where FRR is the DR and sends
+  # LAN Adj-SIDs to 1.1.1.1: 14000 with B (0xe0), 14001 without.
+  FRR_PREFIX = '000100140120004002020202000200080000000000000002'
+  FRR_LINK = '0001002c020000000a000c020a000c020003000be0000000010101010036b0000003000b60000000010101010036b100'
+
+  def test_frr_s_octets_unchanged
+    p = XP::Body.new([FRR_PREFIX].pack('H*'))
+    assert_equal [FRR_PREFIX], [p.to_shex]
+    assert_equal [['2.2.2.2/32', XP::N_FLAG, 2]], p.prefixes.map { [_1.prefix_s, _1.flags, _1.sids.first.sid] }
+    l = XL::Body.new([FRR_LINK].pack('H*'))
+    assert_equal FRR_LINK, l.to_shex
+    link = l.links.first
+    assert_equal [2, '10.0.12.2', '10.0.12.2'], [link.link_type, Addr.to_s(link.link_id), Addr.to_s(link.link_data)]
+    assert_equal [[14_000, true, '1.1.1.1'], [14_001, false, '1.1.1.1']],
+                 link.lan_adj_sids.map { [_1.sid, _1.backup?, Addr.to_s(_1.neighbor)] }
+  end
+
   # RFC 9350's Flexible Algorithm Prefix Metric sub-TLV (type 3) is not
   # read here: it is kept and sent back.
   def test_an_unknown_sub_tlv_is_kept

@@ -490,7 +490,10 @@ neighbor without O is measured, not assumed, and the test records it.
 - **Interop with FRR** (in CI): with `segment-routing prefix 2.2.2.2/32
   index 2`, ospfd reads FRR's Prefix-SID 2 and its Adj-SID to ospfd,
   and FRR's octets of both go through the codec unchanged. The test
-  prints them, to be kept as unit test octets.
+  prints them; FRR 10.5.1's are kept in `extended_test.rb`. As the DR
+  on the broadcast link, FRR sends its extended link as a transit link
+  with two LAN Adj-SIDs to ospfd, one with B (0xe0) and one without.
+  It does so without TI-LFA configured, as routescope found for 10.2.1.
 
 ### Step 4: SR-MPLS (RFC 8665)
 
