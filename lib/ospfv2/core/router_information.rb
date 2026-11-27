@@ -115,24 +115,8 @@ module OSPFv2
       TLVS = { 1 => Capabilities, 8 => SrAlgorithm, 9 => SidLabelRange, 14 => Srlb }.freeze
 
       # The LSA's body: its TLVs, unknown ones kept.
-      class Body
-        attr_reader :tlvs
-
-        def initialize(arg = nil, tlvs: nil)
-          @tlvs = case arg
-                  when nil then Array(tlvs)
-                  when Hash then Array(arg.transform_keys(&:to_sym)[:tlvs]).map { _1.is_a?(Tlv) ? _1 : Tlv.from_hash(_1, TLVS) }
-                  when String then Tlv.list(arg, TLVS)
-                  when Body then Tlv.list(arg.encode, TLVS)
-                  else raise ArgumentError, "a Router Information body from #{arg.class}?"
-                  end
-        end
-
-        def encode = @tlvs.map(&:encode).join.b
-        def to_hash = { tlvs: @tlvs.map(&:to_hash) }
-        def to_shex = encode.unpack1('H*')
-        def to_s = @tlvs.map(&:to_s).join("\n")
-        def ==(other) = other.is_a?(Body) && encode == other.encode
+      class Body < Tlv::Body
+        TLVS = RouterInformation::TLVS
 
         def capabilities = @tlvs.find { _1.is_a?(Capabilities) }&.bits
 

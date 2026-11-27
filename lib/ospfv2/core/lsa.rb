@@ -4,6 +4,7 @@ require_relative 'addr'
 require_relative '../infra/ospf_constants'
 
 require_relative 'router_information'
+require_relative 'extended'
 
 module OSPFv2
   module Core
@@ -273,12 +274,17 @@ module OSPFv2
       # router flags and links, network mask and attached routers, summary
       # and external mask, metric, type, forwarding address and tag. Other
       # types give {}. A body that does not decode gives { error: }.
-      # An opaque LSA's body: the Router Information LSA decoded, others
-      # by their opaque type and ID only. A malformed body says why.
+      OPAQUE_BODIES = { RouterInformation::OPAQUE_TYPE => RouterInformation::Body,
+                        ExtendedPrefix::OPAQUE_TYPE => ExtendedPrefix::Body,
+                        ExtendedLink::OPAQUE_TYPE => ExtendedLink::Body }.freeze
+
+      # An opaque LSA's body: the Router Information and extended LSAs
+      # decoded, others by their opaque type and ID only. A malformed body
+      # says why.
       def opaque_detail
         d = { opaque_type: @ls_id >> 24, opaque_id: @ls_id & 0xff_ffff }
-        return d unless d[:opaque_type] == RouterInformation::OPAQUE_TYPE
-        d.merge(RouterInformation::Body.new(body).to_hash)
+        klass = OPAQUE_BODIES[d[:opaque_type]] or return d
+        d.merge(klass.new(body).to_hash)
       rescue Tlv::Error => e
         d.merge(error: e.message)
       end

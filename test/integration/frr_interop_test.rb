@@ -133,6 +133,33 @@ class TestFrrInterop < Test::Unit::TestCase
     assert_equal lsa.body, OSPFv2::Core::RouterInformation::Body.new(lsa.body).encode, "FRR's RI: #{lsa.body.unpack1('H*')}"
   end
 
+  # ---- extended prefix and link (RFC 7684; docs/design/sr-ospf.md, step 3)
+
+  # ospfd reads FRR's Prefix-SID for its loopback and its Adj-SID to
+  # ospfd, and FRR's octets go through ospfd's codec unchanged. They are
+  # printed (notify), to be kept as unit test octets.
+  def test_frr_s_extended_lsas
+    @lab.start(frr_ospf: FRR_SR + ['segment-routing prefix 2.2.2.2/32 index 2'], core: { opaque: true, sr: CORE_SR })
+    assert_full
+    ok = @lab.wait_for(20) do
+      @lab.core_state.dig('extended_prefixes', '2.2.2.2', 'prefixes', '2.2.2.2/32') &&
+        @lab.core_state.dig('extended_links', '2.2.2.2', 'links')&.any?
+    end
+    assert ok, @lab.core_state.slice('extended_prefixes', 'extended_links').inspect
+    pfx = @lab.core_state.dig('extended_prefixes', '2.2.2.2', 'prefixes', '2.2.2.2/32')
+    assert_equal [2], pfx['sids'].map { _1['sid'] }
+    link = @lab.core_state.dig('extended_links', '2.2.2.2', 'links').first
+    refute_empty link['adj_sids'] + link['lan_adj_sids'], link.inspect
+    [[7, OSPFv2::Core::ExtendedPrefix::Body], [8, OSPFv2::Core::ExtendedLink::Body]].each do |ot, klass|
+      @lab.core_state.dig('lsas', '0.0.0.0').each do |hex|
+        lsa = OSPFv2::Core::Lsa.new([hex].pack('H*'))
+        next unless lsa.type == 10 && lsa.ls_id >> 24 == ot && lsa.advr == OSPFv2::Core::Addr.to_i('2.2.2.2')
+        notify("FRR opaque type #{ot} #{OSPFv2::Core::Addr.to_s(lsa.ls_id)}: #{lsa.body.unpack1('H*')}")
+        assert_equal lsa.body, klass.new(lsa.body).encode, "FRR's type #{ot}: #{lsa.body.unpack1('H*')}"
+      end
+    end
+  end
+
   def test_ospfd_and_ospf_cli
     @lab.start(frr_interface: MD5, ospfd: [
                  'set routing-options router-id 1.1.1.1',

@@ -455,6 +455,43 @@ neighbor without O is measured, not assumed, and the test records it.
   link LSA with no sub-TLVs says nothing. The codec and the reading
   land here; origination comes with step 4.
 
+#### As built, step 3
+
+- **The codec** is `core/extended.rb`, on step 2's `Tlv`, with a body
+  class both share (`Tlv::Body`):
+  - `ExtendedPrefix`: opaque type 7, the Extended Prefix TLV (route
+    type, prefix, AF, flags A and N) and its Prefix-SID sub-TLV (RFC
+    8665 section 5: flags, MT-ID, algorithm, SID);
+  - `ExtendedLink`: opaque type 8, the Extended Link TLV (link type,
+    ID, data) and its Adj-SID and LAN Adj-SID sub-TLVs (6.1, 6.2).
+
+  A SID is 3 octets with the V flag set and 4 without; a parsed one
+  keeps the size it came in, so a SID wrong on purpose goes back as it
+  came. Sub-TLVs are registries too, so RFC 9350's Prefix Metric and
+  RFC 9492's ASLA sub-TLVs are kept as `Unknown` until P9 reads them.
+- **Reading.** `Instance#extended_prefixes(area)` and
+  `#extended_links(area)` give each router's, from the area's type 10s
+  and the AS's type 11s:
+  - a prefix or link in several LSAs of one router takes the lowest
+    opaque ID (RFC 7684 sections 2.1, 3.1);
+  - one twice in one LSA takes the first, with a finding;
+  - a Prefix-SID with V and L unequal is left out (RFC 8665 section 5).
+- **Two new rules**, each with its fault catalog entry:
+  `prefix_tlv_twice` and `link_tlv_twice` (RFC 7684 sections 2.1 and
+  3.1, "SHOULD be logged as an error"). Their action is `:use_first`,
+  and `:ignore_lsa` under `:strict`. They are in the `opaque` group:
+  RFC 7684's, not SR's.
+- **Nothing is originated** in this step, as the spec says.
+- **`show.database` with `detail`** decodes both kinds.
+- **The tests** (`test/unit/core/extended_test.rb`): each TLV and
+  sub-TLV four ways against octets worked out from the RFCs; an unknown
+  sub-TLV kept; the lowest opaque ID; a SID left out; one prefix twice;
+  two links, under `:rfc` and `:strict`; the detail.
+- **Interop with FRR** (in CI): with `segment-routing prefix 2.2.2.2/32
+  index 2`, ospfd reads FRR's Prefix-SID 2 and its Adj-SID to ospfd,
+  and FRR's octets of both go through the codec unchanged. The test
+  prints them, to be kept as unit test octets.
+
 ### Step 4: SR-MPLS (RFC 8665)
 
 #### Wire format

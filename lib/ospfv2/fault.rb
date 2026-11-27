@@ -22,6 +22,7 @@ module OSPFv2
     # 7770), extended prefix and extended link (RFC 7684).
     RI = Validation::OPAQUE_RI
     EXT_PREFIX = Validation::OPAQUE_EXT_PREFIX
+    EXT_LINK = Validation::OPAQUE_EXT_LINK
 
     CATALOG = [
       [:opaque_as_in_stub, :opaque_as_in_stub, 'a correct Router Information LSA, flooded as a type 11 into a stub area',
@@ -36,6 +37,10 @@ module OSPFv2
        ->(c) { [10, opaque_id(RI, 0), Fault.router_information(c, srgb_subs: 2)] }],
       [:prefix_sid_vl_invalid, :prefix_sid_vl_invalid, 'an extended prefix LSA whose Prefix-SID has V set and L clear',
        ->(c) { [10, opaque_id(EXT_PREFIX, 1), Fault.extended_prefix(c, flags: V_FLAG)] }],
+      [:prefix_tlv_twice, :prefix_tlv_twice, 'an extended prefix LSA with the Extended Prefix TLV for its /32 twice',
+       ->(c) { [10, opaque_id(EXT_PREFIX, 1), Fault.extended_prefix(c) * 2] }],
+      [:link_tlv_twice, :link_tlv_twice, 'an extended link LSA with two Extended Link TLVs',
+       ->(c) { [10, opaque_id(EXT_LINK, 1), Fault.extended_link(c) + Fault.extended_link(c, link_id: '10.255.0.8')] }],
       [:tlv_overrun, :tlv_overrun, 'an extended prefix LSA whose Prefix-SID sub-TLV runs 4 octets past its TLV',
        ->(c) { [10, opaque_id(EXT_PREFIX, 1), Fault.extended_prefix(c, overrun: 4)] }]
     ].freeze
@@ -109,6 +114,14 @@ module OSPFv2
       value = [flags, 0, 0, 0].pack('C4') + sid
       sub = [2, value.bytesize + overrun].pack('nn') + value
       tlv(1, [1, 32, 0, N_FLAG].pack('C4') + [Core::Addr.to_i(c[:router_id])].pack('N') + sub)
+    end
+
+    # An extended link body (RFC 7684 section 3.1): a point-to-point link
+    # to +link_id+, with an Adj-SID (RFC 8665 section 6.1), V and L set,
+    # a label from the SRLB.
+    def extended_link(c, link_id: '10.255.0.7', data: '10.0.0.1')
+      adj = tlv(2, [0x60, 0, 0, 0].pack('C4') + three(c[:srlb][0]))
+      tlv(1, [1, 0, 0, 0].pack('C4') + [Core::Addr.to_i(link_id), Core::Addr.to_i(data)].pack('NN') + adj)
     end
   end
 end

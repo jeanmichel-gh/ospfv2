@@ -90,6 +90,31 @@ module OSPFv2
         decode(octets.byteslice(4, len))
       end
 
+      # An opaque LSA's body: its TLVs, through the subclass's TLVS
+      # registry, unknown ones kept. Built four ways, as a TLV is.
+      class Body
+        attr_reader :tlvs
+
+        def self.registry = self::TLVS
+
+        def initialize(arg = nil, tlvs: nil)
+          reg = self.class.registry
+          @tlvs = case arg
+                  when nil then Array(tlvs)
+                  when Hash then Array(arg.transform_keys(&:to_sym)[:tlvs]).map { _1.is_a?(Tlv) ? _1 : Tlv.from_hash(_1, reg) }
+                  when String then Tlv.list(arg, reg)
+                  when self.class then Tlv.list(arg.encode, reg)
+                  else raise ArgumentError, "a #{self.class.name} from #{arg.class}?"
+                  end
+        end
+
+        def encode = @tlvs.map(&:encode).join.b
+        def to_hash = { tlvs: @tlvs.map(&:to_hash) }
+        def to_shex = encode.unpack1('H*')
+        def to_s = @tlvs.map(&:to_s).join("\n")
+        def ==(other) = other.is_a?(self.class) && encode == other.encode
+      end
+
       # An unknown type: its type and value kept as they came. Its Hash
       # has :type and :value, the value in hex.
       class Unknown < Tlv
