@@ -1,0 +1,222 @@
+# frozen_string_literal: true
+
+require_relative 'addr'
+
+module OSPFv2
+  # What ospfd finds wrong in what it receives, each with the RFC text
+  # that says so and what the RFC asks for (docs/design/sr-ospf.md, step
+  # 0; routescope docs/design/protocol-conventions.md, item 3).
+  #
+  # Validation decides nothing. It names a finding and the action each
+  # receive policy takes; the caller acts. Building never validates: the
+  # fault catalog (OSPFv2::Fault) makes wrong values on purpose.
+  #
+  # The policies:
+  #   :rfc      what the RFC asks for, the default.
+  #   :strict   refuses more: a router or an LSA rather than one TLV.
+  #   :lenient  uses what it can. Where using a value is impossible, it
+  #             does what :rfc does, and the rule says why.
+  #
+  # The actions:
+  #   :drop_lsa      the LSA is discarded and not acknowledged.
+  #   :seq_mismatch  the DD exchange starts again (RFC 2328 10.8).
+  #   :ignore_lsa    the LSA is left out of SR; it is still held.
+  #   :ignore_tlv    that TLV is left out.
+  #   :ignore_sid    that SID is left out.
+  #   :ignore_range  that SID/Label Range or SRLB is left out.
+  #   :ignore_router the router is left out of SR.
+  #   :use_first     the first of several is used, the rest ignored.
+  #   :use           the value is used as it is.
+  module Validation
+    POLICIES = %i[rfc strict lenient].freeze
+    # :rfc2328 rules are the inline drops this spec touches; :opaque and
+    # :sr rules each have an entry in OSPFv2::Fault.
+    GROUPS = %i[rfc2328 opaque sr].freeze
+
+    Rule = Struct.new(:name, :group, :clause, :description, :actions, keyword_init: true)
+
+    Finding = Struct.new(:name, :group, :clause, :subject, :detail) do
+      def to_s = "#{subject}: #{detail} (#{clause})"
+
+      def to_hash = { name: name.to_s, group: group.to_s, clause: clause, subject: subject, detail: detail }
+    end
+
+    # The same action under every policy.
+    def self.always(action) = POLICIES.to_h { [_1, action] }
+
+    RULES = [
+      # ---- RFC 2328, the drops in receive_update and accept_dd
+      # Nothing can be stored where the area has no database for it, so
+      # every policy drops.
+      Rule.new(name: :as_external_in_stub, group: :rfc2328,
+               clause: 'RFC 2328 section 13 (3): "if this is an AS-external-LSA (LS type = 5), and the area has been ' \
+                       'configured as a stub area, discard the LSA"',
+               description: 'an AS-external LSA received in a stub area or an NSSA',
+               actions: always(:drop_lsa)),
+      Rule.new(name: :as_external_over_virtual_link, group: :rfc2328,
+               clause: 'RFC 2328 section 15: "AS-external-LSAs are NEVER flooded over virtual adjacencies"',
+               description: 'an AS-external LSA received over a virtual link',
+               actions: always(:drop_lsa)),
+      Rule.new(name: :nssa_outside_nssa, group: :rfc2328,
+               clause: 'RFC 3101 section 2.3: "Type-7 LSAs are only flooded within the originating NSSA"',
+               description: 'a type 7 LSA received outside an NSSA',
+               actions: always(:drop_lsa)),
+      Rule.new(name: :unsupported_lsa_type, group: :rfc2328,
+               clause: 'RFC 2328 section 13 (2): "If the LS type is unknown, discard the LSA"',
+               description: 'an LSA of a type ospfd has no database for',
+               actions: always(:drop_lsa)),
+      Rule.new(name: :dd_unsupported_type, group: :rfc2328,
+               clause: 'RFC 2328 section 10.6: "If the LS type is unknown ... generate the neighbor event ' \
+                       'SeqNumberMismatch"',
+               description: 'a DD that offers an LSA of a type ospfd has no database for',
+               actions: always(:seq_mismatch)),
+      Rule.new(name: :dd_as_external_in_stub, group: :rfc2328,
+               clause: 'RFC 2328 section 10.6: "if this is an AS-external-LSA (LS type = 5) and the neighbor is ' \
+                       'associated with a stub area, generate the neighbor event SeqNumberMismatch"',
+               description: 'a DD that offers an AS-external LSA in a stub area or an NSSA',
+               actions: always(:seq_mismatch)),
+      Rule.new(name: :dd_nssa_outside_nssa, group: :rfc2328,
+               clause: 'RFC 3101 section 2.3: "Type-7 LSAs are only flooded within the originating NSSA"',
+               description: 'a DD that offers a type 7 LSA outside an NSSA',
+               actions: always(:seq_mismatch)),
+
+      # ---- Opaque LSAs (RFC 5250)
+      Rule.new(name: :opaque_as_in_stub, group: :opaque,
+               clause: 'RFC 5250 section 3.1: "A type-11 Opaque LSA that is received on an interface associated ' \
+                       'with a stub area or NSSA MUST be discarded and not acknowledged"',
+               description: 'a type 11 opaque LSA received in a stub area or an NSSA',
+               actions: always(:drop_lsa)),
+
+      # ---- SR (RFC 8665), on the RI and extended LSAs
+      Rule.new(name: :sr_algorithm_twice, group: :sr,
+               clause: 'RFC 8665 section 3.1: "When multiple SR-Algorithm TLVs are received from a given router, ' \
+                       'the receiver MUST use the first occurrence of the TLV"',
+               description: 'a Router Information LSA with two SR-Algorithm TLVs',
+               actions: { rfc: :use_first, strict: :ignore_router, lenient: :use_first }),
+      # A range of nothing holds no label, so lenient cannot use it.
+      Rule.new(name: :sid_label_range_zero, group: :sr,
+               clause: 'RFC 8665 section 3.2: the SID/Label Range size "MUST be greater than 0"',
+               description: 'a SID/Label Range TLV with a range size of 0',
+               actions: { rfc: :ignore_range, strict: :ignore_router, lenient: :ignore_range }),
+      Rule.new(name: :srlb_range_zero, group: :sr,
+               clause: 'RFC 8665 section 3.3: the SRLB range size "MUST be greater than 0"',
+               description: 'an SR Local Block TLV with a range size of 0',
+               actions: { rfc: :ignore_range, strict: :ignore_router, lenient: :ignore_range }),
+      # Which of index and label it is cannot be told, so lenient ignores it too.
+      Rule.new(name: :prefix_sid_vl_invalid, group: :sr,
+               clause: 'RFC 8665 section 5: "any SID Advertisement received with an invalid setting for V- and ' \
+                       'L-Flags MUST be ignored"',
+               description: 'a Prefix-SID with V set and L clear, or L set and V clear',
+               actions: always(:ignore_sid)),
+      # The rest of the LSA cannot be read, so no policy uses it.
+      Rule.new(name: :tlv_overrun, group: :sr,
+               clause: 'RFC 8665 section 9: "if the length is invalid, the LSA in which it is advertised is ' \
+                       'considered malformed and MUST be ignored"; RFC 7684 section 5: "Malformed LSAs MUST NOT be ' \
+                       'stored in the Link State Database (LSDB), acknowledged, or reflooded"',
+               description: 'a TLV or sub-TLV whose length runs past the TLV, or the LSA, that holds it',
+               actions: always(:drop_lsa))
+    ].to_h { [_1.name, _1] }.freeze
+
+    OPAQUE_RI = 4
+    OPAQUE_EXT_PREFIX = 7
+    OPAQUE_EXT_LINK = 8
+
+    module_function
+
+    def rule(name)
+      RULES.fetch(name.to_sym) { raise ArgumentError, "no rule #{name.inspect}; the rules are #{RULES.keys.join(', ')}" }
+    end
+
+    def policy(name)
+      p = (name || :rfc).to_sym
+      raise ArgumentError, "receive_policy is #{POLICIES.join(', ')}, not #{name}" unless POLICIES.include?(p)
+      p
+    end
+
+    def finding(name, subject, detail)
+      r = rule(name)
+      Finding.new(r.name, r.group, r.clause, subject, detail)
+    end
+
+    def action(finding, policy) = rule(finding.name).actions.fetch(policy(policy))
+
+    # ---- opaque LSA bodies
+
+    # The findings in an opaque LSA's body (after its 20-octet header).
+    # +opaque_type+ is the link state ID's first octet (RFC 5250 section
+    # 3). Types other than RI, extended prefix and extended link give
+    # none. It never raises: an overrun is a finding, and the walk stops.
+    def opaque(opaque_type, body, subject)
+      case opaque_type
+      when OPAQUE_RI then router_information(body, subject)
+      when OPAQUE_EXT_PREFIX then extended(body, subject, 1, 8) { |sub| prefix_sid(sub, subject) }
+      when OPAQUE_EXT_LINK then extended(body, subject, 1, 12)
+      else []
+      end
+    end
+
+    # TLVs as [type, value] pairs, each padded to 4 octets (RFC 7770
+    # section 2.3, RFC 7684 section 2). Returns [tlvs, overrun], where
+    # overrun is the detail of a TLV past the end, or nil.
+    def tlvs(octets)
+      out = []
+      at = 0
+      while at < octets.bytesize
+        return [out, "#{octets.bytesize - at} octets left, less than a TLV header"] if octets.bytesize - at < 4
+        type, len = octets.byteslice(at, 4).unpack('nn')
+        return [out, "TLV #{type} of length #{len} runs past its end, #{octets.bytesize - at - 4} octets left"] if at + 4 + len > octets.bytesize
+        out << [type, octets.byteslice(at + 4, len)]
+        at += 4 + ((len + 3) & ~3)
+      end
+      [out, nil]
+    end
+
+    def overrun(detail, subject) = [finding(:tlv_overrun, subject, detail)]
+
+    # RFC 8665 section 3: SR-Algorithm (8), SID/Label Range (9) and SRLB (14).
+    def router_information(body, subject)
+      list, bad = tlvs(body)
+      return overrun(bad, subject) if bad
+      found = []
+      algorithms = list.count { _1[0] == 8 }
+      found << finding(:sr_algorithm_twice, subject, "#{algorithms} SR-Algorithm TLVs") if algorithms > 1
+      list.each do |type, value|
+        next unless [9, 14].include?(type)
+        return overrun("TLV #{type} of length #{value.bytesize}, less than its 4-octet range", subject) if value.bytesize < 4
+        _, bad = tlvs(value.byteslice(4..))
+        return overrun("in TLV #{type}: #{bad}", subject) if bad
+        size = ("\0".b + value.byteslice(0, 3)).unpack1('N')
+        name = type == 9 ? :sid_label_range_zero : :srlb_range_zero
+        found << finding(name, subject, "#{type == 9 ? 'SID/Label Range' : 'SRLB'} of size 0") if size.zero?
+      end
+      found
+    end
+
+    # An extended prefix (RFC 7684 section 2.1) or link (3.1) LSA: TLV
+    # +want+, +fixed+ octets, then sub-TLVs, each given to the block.
+    def extended(body, subject, want, fixed)
+      list, bad = tlvs(body)
+      return overrun(bad, subject) if bad
+      list.flat_map do |type, value|
+        next [] unless type == want
+        return overrun("TLV #{type} of length #{value.bytesize}, less than its #{fixed} fixed octets", subject) if value.bytesize < fixed
+        subs, bad = tlvs(value.byteslice(fixed..))
+        return overrun("in TLV #{type}: #{bad}", subject) if bad
+        block_given? ? subs.flat_map { yield _1 } : []
+      end
+    end
+
+    V_FLAG = 0x08
+    L_FLAG = 0x04
+
+    # RFC 8665 section 5: V and L both clear (an index) or both set (a label).
+    def prefix_sid((type, value), subject)
+      return [] unless type == 2 && value.bytesize >= 1
+      flags = value.getbyte(0)
+      v = flags.anybits?(V_FLAG)
+      l = flags.anybits?(L_FLAG)
+      return [] if v == l
+      [finding(:prefix_sid_vl_invalid, subject, "Prefix-SID flags 0x#{flags.to_s(16).rjust(2, '0')}: #{v ? 'V' : 'L'} set, #{v ? 'L' : 'V'} clear")]
+    end
+  end
+end

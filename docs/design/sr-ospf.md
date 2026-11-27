@@ -157,6 +157,65 @@ Before any SR code, as isis did:
 RFC 2328's own entries (header, Hello, DD, LSU) stay
 protocol-conventions' item, not this spec's.
 
+#### As built, step 0
+
+- **`core/validation.rb`**, on isis's: a `Rule` has a name, a group, the
+  RFC text, a description and one action per policy. A `Finding` has
+  the rule's name, group and text, a subject and a detail. Validation
+  decides nothing; the caller acts. Each clause was checked against
+  the RFC text: RFC 2328 sections 10.6, 13 and 15, RFC 3101 section 2.3,
+  RFC 5250 section 3.1, RFC 7684 section 5, and RFC 8665 sections 3.1,
+  3.2, 3.3, 5 and 9.
+- **Three groups.** `rfc2328` holds the drops of `receive_update` and
+  `accept_dd` that this spec touches: an external in a stub area or over
+  a virtual link, a type 7 outside an NSSA, an unknown type, and the
+  same three in a DD. `opaque` holds a type 11 in a stub area. `sr`
+  holds two SR-Algorithm TLVs, a SID/Label Range or SRLB of size 0, a
+  Prefix-SID with V and L unequal, and a TLV past its end.
+- **The policy.** `Instance.new(receive_policy:)`, `:rfc` by default,
+  checked by `Validation.policy`. Every rule ospfd acts on today takes
+  the same action under each policy, since nothing can be stored where
+  an area has no database. So it changes nothing yet, and it has no
+  configuration statement; step 4 adds one, when SR's rules act.
+- **Counted by finding.** `Interface#drop(kind, reason, finding:)`
+  counts `drop_KIND` as before and `finding_NAME` beside it, and the
+  `drop` event gains `finding`. A DD's SeqNumberMismatch counts its
+  finding too. `show.statistics` gives both, per interface.
+- **A type 11 in a stub area** is the one opaque rule ospfd acts on now:
+  `receive_update` drops it as `opaque_as_in_stub`, not as an unknown
+  type. Types 9 to 11 elsewhere stay unknown types until step 1.
+- **The body walk.** `Validation.opaque(opaque_type, body, subject)`
+  reads RI, extended prefix and extended link bodies and returns the
+  findings. It never raises: an overrun is a finding, and the walk
+  stops. Steps 2 and 3 call it from their codecs.
+- **A TLV past its end drops the LSA.** The draft said such an LSA is
+  "still stored and flooded", from RFC 5250 section 3. RFC 7684
+  section 5 says otherwise for the extended LSAs: "Malformed LSAs MUST
+  NOT be stored in the Link State Database (LSDB), acknowledged, or
+  reflooded". RFC 5250 asks a router to store a *valid* opaque LSA.
+  So `tlv_overrun`'s action is `:drop_lsa`. Step 1 acts on it.
+- **`OSPFv2::Fault`** (`lib/ospfv2/fault.rb`): six entries, one per
+  `opaque` and `sr` rule. An entry is `[name, finding, description,
+  build]`. Its `expect` and `rfc` come from the rule, so they cannot
+  drift. `Fault.lsa` gives a `Core::Lsa` with a good checksum, from a
+  context (router ID, index, SRGB, SRLB, sequence number).
+- **Not in the catalog: a type 9 flooded to another interface.** A
+  receiver cannot tell it from a type 9 for its own link, so it has no
+  finding. Step 1's core tests check that ospfd keeps a type 9 on its
+  interface.
+- **The tests.** Every `opaque` and `sr` rule has one entry and every
+  entry one rule. Each SR entry makes its finding, and no other,
+  through `Validation.opaque`. The stub entry makes its finding through
+  two ospfd instances Full in a stub area, and fails without the
+  change.
+- **The simulator.** `POST /api/fault` with `case` and `router` (the
+  simulator's router ID if left out) floods the entry's octets as they
+  are, a newer instance each time. It is not in the simulator's
+  database. `POST /api/fault/clear` flushes them at MaxAge, and `GET
+  /api/faults` gives the catalog and what was sent. Each is an `lsdb`
+  event, so no new event kind. Both POSTs need the `X-OSPFv2` header,
+  as every POST does.
+
 ### Step 1: opaque LSAs (RFC 5250)
 
 What changes in `core/`:

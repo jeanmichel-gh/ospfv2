@@ -142,9 +142,55 @@ class TestWebServer < Test::Unit::TestCase
   end
 
   def test_every_new_post_needs_the_header
-    %w[/api/lsa/refresh /api/lsa/flush /api/routes/withdraw /api/routes/advertise /api/min-ls-interval].each do |path|
+    %w[/api/lsa/refresh /api/lsa/flush /api/routes/withdraw /api/routes/advertise /api/min-ls-interval
+       /api/fault /api/fault/clear].each do |path|
       assert_equal 403, @app.call('POST', path, {}, '{}', {})[0], path
     end
+  end
+
+  # ---- faults (OSPFv2::Fault, docs/design/sr-ospf.md step 0)
+
+  # The neighbor as if Full, keeping what it floods.
+  def adjacent
+    flooded = []
+    n = @sim.neighbor
+    n.define_singleton_method(:adjacent?) { true }
+    n.define_singleton_method(:flood) { |lsas| flooded.concat(lsas) }
+    flooded
+  end
+
+  def test_a_fault_is_flooded_as_the_catalog_builds_it
+    flooded = adjacent
+    row = JSON.parse(post('/api/fault', '{"case":"sid_label_range_zero","router":"10.255.0.7"}')[2])
+    assert_equal ['sid_label_range_zero', 'sid_label_range_zero', 'ignore_range', true],
+                 row.values_at('case', 'finding', 'expect', 'sent')
+    assert_equal ['4.0.0.0', '10.255.0.7', '0x80000001'], row.values_at('id', 'advr', 'seq')
+    assert_equal [OSPFv2::Fault.wire(:sid_label_range_zero, router_id: '10.255.0.7')], flooded.map(&:encode)
+    again = JSON.parse(post('/api/fault', '{"case":"sid_label_range_zero","router":"10.255.0.7"}')[2])
+    assert_equal '0x80000002', again['seq'], 'each a newer instance'
+    sent = JSON.parse(get('/api/faults')[2])
+    assert_equal OSPFv2::Fault.names.map(&:to_s), sent['catalog'].map { _1['name'] }
+    assert_equal [['4.0.0.0', '0x80000002']], sent['sent'].map { _1.values_at('id', 'seq') }
+    assert_match(/fault sid_label_range_zero: /, @sim.events.last.text)
+  end
+
+  def test_a_fault_from_the_simulator_and_cleared
+    flooded = adjacent
+    advr = JSON.parse(post('/api/fault', '{"case":"tlv_overrun"}')[2])['advr']
+    assert_equal IPAddr.new(@sim.settings.router_id, Socket::AF_INET).to_s, advr
+    assert_equal({ 'cleared' => 1 }, JSON.parse(post('/api/fault/clear')[2]))
+    assert_equal OSPFv2::MaxAge, flooded.last.lsa.age, 'flushed: MaxAge'
+    assert_equal [], JSON.parse(get('/api/faults')[2])['sent']
+  end
+
+  def test_a_fault_with_no_adjacency_is_not_sent
+    assert_equal false, JSON.parse(post('/api/fault', '{"case":"tlv_overrun"}')[2])['sent']
+  end
+
+  def test_a_bad_fault
+    assert_match(/case is required, one of opaque_as_in_stub/, post('/api/fault', '{}')[2])
+    assert_equal 400, post('/api/fault', '{"case":"bogus"}')[0]
+    assert_equal 400, post('/api/fault', '{"case":"tlv_overrun","router":"r2"}')[0]
   end
 
   # Every route the info lists is served: none answers 404.

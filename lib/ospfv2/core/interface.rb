@@ -230,10 +230,19 @@ module OSPFv2
         drop(:packet, "from #{from}: #{e.message}")
       end
 
-      def drop(kind, reason)
+      # +finding+ names the Validation rule, when one says why; it is
+      # counted on its own as finding_NAME, and named in the event.
+      def drop(kind, reason, finding: nil)
         @stats[:"drop_#{kind}"] += 1
-        @instance.log(:warn, self, "dropped #{kind}: #{reason}", kind: :drop, what: kind.to_s, reason: reason.to_s)
+        found(finding) if finding
+        more = finding ? { finding: finding.to_s } : {}
+        @instance.log(:warn, self, "dropped #{kind}: #{reason}", kind: :drop, what: kind.to_s, reason: reason.to_s, **more)
         nil
+      end
+
+      # Counts a finding by its name (OSPFv2::Validation).
+      def found(finding)
+        @stats[:"finding_#{finding}"] += 1
       end
 
       # ---- send ----

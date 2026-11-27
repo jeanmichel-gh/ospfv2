@@ -4,6 +4,7 @@ require 'time' # Time#iso8601 for SPF runs, without the daemon
 require_relative '../infra/event_loop'
 require_relative 'addr'
 require_relative 'lsa'
+require_relative 'validation'
 require_relative 'lsdb'
 require_relative 'wire'
 require_relative 'neighbor'
@@ -50,7 +51,7 @@ module OSPFv2
       AS_SCOPE = [5].freeze
       AREA_SCOPE = [1, 2, 3, 4, 7].freeze
 
-      attr_reader :router_id, :loop, :areas, :interfaces, :as_lsdb, :random, :events, :stats,
+      attr_reader :router_id, :receive_policy, :loop, :areas, :interfaces, :as_lsdb, :random, :events, :stats,
                   :route_table, :spf, :spf_log, :externals, :virtual_links
       # area id => { stub: { default_metric:, no_summaries: } }
       attr_accessor :area_options
@@ -63,8 +64,13 @@ module OSPFv2
       # tracer:    optional ->(direction, interface, packet, peer) per packet
       # spf:       RFC 8405 timers in seconds, see SpfScheduler::DEFAULTS
       # max_paths: equal-cost next hops kept per route
-      def initialize(router_id:, loop:, random: Random.new, logger: nil, tracer: nil, spf: {}, max_paths: 16)
+      # +receive_policy+: :rfc, :strict or :lenient (Validation). Every
+      # rule ospfd acts on today takes the same action under each, so it
+      # changes nothing yet; SR's rules differ (docs/design/sr-ospf.md).
+      def initialize(router_id:, loop:, random: Random.new, logger: nil, tracer: nil, spf: {}, max_paths: 16,
+                     receive_policy: :rfc)
         @router_id = Addr.to_i(router_id)
+        @receive_policy = Validation.policy(receive_policy)
         @loop = loop
         @random = random
         @logger = logger
@@ -234,6 +240,19 @@ module OSPFv2
         nil
       end
 
+      # Why an LSA of +type+ received on +iface+ has no database: the
+      # Validation rule and the text. Every policy drops it (validation.rb).
+      def unstored(type, iface)
+        if AS_SCOPE.include?(type)
+          return iface.virtual? ? [:as_external_over_virtual_link, 'AS-external LSA over a virtual link'] :
+                                  [:as_external_in_stub, 'AS-external LSA in a stub area or NSSA']
+        end
+        return [:nssa_outside_nssa, 'type 7 LSA outside an NSSA'] if type == 7
+        # RFC 5250 section 3.1. ospfd holds no opaque LSA yet (step 1).
+        return [:opaque_as_in_stub, 'type 11 opaque LSA in a stub area or NSSA'] if type == 11 && !iface.area.external_capable?
+        [:unsupported_lsa_type, "unsupported type #{type}"]
+      end
+
       # Databases summarized in DDs; AS-external LSAs never go over
       # virtual links (RFC 2328 10.3).
       def lsdbs_for(area, virtual: false)
@@ -328,12 +347,8 @@ module OSPFv2
           db = lsdb_for(lsa.type, area)
           db = nil if iface.virtual? && AS_SCOPE.include?(lsa.type)
           unless db
-            why = case lsa.type
-                  when *AS_SCOPE then iface.virtual? ? 'AS-external LSA over a virtual link' : 'AS-external LSA in a stub area or NSSA'
-                  when 7 then 'type 7 LSA outside an NSSA'
-                  else "unsupported type #{lsa.type}"
-                  end
-            iface.drop(:lsa, "#{why} from #{nbr}")
+            finding, why = unstored(lsa.type, iface)
+            iface.drop(:lsa, "#{why} from #{nbr}", finding: finding)
             next
           end
           cur = db[lsa.key]

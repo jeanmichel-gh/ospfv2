@@ -95,6 +95,14 @@ module OSPFv2
         %w[POST /api/lsa/flush] => ->(s, _q, b) { s.send(:lsa_action, :lsa_flush, b) },
         %w[POST /api/routes/withdraw] => ->(s, _q, b) { s.send(:route_action, :routes_withdraw, b) },
         %w[POST /api/routes/advertise] => ->(s, _q, b) { s.send(:route_action, :routes_advertise, b) },
+        # OSPFv2::Fault, docs/design/sr-ospf.md step 0.
+        %w[GET /api/faults] => ->(s, _q, _b) { s.send(:json, 200, s.sim.faults) },
+        %w[POST /api/fault] => lambda do |s, _q, b|
+          p = s.send(:body, b)
+          raise ArgumentError, "case is required, one of #{OSPFv2::Fault.names.join(', ')}" unless p['case']
+          s.send(:json, 200, s.sim.fault(p['case'], router: p['router']))
+        end,
+        %w[POST /api/fault/clear] => ->(s, _q, _b) { s.send(:json, 200, s.sim.fault_clear) },
         %w[POST /api/neighbor/start] => lambda do |s, _q, _b|
           s.sim.start unless s.sim.running?
           s.send(:json, 200, running: s.sim.running?)
