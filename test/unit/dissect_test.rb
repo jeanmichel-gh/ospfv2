@@ -182,4 +182,58 @@ class TestDissect < Test::Unit::TestCase
     assert_equal 0, h[:fields][0][:offset]
     assert JSON.generate(h)
   end
+
+  # FRR 10.5.1's octets, from CI's interop job (2026-11-27), as the core's
+  # codec tests hold them: its RI (SR-Algorithm padded with 0xff), its
+  # loopback with index 2, and a transit link with two LAN Adj-SIDs.
+  FRR_RI = '00010004100000000008000100ffffff0009000c001f40000001000300465000000e000c0003e800000100030036b000'
+  FRR_PREFIX = '000100140120004002020202000200080000000000000002'
+  FRR_LINK = '0001002c020000000a000c020a000c020003000be0000000010101010036b0000003000b60000000010101010036b100'
+
+  def opaque_lsas
+    [['4.0.0.0', FRR_RI], ['7.0.0.1', FRR_PREFIX], ['8.0.0.1', FRR_LINK]].map do |id, hex|
+      Core::Lsa.build(type: 10, ls_id: id, advr: '2.2.2.2', seq: -0x7fff_ffff, options: 0x42, body: [hex].pack('H*'))
+    end
+  end
+
+  def keyed(fields) = find_all(fields).select(&:key)
+
+  def test_sr_tlvs_nested_with_keys
+    d = Dissect.frame(frame(encode(W::LinkStateUpdate.new(lsas: opaque_lsas))))
+    assert_equal [], d.errors
+    assert_every_byte_owned(d)
+    k = keyed(d.fields)
+    assert_equal %w[router-information sr-algorithm sid-label-range sid-label srlb sid-label
+                    extended-prefix prefix-sid extended-link lan-adj-sid lan-adj-sid], k.map(&:key)
+    by = ->(key) { k.select { _1.key == key }.map(&:show) }
+    assert_equal ['algorithms 0'], by['sr-algorithm']
+    assert_equal ['label 18000 size 8000'], by['sid-label-range']
+    assert_equal ['label 14000 size 1000'], by['srlb']
+    assert_equal ['2.2.2.2/32 route type 1'], by['extended-prefix']
+    assert_equal ['index 2 flags 0x00'], by['prefix-sid']
+    assert_equal ['transit 10.0.12.2 data 10.0.12.2'], by['extended-link']
+    assert_equal ['label 14000 neighbor 1.1.1.1 flags B V L', 'label 14001 neighbor 1.1.1.1 flags V L'],
+                 by['lan-adj-sid']
+    # The capabilities TLV is not one of SR's: one hex field.
+    caps = find_all(d.fields).find { _1.name == 'TLV type 1' }
+    assert_equal ['0001000410000000', nil], [caps.value, caps.key]
+    # FRR's padding after SR-Algorithm is kept as it came.
+    assert_equal 'ffffff', find_all(d.fields).find { _1.name == 'padding' }.value
+    lan = k.find { _1.key == 'lan-adj-sid' }
+    assert_equal 'lan-adj-sid', lan.to_h[:key]
+    assert_equal %w[B V L], lan.children.find { _1.name == 'flags' }.children.select { _1.show == '1' }.map(&:name)
+  end
+
+  # An unknown opaque type stays hex; a TLV past its LSA's end says so and
+  # still leaves no byte without a field.
+  def test_opaque_unknown_and_cut
+    odd = Core::Lsa.build(type: 10, ls_id: '9.0.0.1', advr: '2.2.2.2', seq: 1, body: [FRR_PREFIX].pack('H*'))
+    d = Dissect.frame(frame(encode(W::LinkStateUpdate.new(lsas: [odd]))))
+    assert_equal [[], []], [d.errors, keyed(d.fields)]
+    assert find_all(d.fields).any? { _1.name == 'data' && _1.value == FRR_PREFIX }
+    cut = Core::Lsa.build(type: 10, ls_id: '7.0.0.1', advr: '2.2.2.2', seq: 1, body: [FRR_PREFIX[0, 40]].pack('H*'))
+    c = Dissect.frame(frame(encode(W::LinkStateUpdate.new(lsas: [cut]))))
+    assert_match(/runs past its LSA/, c.errors.join)
+    assert_every_byte_owned(c)
+  end
 end

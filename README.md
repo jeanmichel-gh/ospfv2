@@ -549,7 +549,9 @@ docker run --rm --network host --cap-add NET_RAW \
 `ospfv2 capture` runs tcpdump on an interface (or reads a pcap file with `-r FILE`, `-r -` for
 stdin) and prints each OSPF packet dissected, one JSON line per packet: every field with its
 byte offset, length and bit mask, every byte in a field, checksums verified. A console uses it
-to decode packets at the byte level. Next to a router of the lab:
+to decode packets at the byte level. The TLVs of the RI, extended prefix and extended link
+LSAs are nested fields; each SR TLV has a `key` (`prefix-sid`, `adj-sid`, `sid-label-range`
+and the like) that a filter can search. Next to a router of the lab:
 
     docker run --rm --network container:ospfv2-frr-1 --cap-add NET_RAW --cap-add NET_ADMIN \
       ospfv2 capture -c 5
