@@ -23,6 +23,13 @@ module OSPFv2
     # the hold, up to twice +hold+. A route the kernel refuses is retried
     # every +retry+ seconds. Every +reconcile+ seconds the kernel is read
     # back and any drift repaired, with a log line per repair.
+    #
+    # SR-MPLS (docs/design/sr-ospf.md, step 4): with the router's label
+    # table (Instance#sr_labels), each IP next hop pushes its out-label,
+    # and each in-label is a label route, kept in line the same way: added
+    # and changed first, deleted last, held through the start, repaired
+    # on reconcile. +labels+ false (the host takes no label routes) leaves
+    # both out: IP routes only.
     class Manager
       DEFAULTS = { metric: 20, hold: 60, retry: 5, reconcile: 60 }.freeze
       EXCHANGING = %i[exstart exchange loading].freeze
@@ -47,6 +54,9 @@ module OSPFv2
         @retry_every = o[:retry]
         @reconcile_every = o[:reconcile]
         @installed = {}   # kernel_key => Route, what we believe the kernel holds
+        @labels_on = true
+        @installed_labels = {} # label => Label, what we believe the kernel holds
+        @want_labels = {}
         @failed = {}      # kernel_key => message, routes the kernel refused
         @want = {}
         @instance = nil
@@ -61,10 +71,12 @@ module OSPFv2
         @instance = instance
         @detached = false
         @installed = read_kernel || {}
-        unless @installed.empty?
+        @installed_labels = read_labels || {}
+        unless @installed.empty? && @installed_labels.empty?
           @holding = true
           @hold_until = @loop.now + 2 * @hold_for
-          log(:info, "kernel holds #{@installed.size} OSPF routes from before; keeping them until converged")
+          log(:info, "kernel holds #{@installed.size} OSPF routes and #{@installed_labels.size} label routes from before; " \
+                     'keeping them until converged')
           @hold_timer = @loop.after(@hold_for, :fib_hold) { hold_time_up }
           @hold_check = @loop.every(1, :fib_hold_check) { end_hold('converged') if converged? }
         end
@@ -84,6 +96,7 @@ module OSPFv2
         @detached = true
         @holding = false
         @want = {}
+        @want_labels = {}
         if withdraw
           sync(force: true)
           unless @installed.empty?
@@ -102,9 +115,42 @@ module OSPFv2
 
       def holding? = @holding
 
+      # Whether label routes and pushes go in: false when the host cannot
+      # take them (Daemon: net.mpls.platform_labels, the mpls_router module).
+      attr_reader :labels_on
+
+      def labels_on=(on)
+        return if on == @labels_on
+        @labels_on = on
+        sync
+      end
+
+      # Every label route we want or the kernel holds, as #status does routes.
+      def label_status
+        keys = (@want_labels.keys | @installed_labels.keys).sort
+        keys.map do |k|
+          want = @want_labels[k]
+          got = @installed_labels[k]
+          state = if @failed[[:label, k]] then :failed
+                  elsif want && got == want then :installed
+                  elsif want && got then :different
+                  elsif want then :missing
+                  elsif @holding then :held
+                  else :extra
+                  end
+          Entry.new(key: k, want: want, have: got, state: state, error: @failed[[:label, k]])
+        end
+      end
+
       # Brings the kernel to the wanted state. Changes first, deletes last.
       def sync(force: false)
         @want = wanted unless force
+        @want_labels = wanted_labels unless force
+        @want_labels.each_value do |l|
+          have = @installed_labels[l.label]
+          next if have == l
+          apply_label(l) { have ? @backend.replace_label(l) : @backend.add_label(l) }
+        end
         @want.each_value do |r|
           have = @installed[r.kernel_key]
           next if have == r
@@ -116,7 +162,13 @@ module OSPFv2
           next if @want.key?(r.kernel_key) || (@holding && !force)
           apply(r, delete: true) { @backend.delete(r) }
         end
-        @failed.select! { |k, _| @want.key?(k) || @installed.key?(k) }
+        @installed_labels.values.each do |l|
+          next if @want_labels.key?(l.label) || (@holding && !force)
+          apply_label(l, delete: true) { @backend.delete_label(l) }
+        end
+        @failed.select! do |k, _|
+          k.is_a?(Array) && k[0] == :label ? @want_labels.key?(k[1]) || @installed_labels.key?(k[1]) : @want.key?(k) || @installed.key?(k)
+        end
         if @failed.empty? || @detached
           @retry_timer&.cancel
         elsif @retry_timer && !@retry_timer.active?
@@ -139,6 +191,14 @@ module OSPFv2
           log(:warn, "FIB repair: #{(kernel[k] || @installed[k]).dest_s} #{why}")
         end
         @installed = kernel
+        if (labels = read_labels)
+          (labels.keys | @installed_labels.keys).each do |k|
+            next if labels[k] == @installed_labels[k]
+            @repairs += 1
+            log(:warn, "FIB repair: label #{k} #{labels[k] ? 'changed in, or not ours to keep in,' : 'missing from'} the kernel")
+          end
+          @installed_labels = labels
+        end
         sync
       end
 
@@ -165,11 +225,49 @@ module OSPFv2
 
       def wanted
         return {} unless @instance
+        sr = @labels_on && @instance.respond_to?(:sr_labels) ? @instance.sr_labels : nil
         @instance.routes.each_value.filter_map do |r|
           next if r.next_hops.empty? || r.next_hops.any? { |h| h.gateway.nil? }
-          f = Route.new(r.prefix, r.prefix_len, r.next_hops.map { |h| [h.interface, h.gateway] }, @metric)
+          hops = r.next_hops.map do |h|
+            out = sr&.out_label(r.dest_s, h)
+            [h.interface, h.gateway, out == IMPLICIT_NULL ? nil : out]
+          end
+          f = Route.new(r.prefix, r.prefix_len, hops, @metric)
           [f.kernel_key, f]
         end.to_h
+      end
+
+      # The label routes the router's label table asks for: a swap or a
+      # pop toward each next hop (implicit null pops), and a pop with no
+      # next hop looked up again through lo.
+      def wanted_labels
+        return {} unless @instance && @labels_on && @instance.respond_to?(:sr_labels) && (t = @instance.sr_labels)
+        t.entries.values.to_h do |e|
+          hops = e.next_hops.map do |h|
+            gw = h[:address] && Core::Addr.to_i(h[:address])
+            [h[:interface], gw, h[:out_label] == IMPLICIT_NULL ? nil : h[:out_label]]
+          end
+          hops = [['lo', nil, nil]] if hops.empty?
+          [e.label, Label.new(e.label, hops)]
+        end
+      end
+
+      def apply_label(l, delete: false)
+        yield
+        delete ? @installed_labels.delete(l.label) : @installed_labels[l.label] = l
+        log(@failed.delete([:label, l.label]) ? :info : :debug, "FIB #{delete ? 'deleted' : 'installed'} #{l}")
+      rescue Error => e
+        k = [:label, l.label]
+        log(:warn, "FIB could not #{delete ? 'delete' : 'install'} #{l}: #{e.message}, will retry") unless @failed[k] == e.message
+        @failed[k] = e.message
+      end
+
+      def read_labels
+        return {} unless @backend.respond_to?(:dump_labels)
+        @backend.dump_labels.to_h { |l| [l.label, l] }
+      rescue Error => e
+        log(:warn, "FIB could not read the kernel's label table: #{e.message}")
+        nil
       end
 
       def apply(route, delete: false)
@@ -227,6 +325,8 @@ module OSPFv2
         @hold_check&.cancel
         stale = @installed.keys - @want.keys
         log(:info, "FIB: #{why}, removing #{stale.size} routes OSPF no longer has") unless stale.empty?
+        gone = @installed_labels.keys - @want_labels.keys
+        log(:info, "FIB: #{why}, removing #{gone.size} label routes OSPF no longer has") unless gone.empty?
         sync
       end
 

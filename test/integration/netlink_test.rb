@@ -44,6 +44,35 @@ class TestFibNetlink < Test::Unit::TestCase
     `ip -n #{@ns} route show proto #{proto} table all`.lines.map(&:strip).reject(&:empty?)
   end
 
+  # ---- SR-MPLS (docs/design/sr-ospf.md, step 4, PR 6): label routes
+  # and pushes in a real kernel, read back by iproute2 and by dump.
+
+  def mpls!
+    omit('needs the mpls_router module') unless File.exist?('/proc/sys/net/mpls/platform_labels')
+    sh "ip netns exec #{@ns} sysctl -qw net.mpls.platform_labels=100000"
+  end
+
+  def test_label_routes_and_a_push
+    mpls!
+    r = probe([['add_label', 16_004, [['eth1', '10.9.0.2', 17_004]]],
+               ['add_label', 16_002, [['eth1', '10.9.0.2', nil]]],
+               ['add_label', 16_001, [['lo', nil, nil]]],
+               ['add_label', 16_005, [['eth1', '10.9.0.2', 17_005], ['eth2', '10.9.1.2', 18_005]]],
+               ['replace', '10.255.0.4/32', [['eth1', '10.9.0.2', 17_004]], 20],
+               ['dump_labels'], ['dump']])
+    assert_equal [{ 'ok' => true }] * 5, r.first(5)
+    assert_equal ['label 16001 pop dev lo', 'label 16002 pop via 10.9.0.2 dev eth1',
+                  'label 16004 swap 17004 via 10.9.0.2 dev eth1',
+                  'label 16005 swap 17005 via 10.9.0.2 dev eth1, swap 18005 via 10.9.1.2 dev eth2'], r[5]['labels']
+    assert_equal ['10.255.0.4/32 via 10.9.0.2 eth1 push 17004 metric 20'], r[6]['routes']
+    shown = `ip -n #{@ns} -M route show proto 89`
+    assert_match(/16004 as to 17004 via inet 10.9.0.2 dev eth1/, shown)
+    assert_match(/encap mpls\s+17004 via 10.9.0.2 dev eth1/, `ip -n #{@ns} route show proto 89`)
+    r = probe([['delete_label', 16_004, []], ['delete_label', 16_004, []], ['dump_labels']])
+    assert_equal [{ 'ok' => true }, { 'ok' => true }], r.first(2), 'gone already is fine'
+    refute(r[2]['labels'].any? { _1.start_with?('label 16004') })
+  end
+
   def test_replace_dump_and_delete
     r = probe([['replace', '10.1.0.0/16', [%w[eth1 10.9.0.2]], 20],
                ['replace', '0.0.0.0/0', [%w[eth2 10.9.1.2]], 20],

@@ -6,6 +6,9 @@
 #   ip netns exec NS ruby -Ilib test/support/netlink_probe.rb '[["replace", "10.1.0.0/16", [["a", "10.9.0.2"]], 20], ["dump"]]'
 #
 # A result is {"ok": true}, {"error": "..."} or {"routes": ["10.1.0.0/16 via 10.9.0.2 a metric 20"]}.
+# A hop may carry a label to push, ["a", "10.9.0.2", 17004]. Label routes:
+# ["add_label", 16004, [["a", "10.9.0.2", 17004]]], ["delete_label", 16004, []],
+# and ["dump_labels"], which gives {"labels": [...]}.
 
 require 'json'
 require 'ospfv2/fib/netlink'
@@ -18,9 +21,14 @@ JSON.parse(ARGV.fetch(0)).each do |op, prefix, hops, metric|
     case op
     when 'dump'
       { routes: nl.dump.map(&:to_s).sort }
+    when 'dump_labels'
+      { labels: nl.dump_labels.map(&:to_s).sort }
+    when 'add_label', 'replace_label', 'delete_label'
+      nl.public_send(op, OSPFv2::Fib::Label.new(prefix, hops.map { |i, g, l| [i, g && addr[g], l] }))
+      { ok: true }
     else
       p, len = prefix.split('/')
-      route = OSPFv2::Fib::Route.new(addr[p], len.to_i, hops.map { |i, g| [i, g && addr[g]] }, metric)
+      route = OSPFv2::Fib::Route.new(addr[p], len.to_i, hops.map { |i, g, l| [i, g && addr[g], l] }, metric)
       nl.public_send(op, route)
       { ok: true }
     end

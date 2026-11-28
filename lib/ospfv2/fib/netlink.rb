@@ -43,6 +43,16 @@ module OSPFv2
       RTA_PRIORITY = 6
       RTA_MULTIPATH = 9
       RTA_TABLE = 15
+      # MPLS (linux/rtnetlink.h, lwtunnel.h, mpls_iptunnel.h), as isisd's
+      # Forwarding::Netlink has them.
+      RTA_VIA = 18
+      RTA_NEWDST = 19
+      RTA_ENCAP_TYPE = 21
+      RTA_ENCAP = 22
+      NLA_F_NESTED = 0x8000
+      LWTUNNEL_ENCAP_MPLS = 1
+      MPLS_IPTUNNEL_DST = 1
+      AF_MPLS = 28
 
       RTN_UNICAST = 1
       RT_SCOPE_UNIVERSE = 0
@@ -98,6 +108,38 @@ module OSPFv2
         raise unless e.message.start_with?('No such process') # ESRCH: gone already
       end
 
+      # ---- label routes (SR-MPLS), as `ip -M route` sends them ----
+
+      def add_label(l)
+        request(RTM_NEWROUTE, NLM_F_CREATE | NLM_F_EXCL, encode_label(l, hops: true))
+      rescue Error => e
+        raise unless e.message.start_with?('File exists')
+        raise Error, "label #{l.label} is in the kernel already"
+      end
+
+      def replace_label(l)
+        request(RTM_NEWROUTE, NLM_F_REPLACE, encode_label(l, hops: true))
+      rescue Error => e
+        raise unless e.message.start_with?('No such file or directory')
+        add_label(l)
+      end
+
+      def delete_label(l)
+        request(RTM_DELROUTE, 0, encode_label(l, hops: false))
+      rescue Error => e
+        raise unless e.message.start_with?('No such process', 'No such file or directory')
+      end
+
+      # Our label routes, as Fib::Labels.
+      def dump_labels
+        names = links(fresh: true).invert
+        msgs = @lock.synchronize do
+          seq = send_msg(RTM_GETROUTE, NLM_F_DUMP, rtmsg(0, 0, 0, family: AF_MPLS))
+          collect(seq)
+        end
+        msgs.filter_map { |type, body| decode_label(body, names) if type == RTM_NEWROUTE }
+      end
+
       # Our routes in our table, as Fib::Routes. +protocols+ reads other
       # protocols' routes instead (read only: we change only our own).
       def dump(protocols: [@protocol])
@@ -117,8 +159,46 @@ module OSPFv2
 
       # ---- encoding ----
 
-      def rtmsg(dst_len, table, protocol, type: 0, scope: 0)
-        [Socket::AF_INET, dst_len, 0, 0, table < 256 ? table : 252, protocol, scope, type, 0].pack('CCCCCCCCL')
+      def rtmsg(dst_len, table, protocol, type: 0, scope: 0, family: Socket::AF_INET)
+        [family, dst_len, 0, 0, table < 256 ? table : 252, protocol, scope, type, 0].pack('CCCCCCCCL')
+      end
+
+      # One label stack entry (RFC 3032 section 2.1): the label, Exp 0, the
+      # bottom-of-stack bit, TTL 0 for the kernel to fill.
+      def stack(label) = [(label << 12) | 0x100].pack('N')
+
+      # The push of +label+ on an IP route's next hop, or nothing.
+      def encap(label)
+        return ''.b if label.nil? || label == IMPLICIT_NULL
+        attr(RTA_ENCAP | NLA_F_NESTED, attr(MPLS_IPTUNNEL_DST, stack(label))) +
+          attr(RTA_ENCAP_TYPE, [LWTUNNEL_ENCAP_MPLS].pack('S'))
+      end
+
+      def ifindex(name)
+        links[name] || links(fresh: true)[name] || raise(Error, "no interface #{name}")
+      end
+
+      # An MPLS label route: rtmsg AF_MPLS, 20 bits, the table in the rtmsg
+      # and no RTA_TABLE, RTA_DST the label; per next hop RTA_NEWDST (a
+      # swap), RTA_VIA (an address) and the interface. iproute2 6.19's
+      # layout for `ip -M route add L as M via inet A dev D proto 89`,
+      # captured with strace (test/unit/fib/netlink_test.rb).
+      def encode_label(l, hops:)
+        body = rtmsg(20, 254, @protocol, type: RTN_UNICAST, scope: RT_SCOPE_UNIVERSE, family: AF_MPLS)
+        body << attr(RTA_DST, stack(l.label))
+        return body unless hops
+        hop = ->(gw, out) { (out ? attr(RTA_NEWDST, stack(out)) : ''.b) + (gw ? attr(RTA_VIA, [Socket::AF_INET].pack('S') + [gw].pack('N')) : ''.b) }
+        if l.next_hops.size == 1
+          ifname, gw, out = l.next_hops.first
+          body << hop.(gw, out) << attr(RTA_OIF, [ifindex(ifname)].pack('l'))
+        else
+          nh = l.next_hops.map do |ifname, gw, out|
+            sub = hop.(gw, out)
+            [8 + sub.bytesize, 0, 0, ifindex(ifname)].pack('SCCl') + sub
+          end.join
+          body << attr(RTA_MULTIPATH, nh)
+        end
+        body
       end
 
       def attr(type, data)
@@ -138,12 +218,13 @@ module OSPFv2
           links[name] || links(fresh: true)[name] || raise(Error, "no interface #{name}")
         end
         if route.next_hops.size == 1
-          ifname, gw = route.next_hops.first
+          ifname, gw, label = route.next_hops.first
+          body << encap(label)
           body << attr(RTA_GATEWAY, [gw].pack('N')) if gw
           body << attr(RTA_OIF, [index.call(ifname)].pack('l'))
         else
-          nh = route.next_hops.map do |ifname, gw|
-            sub = gw ? attr(RTA_GATEWAY, [gw].pack('N')) : ''.b
+          nh = route.next_hops.map do |ifname, gw, label|
+            sub = encap(label) + (gw ? attr(RTA_GATEWAY, [gw].pack('N')) : ''.b)
             [8 + sub.bytesize, 0, 0, index.call(ifname)].pack('SCCl') + sub
           end.join
           body << attr(RTA_MULTIPATH, nh)
@@ -213,9 +294,43 @@ module OSPFv2
                  multipath(attrs[RTA_MULTIPATH], names)
                else
                  oif = attrs[RTA_OIF]&.unpack1('l')
-                 [[names.fetch(oif, "if#{oif}"), attrs[RTA_GATEWAY]&.unpack1('N')]]
+                 [[names.fetch(oif, "if#{oif}"), attrs[RTA_GATEWAY]&.unpack1('N'), pushed(attrs)]]
                end
         Route.new(prefix, dst_len, hops, metric)
+      end
+
+      # The label an IP next hop pushes (RTA_ENCAP's MPLS_IPTUNNEL_DST), or nil.
+      def pushed(attrs)
+        return nil unless attrs[RTA_ENCAP_TYPE]&.unpack1('S') == LWTUNNEL_ENCAP_MPLS && attrs[RTA_ENCAP]
+        dst = attrs(attrs[RTA_ENCAP])[MPLS_IPTUNNEL_DST]
+        dst && dst.unpack1('N') >> 12
+      end
+
+      def decode_label(body, names)
+        family, _, _, _, _, protocol, = body.unpack('CCCCCCCCL')
+        return nil unless family == AF_MPLS && protocol == @protocol
+        attrs = attrs(body.byteslice(12..))
+        label = attrs[RTA_DST]&.unpack1('N') or return nil
+        hop = lambda do |a, oif|
+          via = a[RTA_VIA]
+          gw = via && via.unpack1('S') == Socket::AF_INET ? via.byteslice(2, 4).unpack1('N') : nil
+          [names.fetch(oif, "if#{oif}"), gw, a[RTA_NEWDST] && a[RTA_NEWDST].unpack1('N') >> 12]
+        end
+        hops = if attrs[RTA_MULTIPATH]
+                 out = []
+                 data = attrs[RTA_MULTIPATH]
+                 off = 0
+                 while off + 8 <= data.bytesize
+                   len, _, _, oif = data.byteslice(off, 8).unpack('SCCl')
+                   break if len < 8
+                   out << hop.(attrs(data.byteslice(off + 8, len - 8)), oif)
+                   off += len + pad(len)
+                 end
+                 out
+               else
+                 [hop.(attrs, attrs[RTA_OIF]&.unpack1('l'))]
+               end
+        Label.new(label >> 12, hops)
       end
 
       def attrs(data)
@@ -237,7 +352,7 @@ module OSPFv2
           len, _, _, ifindex = data.byteslice(off, 8).unpack('SCCl')
           break if len < 8
           sub = attrs(data.byteslice(off + 8, len - 8))
-          hops << [names.fetch(ifindex, "if#{ifindex}"), sub[RTA_GATEWAY]&.unpack1('N')]
+          hops << [names.fetch(ifindex, "if#{ifindex}"), sub[RTA_GATEWAY]&.unpack1('N'), pushed(sub)]
           off += len + pad(len)
         end
         hops

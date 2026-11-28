@@ -384,8 +384,15 @@ neighbor's SRGB; each Adj-SID pops. Two prefixes with one index get no label. On
 routers SPF reaches count. `show.labels` gives the table, `show.segment_routing` our
 blocks, our Adj-SIDs and each SR router per area, and `show.routes` a route's `sid` and
 each next hop's `label`. In ospf-cli: `show ospf segment-routing` and `show mpls label`,
-or `show ip ospf segment-routing` and `show mpls forwarding-table`. Installing the labels
-in the kernel comes next (`docs/design/sr-ospf.md`, step 4).
+or `show ip ospf segment-routing` and `show mpls forwarding-table`.
+
+With routes going into the kernel, the labels go too, over netlink, with ospfd's
+protocol id: a label route per in-label (`ip -M route show proto 89`), and on each IP
+route the label its next hop pushes (`encap mpls`). ospfd sets `net.mpls.conf.IF.input`
+on its interfaces and checks `net.mpls.platform_labels` against the top of its blocks.
+The host loads `mpls_router` and `mpls_iptunnel` and sizes the label table. Without them
+ospfd says why, once, keeps sending its SIDs and installs IP routes only. `show.fib`
+gives the label routes against the kernel, as it does routes, and `labels_on`.
 
 ### Opaque LSAs
 

@@ -321,10 +321,15 @@ module OSPFv2
       # event each, once), and has an ABR re-originate its inter-area SIDs
       # when they changed. After each SPF run, and on a change to an opaque
       # LSA or an adjacency, which run no SPF.
-      def compute_labels
+      # +notify+: tell the route listeners (the FIB) when the label table
+      # changed; an SPF run that changed routes tells them itself.
+      def compute_labels(notify: true)
         @labels_pending = false
         old = @sr_labels&.sids
+        before = @sr_labels && [@sr_labels.entries, @sr_labels.out_labels]
         @sr_labels = @sr && @opaque ? SrLabels.new(self).build : nil
+        after = @sr_labels && [@sr_labels.entries, @sr_labels.out_labels]
+        @route_listeners.each { |l| l.call(Spf::Diff.new([], [], [])) } if notify && before != after
         found = @sr_labels&.findings || []
         (found - @sr_found).each { announce_sr_finding(_1) }
         @sr_found = found
@@ -1221,7 +1226,7 @@ module OSPFv2
       def replace_routes(table, reasons, duration, started: @loop.clock.wall)
         diff = Spf.diff(@route_table.routes, table.routes)
         @route_table = table
-        compute_labels
+        compute_labels(notify: diff.empty?)
         n = @spf.runs
         fib = nil
         unless diff.empty?

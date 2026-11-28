@@ -102,8 +102,15 @@ module OSPFv2
               want: e.want && fib_hops(e.want), have: e.have && fib_hops(e.have),
               path_type: x&.path_type, cost: x&.cost, type2_cost: x&.type2_cost }
           end
-          base.merge(holding: f.holding?, repairs: f.repairs, last_reconcile: f.last_reconcile&.utc&.iso8601,
-                     routes: rows)
+          out = base.merge(holding: f.holding?, repairs: f.repairs, last_reconcile: f.last_reconcile&.utc&.iso8601,
+                           routes: rows)
+          next out unless r.segment_routing
+          # SR: label routes against the kernel, as routes are; labels_on
+          # false when the host takes none (System#mpls).
+          labels = f.label_status.map do |e|
+            { label: e.key, state: e.state, error: e.error, want: e.want && label_hops(e.want), have: e.have && label_hops(e.have) }
+          end
+          out.merge(labels_on: f.labels_on, labels: labels)
         end
       end
 
@@ -281,7 +288,13 @@ module OSPFv2
 
             def ago(time) = (@daemon.loop.clock.wall - time).floor
 
-      def fib_hops(route) = route.next_hops.map { |i, g| { interface: i, gateway: g && Core::Addr.to_s(g) } }
+      # A pushed label shows as +label+, only where there is one.
+      def fib_hops(route)
+        route.next_hops.map { |i, g, l| { interface: i, gateway: g && Core::Addr.to_s(g) }.merge(l ? { label: l } : {}) }
+      end
+
+      # A label route's next hops: +out_label+ nil pops.
+      def label_hops(l) = l.next_hops.map { |i, g, out| { interface: i, gateway: g && Core::Addr.to_s(g), out_label: out } }
 
       # With SR, a route with a Prefix-SID gains +sid+, its index, and each
       # next hop with a label +label+ (docs/design/sr-ospf.md, step 4).

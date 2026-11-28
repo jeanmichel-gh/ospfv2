@@ -777,6 +777,54 @@ protocol-conventions' open question 5, not this spec's.
   routes only. The VMs load `mpls_router` and `mpls_iptunnel` at boot
   (routescope `docs/sr-mpls.md`).
 
+#### As built, pull request 6: forwarding
+
+- **`fib/netlink.rb`** gains label routes (`add_label`,
+  `replace_label`, `delete_label`, `dump_labels`) and a pushed label
+  on an IP route's next hop (`RTA_ENCAP` with `MPLS_IPTUNNEL_DST`,
+  `RTA_ENCAP_TYPE` `LWTUNNEL_ENCAP_MPLS`), on isisd's
+  `Forwarding::Netlink`. A label route is `rtmsg` `AF_MPLS`, 20 bits,
+  the table in the `rtmsg` and no `RTA_TABLE`, `RTA_DST` the label,
+  then per next hop `RTA_NEWDST` (a swap), `RTA_VIA` (the family as a
+  u16, then the address) and `RTA_OIF`; several go in `RTA_MULTIPATH`.
+  A pop with no next hop looks up again through `lo`.
+- **Checked against iproute2 6.19**, captured with `strace -e
+  write=all` in a network namespace on ospflab (2026-11-28): swap,
+  PHP, pop through `lo`, a two-hop swap and a delete are the same
+  octets; a push, alone and in a multipath, has the same `rtmsg` and
+  the same attributes and values. Only the order of an IP route's
+  attributes differs, as it did before this change, and ospfd keeps its
+  `RTA_TABLE`. The octets are `test/unit/fib/netlink_test.rb`'s.
+- **In a real kernel**: `test/integration/netlink_test.rb`, as root
+  with `mpls_router` loaded, installs the four label routes and a
+  push, and `ip -M route` and `ip route` show them as meant, and the
+  dump reads them back. Run on ospflab. CI's runner has no MPLS in its
+  kernel (PR 5's interop found FRR's label table empty), so there the
+  test omits itself.
+- **`fib/manager.rb`** pushes each next hop's out-label (none for
+  implicit null) and keeps label routes in line as it does routes:
+  changes first, deletes last, retried, repaired on reconcile. A label
+  table that changes with no route change (an SR LSA, an adjacency)
+  reaches it through the route listeners, with an empty diff.
+- **Held, then flushed.** The draft said ospfd's old label routes are
+  flushed at start, as isisd's are. They are held through the start
+  as ospfd's routes are, and the stale ones removed once converged, so
+  a restart keeps forwarding. The outcome is the same, later.
+- **`fib/memory.rb`** keeps labels, so the unit tests see them.
+- **The host**: `System#mpls`, isisd's `Router::Host#mpls`, sets
+  `net.mpls.conf.IF.input` on ospfd's non-passive interfaces and
+  checks `net.mpls.platform_labels` past the top of the SRGB and SRLB.
+  When it cannot, the daemon logs why once, keeps sending SIDs, and the
+  manager's `labels_on` is false: IP routes only, nothing pushed.
+- **`show.fib`** gains `labels_on` and `labels`, one row per label
+  route with its state against the kernel; a route's next hop shows
+  its pushed `label`.
+- **The tests**: the octets above; the manager over `Fib::Memory`
+  (label routes and pushes, labels off, a label change with no route
+  change, which fails without the listener's call, old label routes
+  held then removed, reconcile, detach); the daemon from the statement
+  to the kernel, and a host without MPLS; `System#mpls`.
+
 #### API and CLI
 
 Additive, and listed in `api.info`:

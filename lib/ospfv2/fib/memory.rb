@@ -11,10 +11,11 @@ module OSPFv2
     #   m.fail[[prefix, len]] = 'Network is unreachable'
     #   m.foreign << [prefix, len, metric]
     class Memory
-      attr_reader :table, :calls, :fail, :foreign
+      attr_reader :table, :calls, :fail, :foreign, :labels
 
       def initialize
         @table = {}
+        @labels = {}
         @calls = []
         @fail = {}
         @foreign = []
@@ -43,6 +44,24 @@ module OSPFv2
       end
 
       def dump = @table.values
+
+      def add_label(l)
+        @calls << [:add_label, l.to_s]
+        raise Error, "label #{l.label} is in the kernel" if @labels.key?(l.label)
+        @labels[l.label] = l
+      end
+
+      def replace_label(l)
+        @calls << [:replace_label, l.to_s]
+        @labels[l.label] = l
+      end
+
+      def delete_label(l)
+        @calls << [:delete_label, l.to_s]
+        @labels.delete(l.label)
+      end
+
+      def dump_labels = @labels.values
 
       def close; end
 
