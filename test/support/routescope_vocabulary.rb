@@ -11,7 +11,9 @@
 # Written by `bundle exec rake vocabulary` in routescope at be270f3
 # (jeanmichel-gh/routescope#129, branch claude/api-contract) on
 # 2026-11-14, which records what its drivers read while its unit tests
-# run. To refresh: run that task in routescope and copy its "ospfd"
+# run; again at routescope d9a4004 (#395, ospfd's SR: show.labels,
+# show.segment_routing, and their keys on routes, neighbors and the
+# database) on 2026-11-28. To refresh: run that task in routescope and copy its "ospfd"
 # section here. test/unit/daemon/routescope_vocabulary_test.rb holds the
 # API to it. Not named *_test.rb, so the test runner does not load it as a
 # test.
@@ -26,14 +28,16 @@ module RoutescopeVocabulary
     "config.rollback" => [],
     "events.subscribe" => [],
     "show.configuration" => [],
-    "show.database" => %w[[].advr [].age [].area [].checksum [].detail [].length [].ls_id [].self [].seq [].type [].type_name],
+    "show.database" => %w[[].advr [].age [].area [].checksum [].detail [].length [].ls_id [].opaque_id [].opaque_type [].self [].seq [].type [].type_name],
     "show.fib" => %w[configured error install protocol routes routes[].cost routes[].error routes[].have routes[].have[].gateway routes[].metric routes[].path_type routes[].prefix routes[].state routes[].type2_cost routes[].want routes[].want[].gateway table],
     "show.interfaces" => %w[[].address [].adjacent [].area [].bdr_id [].cost [].dead_interval [].dr_id [].hello_interval [].name [].neighbors [].priority [].state_name [].type],
-    "show.neighbors" => %w[[].address [].dead_in [].interface [].priority [].role [].router_id [].state [].uptime],
+    "show.labels" => %w[[].fec [].kind [].label [].next_hops [].next_hops[].address [].next_hops[].interface [].next_hops[].label [].op],
+    "show.neighbors" => %w[[].address [].dead_in [].interface [].opaque [].priority [].role [].router_id [].state [].uptime],
     "show.overview" => %w[areas areas[].lsas external_lsas fib fib.installed router_id spf spf.routes spf.runs],
-    "show.routes" => %w[routes routes[].area routes[].cost routes[].next_hops routes[].next_hops[].gateway routes[].next_hops[].interface routes[].path_type routes[].prefix routes[].type2_cost],
+    "show.routes" => %w[routes routes[].area routes[].cost routes[].next_hops routes[].next_hops[].gateway routes[].next_hops[].interface routes[].next_hops[].label routes[].path_type routes[].prefix routes[].sid routes[].type2_cost],
+    "show.segment_routing" => %w[adj_sids adj_sids[].interface adj_sids[].label adj_sids[].neighbor enabled nodes nodes[].algorithms nodes[].area nodes[].node_sid nodes[].node_sid.index nodes[].node_sid.label nodes[].router_id nodes[].self nodes[].srgb nodes[].srgb[].size nodes[].srgb[].start nodes[].srlb nodes[].srlb.size nodes[].srlb.start srgb srgb[].size srgb[].start srlb srlb.size srlb.start],
     "show.spf" => [],
     "show.timers" => [],
-    "show.topology" => %w[area nodes nodes[].abr nodes[].asbr nodes[].id nodes[].kind nodes[].neighbors nodes[].neighbors[].id nodes[].neighbors[].metric nodes[].prefixes nodes[].prefixes[].forwarding nodes[].prefixes[].metric nodes[].prefixes[].prefix nodes[].prefixes[].route_type nodes[].reachable scope],
+    "show.topology" => %w[area nodes nodes[].abr nodes[].asbr nodes[].id nodes[].kind nodes[].neighbors nodes[].neighbors[].id nodes[].neighbors[].metric nodes[].prefixes nodes[].prefixes[].forwarding nodes[].prefixes[].metric nodes[].prefixes[].prefix nodes[].prefixes[].route_type nodes[].reachable scope]
   }.freeze
 end
