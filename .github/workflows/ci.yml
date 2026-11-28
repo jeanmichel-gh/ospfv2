@@ -203,7 +203,13 @@ jobs:
       - uses: ruby/setup-ruby@v1
         with:
           ruby-version: '3.3'
+          bundler-cache: true
       - run: sudo modprobe mpls_router && sudo modprobe mpls_iptunnel && test -e /proc/sys/net/mpls/platform_labels
+      # Label routes by netlink in a real kernel, as root. An omitted test
+      # here means MPLS or root went missing, so it fails the job.
+      - run: |
+          sudo -E env "PATH=$PATH" bundle exec ruby -Ilib -Itest test/integration/netlink_test.rb | tee "$RUNNER_TEMP/netlink.out"
+          grep -q ' 0 failures, 0 errors, 0 pendings, 0 omissions' "$RUNNER_TEMP/netlink.out"
       - run: bash -c "$(curl -sL https://get.containerlab.dev)"
       - run: test/lab/pull.sh quay.io/frrouting/frr:10.2.1
       - run: test/lab/sr_test.sh
