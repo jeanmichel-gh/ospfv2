@@ -746,8 +746,12 @@ labels follow that route's area. No per-area label tables.
   100 is label 1000, 200 is 500). The daemon's views end to end. Not
   tested yet: a next hop that advertises the prefix off the best path,
   and a SID from a router SPF does not reach.
-- **Interop with FRR** (in CI): ospfd's 16002 pops toward FRR, and
-  FRR's 18001 pops toward ospfd.
+- **Interop with FRR** (in CI, FRR 10.5.1): ospfd's 16002 pops toward
+  FRR, and FRR's 18001 pops toward ospfd. FRR's own label table (`show
+  mpls table`) stays empty in CI's namespaces, with no MPLS in the
+  runner's kernel; the first run failed on it. FRR's SR database gives
+  the labels it computed (`inputLabel` 18001, `outputLabel` 3), and the
+  test reads those. The kernel's side is PR 6's.
 
 #### Forwarding
 

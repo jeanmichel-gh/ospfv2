@@ -199,12 +199,17 @@ class TestFrrInterop < Test::Unit::TestCase
     ok = @lab.wait_for(30) { ours = @lab.core_state['labels']&.find { _1['label'] == 16_002 } }
     assert ok, "core labels #{@lab.core_state['labels'].inspect}"
     assert_equal ['php', '2.2.2.2/32', [3]], [ours['op'], ours['fec'], ours['next_hops'].map { _1['out_label'] }]
-    frr = nil
-    ok = @lab.wait_for(30) { frr = @lab.frr_json('show mpls table')['18001'] }
-    notify("FRR's mpls table: #{@lab.vtysh('show mpls table json')}")
-    assert ok, "FRR's mpls table: #{@lab.vtysh('show mpls table json')}"
-    out = Array(frr['nexthops']).map { _1['outLabel'] || _1['outLabelStack'] }
-    assert_equal [[3]], out.map { Array(_1) }, frr.inspect
+    # FRR's label table (show mpls table) stays empty in CI's namespaces,
+    # with no MPLS in the runner's kernel (measured 2026-11-28); its SR
+    # database gives the labels it computed all the same.
+    pfx = nil
+    ok = @lab.wait_for(30) do
+      node = Array(@lab.frr_json('show ip ospf database segment-routing')['srNodes']).find { _1['routerID'] == '1.1.1.1' }
+      pfx = Array(node && node['extendedPrefix']).find { _1['prefix'] == '1.1.1.1/32' }
+      pfx && Array(pfx['prefixRoute']).any?
+    end
+    assert ok, "FRR's SR database: #{@lab.vtysh('show ip ospf database segment-routing json')}"
+    assert_equal [18_001, [3]], [pfx['inputLabel'], pfx['prefixRoute'].map { _1['outputLabel'] }], pfx.inspect
   end
 
   def test_ospfd_and_ospf_cli
