@@ -142,6 +142,6 @@ class TestCoreExtended < Test::Unit::TestCase
     receive(prefix_lsa(1, 9))
     l = @b.areas[0].lsdb[[10, (7 << 24) | 1, Addr.to_i('9.9.9.9')]]
     d = l.detail
-    assert_equal [7, 1, '9.9.9.9/32', 9], [d[:opaque_type], d[:opaque_id], d[:tlvs][0][:prefix], d[:tlvs][0][:subs][0][:sid]]
+    assert_equal [7, 1, '9.9.9.9/32', 9], [d[:opaque_type], d[:opaque_id], d[:tlvs][0][:prefix], d[:tlvs][0][:sub_tlvs][0][:index]]
   end
 end

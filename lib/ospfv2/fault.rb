@@ -41,6 +41,8 @@ module OSPFv2
        ->(c) { [10, opaque_id(EXT_PREFIX, 1), Fault.extended_prefix(c) * 2] }],
       [:link_tlv_twice, :link_tlv_twice, 'an extended link LSA with two Extended Link TLVs',
        ->(c) { [10, opaque_id(EXT_LINK, 1), Fault.extended_link(c) + Fault.extended_link(c, link_id: '10.255.0.8')] }],
+      [:adj_sid_vl_invalid, :adj_sid_vl_invalid, 'an extended link LSA whose Adj-SID has V set and L clear',
+       ->(c) { [10, opaque_id(EXT_LINK, 1), Fault.extended_link(c, flags: 0x40)] }],
       [:tlv_overrun, :tlv_overrun, 'an extended prefix LSA whose Prefix-SID sub-TLV runs 4 octets past its TLV',
        ->(c) { [10, opaque_id(EXT_PREFIX, 1), Fault.extended_prefix(c, overrun: 4)] }]
     ].freeze
@@ -119,8 +121,8 @@ module OSPFv2
     # An extended link body (RFC 7684 section 3.1): a point-to-point link
     # to +link_id+, with an Adj-SID (RFC 8665 section 6.1), V and L set,
     # a label from the SRLB.
-    def extended_link(c, link_id: '10.255.0.7', data: '10.0.0.1')
-      adj = tlv(2, [0x60, 0, 0, 0].pack('C4') + three(c[:srlb][0]))
+    def extended_link(c, link_id: '10.255.0.7', data: '10.0.0.1', flags: 0x60)
+      adj = tlv(2, [flags, 0, 0, 0].pack('C4') + three(c[:srlb][0]))
       tlv(1, [1, 0, 0, 0].pack('C4') + [Core::Addr.to_i(link_id), Core::Addr.to_i(data)].pack('NN') + adj)
     end
   end

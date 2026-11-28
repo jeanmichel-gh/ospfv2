@@ -415,12 +415,16 @@ module OSPFv2
       # in several LSAs, the first Extended Link TLV of one (3.1).
       #   { router id => { links: [{ link_type:, link_id:, link_data:, opaque_id:, adj_sids: [], lan_adj_sids: [] }], findings: [] } }
       def extended_links(area)
+        # RFC 8665 sections 6.1 and 5: an Adj-SID with V and L unequal is ignored.
+        valid = lambda do |sids|
+          sids.select { |s| s.flags.anybits?(ExtendedLink::AdjSid::V) == s.flags.anybits?(ExtendedLink::AdjSid::L) }
+              .map { _1.to_hash.except(:type) }
+        end
         read_extended(area, ExtendedLink) do |body, out, oid|
           t = body.links.first or next
           next if out.key?(t.key) && out[t.key][:opaque_id] <= oid
           out[t.key] = { link_type: t.link_type, link_id: Addr.to_s(t.link_id), link_data: Addr.to_s(t.link_data),
-                         opaque_id: oid, adj_sids: t.adj_sids.map { _1.to_hash.except(:type) },
-                         lan_adj_sids: t.lan_adj_sids.map { _1.to_hash.except(:type) } }
+                         opaque_id: oid, adj_sids: valid.(t.adj_sids), lan_adj_sids: valid.(t.lan_adj_sids) }
         end.transform_values { |r| { links: r[:items].values, findings: r[:findings] } }
       end
 
