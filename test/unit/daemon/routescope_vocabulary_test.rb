@@ -26,7 +26,10 @@ class TestRoutescopeVocabulary < Test::Unit::TestCase
           'set protocols ospf area 0 interface lo passive',
           'set policy-options policy-statement EXP term statics from protocol static',
           'set policy-options policy-statement EXP term statics then accept',
-          'set protocols ospf export EXP'].freeze
+          'set protocols ospf export EXP',
+          # SR (docs/design/sr-ospf.md, step 4), so the SR keys routescope
+          # reads have rows: labels, nodes, Adj-SIDs, opaque LSAs.
+          'set protocols ospf source-packet-routing node-segment ipv4-index 1'].freeze
 
   def setup
     @dir = Dir.mktmpdir('ospfd-vocabulary')
@@ -40,6 +43,8 @@ class TestRoutescopeVocabulary < Test::Unit::TestCase
     @peer.add_interface(name: 'e0', address: '10.0.0.2/24', transport: Transport::Loopback.new(hub, '10.0.0.2'))
     @peer.add_interface(name: 'lo', address: '2.2.2.2/32', passive: true,
                         transport: Transport::Loopback.new(Transport::Hub.new, '2.2.2.2'))
+    @peer.opaque = true
+    @peer.segment_routing = { srgb: [17_000, 8_000], srlb: [15_000, 1_000], index: 2 }
     @peer.start
     @daemon = Daemon.new(config_path: File.join(@dir, 'ospfd.conf'), loop: @loop, system: system,
                          transport: ->(_n, ip) { Transport::Loopback.new(hub, ip) })
@@ -85,7 +90,7 @@ class TestRoutescopeVocabulary < Test::Unit::TestCase
     {
       'show.overview' => [{}], 'show.neighbors' => [{}], 'show.interfaces' => [{}],
       'show.database' => [{}, { 'detail' => true }], 'show.routes' => [{}], 'show.fib' => [{}],
-      'show.spf' => [{}], 'show.timers' => [{}],
+      'show.spf' => [{}], 'show.timers' => [{}], 'show.labels' => [{}], 'show.segment_routing' => [{}],
       'show.topology' => [{ 'area' => '0' }, { 'scope' => 'as' }],
       'show.configuration' => [{ 'format' => 'set' }],
       'config.changed' => [{}],
