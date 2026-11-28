@@ -469,7 +469,7 @@ them. The build order:
 | 4 | SR-MPLS (RFC 8665): SIDs, the label table, label routes by netlink | Done: configuration and origination (#72), calculation and API (#74), forwarding (#75) |
 | 5 | The simulator sends SR LSAs | Done, #76 |
 | 6 | TI-LFA | Its own spec, later |
-| 8 | The labs: `ospf-sr` (main), `ospf-sr-frr` (interop), `test/lab/sr_test.sh` and CI's `sr` job | This change |
+| 8 | The labs: `ospf-sr` (main), `ospf-sr-frr` (interop), `test/lab/sr_test.sh` and CI's `sr` job | Done, #77 |
 
 ### Noted for later, from the owner, 2026-11-13
 

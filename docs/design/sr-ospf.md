@@ -798,9 +798,8 @@ protocol-conventions' open question 5, not this spec's.
 - **In a real kernel**: `test/integration/netlink_test.rb`, as root
   with `mpls_router` loaded, installs the four label routes and a
   push, and `ip -M route` and `ip route` show them as meant, and the
-  dump reads them back. Run on ospflab. CI's runner has no MPLS in its
-  kernel (PR 5's interop found FRR's label table empty), so there the
-  test omits itself.
+  dump reads them back. Run on ospflab, and in CI's `sr` job, which
+  loads the MPLS modules first and fails if the test omits itself.
 - **`fib/manager.rb`** pushes each next hop's out-label (none for
   implicit null) and keeps label routes in line as it does routes:
   changes first, deletes last, retried, repaired on reconcile. A label
@@ -1173,9 +1172,12 @@ idx 1   idx 2   idx 3   idx 4     Node-SIDs
   own, `vm-build`), under `vm-lock shared`: 38 checks passed. The first
   run failed on the script's own ping: the ospfv2 image has no `ping`,
   so the script runs the host's in the node's network namespace.
-- **CI** gains an `sr` job. Its runner had no MPLS loaded (PR 5's and 6's
-  runs), so the job loads `mpls_router` and `mpls_iptunnel` first and
-  stops if it cannot.
+- **CI** gains an `sr` job. Its runner has no MPLS loaded by default
+  (PR 5's and 6's runs), so the job loads `mpls_router` and
+  `mpls_iptunnel` first and stops if it cannot. GitHub's runner loads
+  them: #77's run passed the 38 checks. The job then runs
+  `test/integration/netlink_test.rb` as root, and fails if a test omits
+  itself.
 - **Not here:** the two-area lab (open question 7), and the gate with the
   simulator beside FRR (step 5's), which a later lab can add.
 
