@@ -904,9 +904,9 @@ items 3 and 4). This step adds to it and does not rewrite it.
   3x2 SR grid labels every grid SID through the simulator, in the
   simulator's SRGB, and reads the simulator's RI. FRR beside the
   simulator is the spec's gate; it waits for the labs (step 8).
-- **Not here:** the dissector's opaque TLVs with `key` (answer 7), which
-  the spec put with step 3's codec, are not built yet; the simulator
-  pane shows no SIDs yet.
+- **Not here:** the simulator pane shows no SIDs yet. The dissector's
+  opaque TLVs with `key` (answer 7) came later; see "As built, the
+  dissector".
 
 ### Step 6: TI-LFA, out of this spec
 
@@ -1180,6 +1180,25 @@ idx 1   idx 2   idx 3   idx 4     Node-SIDs
   itself.
 - **Not here:** the two-area lab (open question 7), and the gate with the
   simulator beside FRR (step 5's), which a later lab can add.
+
+### As built, the dissector (answer 7)
+
+- `dissect.rb` decodes the TLVs of opaque types 4, 7 and 8 as nested
+  fields with offsets. The RI LSA's field has `key`
+  `router-information`; SR-Algorithm, SID/Label Range, SRLB, Extended
+  Prefix, Prefix-SID, Extended Link, Adj-SID and LAN Adj-SID have theirs.
+  The SID/Label sub-TLV inside a range has `sid-label`, a tenth key the
+  answer did not list, since the range's first label is in it.
+- The Router Informational Capabilities TLV and any other TLV stay one
+  hex field, as answer 7 says. Another opaque type stays one `data`
+  field.
+- Padding is a `padding` field, kept as it came: FRR pads with 0xff,
+  which RFC 7770 section 2.3 allows ("undefined bits").
+- A 3-octet SID is a `label` field with the low 20 bits and a 4-bit
+  `reserved`, so every byte still has its field. A TLV that runs past
+  its LSA is a `truncated` field and an error.
+- Tested on FRR 10.5.1's octets, the ones the core's codec tests hold.
+- The `Field` struct gains `key`, which `to_h` gives only when set.
 
 ## Tests
 

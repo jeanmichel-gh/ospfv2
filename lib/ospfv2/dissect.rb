@@ -16,17 +16,21 @@ module OSPFv2
   #   d.to_h  # => { summary:, length:, fields: [...], errors: [...] }
   #
   # A field: { name:, offset:, length:, value:, show:, mask:, children:,
-  # check: { ok:, ... }, lsa: { type:, ls_id:, advr:, seq: } }. Offsets are
+  # check: { ok:, ... }, lsa: { type:, ls_id:, advr:, seq: }, key: }. Offsets are
   # from the start of the frame. A mask is the field's bits within its bytes
   # (big endian). An LSA, or an LSA header in a DD or Ack packet, carries
   # its instance key in +lsa+, the key the console follows an LSA by.
+  # An SR TLV or sub-TLV carries +key+, its registry name with hyphens
+  # (prefix-sid, adj-sid), the word a filter finds in OSPF and IS-IS alike.
   #
   # The dissector never raises on a bad frame: what does not parse becomes
   # a "truncated" or "data" field, and the reason goes to +errors+.
   module Dissect
-    Field = Struct.new(:name, :offset, :length, :value, :show, :mask, :children, :check, :lsa, keyword_init: true) do
+    Field = Struct.new(:name, :offset, :length, :value, :show, :mask, :children, :check, :lsa, :key,
+                       keyword_init: true) do
       def to_h
         h = { name: name, offset: offset, length: length }
+        h[:key] = key if key
         h[:value] = value unless value.nil?
         h[:show] = show unless show.nil?
         h[:mask] = mask if mask
@@ -54,6 +58,13 @@ module OSPFv2
     # Options (RFC 2328 A.2, RFC 5250, RFC 3101): bit => name.
     OPTIONS = { 0x80 => 'DN', 0x40 => 'O', 0x20 => 'DC', 0x10 => 'L', 0x08 => 'N/P', 0x04 => 'MC', 0x02 => 'E', 0x01 => 'MT' }.freeze
     LINK_TYPES = { 1 => 'point-to-point', 2 => 'transit', 3 => 'stub', 4 => 'virtual link' }.freeze
+    # Opaque types whose TLVs are decoded: RFC 7770 and RFC 7684.
+    OPAQUE_TYPES = { 4 => 'RI', 7 => 'extended prefix', 8 => 'extended link' }.freeze
+    # Prefix-SID flags (RFC 8665 section 5), Adj-SID and LAN Adj-SID flags
+    # (6.1, 6.2), extended prefix flags (RFC 7684 section 2.1).
+    PREFIX_SID_FLAGS = { 0x40 => 'NP', 0x20 => 'M', 0x10 => 'E', 0x08 => 'V', 0x04 => 'L' }.freeze
+    ADJ_SID_FLAGS = { 0x80 => 'B', 0x40 => 'V', 0x20 => 'L', 0x10 => 'G', 0x08 => 'P' }.freeze
+    PREFIX_FLAGS = { 0x80 => 'A', 0x40 => 'N' }.freeze
 
     module_function
 
@@ -384,10 +395,12 @@ module OSPFv2
             when 2 then network_body(body, stop)
             when 3, 4 then summary_body(body, stop)
             when 5, 7 then external_body(body, stop)
+            when 9, 10, 11 then opaque_body(u8(off + 4), body, stop)
             else [field('data', body, stop - body, hex(body, stop - body))]
             end.compact
+        ri = [9, 10, 11].include?(k[:type]) && u8(off + 4) == 4
         field("#{LSA_TYPES.fetch(k[:type], "type #{k[:type]}")} LSA", off, len,
-              nil, "#{k[:ls_id]} #{k[:advr]} #{k[:seq]}", lsa: k,
+              nil, "#{k[:ls_id]} #{k[:advr]} #{k[:seq]}", lsa: k, key: ri ? 'router-information' : nil,
               children: [field('LSA header', off, 20, nil, nil, children: hdr), *b])
       end
 
@@ -456,6 +469,157 @@ module OSPFv2
         end
         f << truncated(o, stop) if o < stop
         f
+      end
+
+      # ---- opaque LSAs: RI (RFC 7770), extended prefix and link (RFC 7684)
+
+      # Each top-level TLV of the opaque types the core reads, by type.
+      OPAQUE_TLVS = {
+        4 => { 8 => :sr_algorithm, 9 => :sid_label_range, 14 => :srlb },
+        7 => { 1 => :extended_prefix },
+        8 => { 1 => :extended_link }
+      }.freeze
+
+      def opaque_body(opaque_type, off, stop)
+        table = OPAQUE_TLVS[opaque_type]
+        return [field('data', off, stop - off, hex(off, stop - off))] if table.nil? || off >= stop
+        tlvs(off, stop, table, 'TLV')
+      end
+
+      # TLVs in 4-octet steps (RFC 7770 section 2.3, RFC 7684 section 2):
+      # type, length, value, then padding to the step. One the table names
+      # is decoded, another stays one hex field.
+      def tlvs(off, stop, table, what)
+        out = []
+        o = off
+        while o < stop
+          if o + 4 > stop
+            @errors << "#{what} header cut at offset #{o}"
+            out << truncated(o, stop)
+            break
+          end
+          t = u16(o)
+          len = u16(o + 2)
+          size = 4 + ((len + 3) & ~3)
+          if o + 4 + len > stop
+            @errors << "#{what} type #{t} length #{len} runs past its LSA"
+            out << truncated(o, stop)
+            break
+          end
+          head = [num('type', o, 2), num('length', o + 2, 2)]
+          kind = table[t]
+          out << if kind
+                   send(kind, o, head, o + 4, o + 4 + len)
+                 else
+                   field("#{what} type #{t}", o, 4 + len, hex(o, 4 + len))
+                 end
+          pad = [size, stop - o].min - 4 - len
+          out << field('padding', o + 4 + len, pad, hex(o + 4 + len, pad)) if pad.positive?
+          o += size
+        end
+        out
+      end
+
+      # A TLV's field: its header, its value's fields, and what of its
+      # value the decoding did not reach.
+      def tlv(name, key, o, head, vstop, kids, show = nil)
+        last = kids.empty? ? o + 4 : kids.map { _1.offset + _1.length }.max
+        kids << field('data', last, vstop - last, hex(last, vstop - last)) if last < vstop
+        field(name, o, vstop - o, nil, show, key: key, children: head + kids)
+      end
+
+      # A SID: a label in the low 20 bits of 3 octets, or a 4-octet index
+      # (RFC 8665 section 5). The value's length picks which.
+      def sid(off, stop)
+        case stop - off
+        when 3
+          v = u24(off)
+          [field('label', off, 3, v & 0xfffff, (v & 0xfffff).to_s,
+                 children: [field('reserved', off, 3, v >> 20, nil, mask: 0xf00000),
+                            field('label', off, 3, v & 0xfffff, nil, mask: 0xfffff)]), "label #{v & 0xfffff}"]
+        when 4 then [num('index', off, 4), "index #{u32(off)}"]
+        else
+          @errors << "SID of #{stop - off} octets at offset #{off}" if stop > off
+          [stop > off ? field('SID', off, stop - off, hex(off, stop - off)) : nil, nil]
+        end
+      end
+
+      def sr_algorithm(o, head, v, stop)
+        algos = (v...stop).map { u8(_1) }
+        kids = (v...stop).map { num('algorithm', _1, 1) }
+        tlv('SR-Algorithm', 'sr-algorithm', o, head, stop, kids, "algorithms #{algos.join(' ')}")
+      end
+
+      def sid_label_range(o, head, v, stop) = range('SID/Label Range', 'sid-label-range', o, head, v, stop)
+      def srlb(o, head, v, stop) = range('SR Local Block', 'srlb', o, head, v, stop)
+
+      # RFC 8665 sections 3.2 and 3.3: a 3-octet range size, a reserved
+      # octet, then the SID/Label sub-TLV that gives the first label.
+      def range(name, key, o, head, v, stop)
+        return tlv(name, key, o, head, stop, [truncated(v, stop)].compact) if v + 4 > stop
+        kids = [num('range size', v, 3), num('reserved', v + 3, 1)]
+        subs = tlvs(v + 4, stop, { 1 => :sid_label }, 'sub-TLV')
+        first = subs.find { _1.key == 'sid-label' }&.show
+        tlv(name, key, o, head, stop, kids + subs, [first, "size #{u24(v)}"].compact.join(' '))
+      end
+
+      # The SID/Label sub-TLV (RFC 8665 section 2.1).
+      def sid_label(o, head, v, stop)
+        f, show = sid(v, stop)
+        tlv('SID/Label', 'sid-label', o, head, stop, [f].compact, show)
+      end
+
+      # The Extended Prefix TLV (RFC 7684 section 2.1). An IPv4 prefix is
+      # 32 bits, a default route's too.
+      def extended_prefix(o, head, v, stop)
+        return tlv('Extended Prefix', 'extended-prefix', o, head, stop, [truncated(v, stop)].compact) if v + 8 > stop
+        rt = u8(v)
+        plen = u8(v + 1)
+        kids = [field('route type', v, 1, rt), num('prefix length', v + 1, 1), num('address family', v + 2, 1),
+                bits('flags', v + 3, 1, PREFIX_FLAGS), addr('address prefix', v + 4)]
+        subs = tlvs(v + 8, stop, { 2 => :prefix_sid }, 'sub-TLV')
+        tlv('Extended Prefix', 'extended-prefix', o, head, stop, kids + subs, "#{ip4(v + 4)}/#{plen} route type #{rt}")
+      end
+
+      # The Prefix-SID sub-TLV (RFC 8665 section 5).
+      def prefix_sid(o, head, v, stop)
+        return tlv('Prefix-SID', 'prefix-sid', o, head, stop, [truncated(v, stop)].compact) if v + 4 > stop
+        fl = bits('flags', v, 1, PREFIX_SID_FLAGS)
+        f, show = sid(v + 4, stop)
+        kids = [fl, num('reserved', v + 1, 1), num('MT-ID', v + 2, 1), num('algorithm', v + 3, 1), f].compact
+        tlv('Prefix-SID', 'prefix-sid', o, head, stop, kids, [show, "flags #{fl.show}"].compact.join(' '))
+      end
+
+      # The Extended Link TLV (RFC 7684 section 3.1).
+      def extended_link(o, head, v, stop)
+        return tlv('Extended Link', 'extended-link', o, head, stop, [truncated(v, stop)].compact) if v + 12 > stop
+        t = u8(v)
+        kids = [field('link type', v, 1, t, "#{t} #{LINK_TYPES.fetch(t, '?')}"), num('reserved', v + 1, 3),
+                addr('link id', v + 4), addr('link data', v + 8)]
+        subs = tlvs(v + 12, stop, { 2 => :adj_sid, 3 => :lan_adj_sid }, 'sub-TLV')
+        tlv('Extended Link', 'extended-link', o, head, stop, kids + subs,
+            "#{LINK_TYPES.fetch(t, t)} #{ip4(v + 4)} data #{ip4(v + 8)}")
+      end
+
+      # The Adj-SID sub-TLV (RFC 8665 section 6.1).
+      def adj_sid(o, head, v, stop)
+        return tlv('Adj-SID', 'adj-sid', o, head, stop, [truncated(v, stop)].compact) if v + 4 > stop
+        fl = bits('flags', v, 1, ADJ_SID_FLAGS)
+        f, show = sid(v + 4, stop)
+        kids = [fl, num('reserved', v + 1, 1), num('MT-ID', v + 2, 1), num('weight', v + 3, 1), f].compact
+        tlv('Adj-SID', 'adj-sid', o, head, stop, kids, [show, "flags #{fl.show}"].compact.join(' '))
+      end
+
+      # The LAN Adj-SID sub-TLV (RFC 8665 section 6.2): the Adj-SID's
+      # fields with the neighbor's router ID before the SID.
+      def lan_adj_sid(o, head, v, stop)
+        return tlv('LAN Adj-SID', 'lan-adj-sid', o, head, stop, [truncated(v, stop)].compact) if v + 8 > stop
+        fl = bits('flags', v, 1, ADJ_SID_FLAGS)
+        f, show = sid(v + 8, stop)
+        kids = [fl, num('reserved', v + 1, 1), num('MT-ID', v + 2, 1), num('weight', v + 3, 1),
+                addr('neighbor ID', v + 4), f].compact
+        tlv('LAN Adj-SID', 'lan-adj-sid', o, head, stop, kids,
+            [show, "neighbor #{ip4(v + 4)}", "flags #{fl.show}"].compact.join(' '))
       end
     end
   end
