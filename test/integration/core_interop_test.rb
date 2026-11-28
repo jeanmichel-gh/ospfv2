@@ -5,6 +5,7 @@ require 'stringio'
 require 'timeout'
 require 'ospfv2'
 require 'ospfv2/core'
+require 'ospfv2/simulator'
 
 # The new router core against the old simulator: two implementations
 # written years apart, talking over an in-memory segment in real time.
@@ -65,6 +66,34 @@ class TestCoreInterop < Test::Unit::TestCase
 
   def core_neighbor_state
     @loop.call { @core.neighbors.first&.state }
+  end
+
+  # The step 5 gate (docs/design/sr-ospf.md), with ospfd in FRR's place:
+  # ospfd beside the simulator labels every grid SID through it, in the
+  # simulator's SRGB, since the grid's routers, not the simulator, own
+  # the SIDs.
+  def test_sr_grid_labelled_through_the_simulator
+    t = Topology.from_hash('simulator' => { 'router_id' => '1.1.1.1', 'interface' => '10.0.0.1/24', 'hello_interval' => 1 },
+                           'segment_routing' => {}, 'grid' => { 'columns' => 3, 'rows' => 2, 'sids' => 1 })
+    @sim = Simulator.new(t, transport: Transport::Loopback.new(@hub, '10.0.0.1'), log: @sim_log, min_ls_interval: 0)
+    @sim.start
+    start_core(:broadcast)
+    @loop.call do
+      @core.opaque = true
+      @core.segment_routing = { srgb: [17_000, 8_000], srlb: [15_000, 1_000], index: nil }
+    end
+    want = (1..6).to_h { |i| [17_000 + i, 16_000 + i] }
+    wait_for(60) do
+      @loop.call do
+        e = @core.sr_labels&.entries || {}
+        want.all? { |in_label, out| e[in_label]&.next_hops&.map { _1[:out_label] } == [out] }
+      end
+    end
+    @loop.call do
+      sr = @core.router_information(0)
+      assert_equal [[16_000, 8_000]], sr.dig('1.1.1.1', :srgb), "the simulator's own RI"
+      assert_equal 8, sr.size, 'six grid routers, the simulator and ospfd itself'
+    end
   end
 
   def test_broadcast_core_is_dr_and_learns_the_simulated_area

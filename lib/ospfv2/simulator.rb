@@ -8,6 +8,7 @@ require_relative '../ospfv2'
 require_relative 'topology'
 require_relative 'core/lsa'
 require_relative 'fault'
+require_relative 'lsa/opaque_lsa'
 
 module OSPFv2
   # Runs a Topology: builds its link state database, brings up the
@@ -27,7 +28,9 @@ module OSPFv2
     # No such LSA, router or prefix: the web API answers 404.
     class NotFound < StandardError; end
 
-    LSA_TYPES = %w[router network summary asbr_summary as_external].freeze
+    # The LSA actions' types; opaque ones (RFC 5250) by LsType's names, the
+    # id their opaque link state ID (opaque type and ID).
+    LSA_TYPES = %w[router network summary asbr_summary as_external link_local area domain].freeze
 
     # A topology link and the LSDB link that implements it.
     class LinkState
@@ -126,6 +129,8 @@ module OSPFv2
         next l unless l.up?
         l.down!
         reoriginate @ls_db.link_down(l.lsdb_link), "link #{l.name} down"
+        # The link's Adj-SIDs go with it (RFC 8665 section 7.4.1).
+        sr_link_lsas(l).each { |x| flush_one(x, "link #{l.name} down: its Adj-SID") unless @flushed_lsas.key?(x.key) }
         l
       end
     end
@@ -136,6 +141,7 @@ module OSPFv2
         next l if l.up?
         l.up!
         reoriginate @ls_db.link_up(l.lsdb_link), "link #{l.name} up"
+        sr_link_lsas(l).each { |x| bring_back(x) if @flushed_lsas.key?(x.key) }
         l
       end
     end
@@ -470,6 +476,7 @@ module OSPFv2
         age: l.ls_age.to_i, checksum: format('0x%04x', l.encode && l.send(:csum_to_i)),
         length: l.encode.bytesize, acked: l.ack?, originated: @ls_db.proxied?(l.advertising_router)
       }
+      row.merge!(opaque_type: l.opaque_type.to_i, opaque_id: l.opaque_id.to_i) if l.is_opaque?
       (ms = deferred_ms(l.key)) and row[:deferred_ms] = ms
       row[:flushed] = true if @flushed_lsas.key?(l.key)
       row[:detail] = lsa_detail(l) if detail
@@ -484,8 +491,15 @@ module OSPFv2
 
     def graph
       nodes = @topology.all_routers.map do |r|
-        { id: r.name, router_id: rid_s(r.id), grid: r.grid, sim: r.name == Topology::SIM, abr: r.abr,
-          asbr: r.asbr, networks: r.networks.size, summaries: r.summaries.size, externals: r.externals.size }
+        n = { id: r.name, router_id: rid_s(r.id), grid: r.grid, sim: r.name == Topology::SIM, abr: r.abr,
+              asbr: r.asbr, networks: r.networks.size, summaries: r.summaries.size, externals: r.externals.size }
+        # With SR (answer 6 for routescope): its block and its loopback's index.
+        if (sr = @topology.segment_routing)
+          first, size = r.srgb || sr[:srgb]
+          n[:srgb] = [{ start: first, size: size }]
+          n[:sid] = r.sid if r.sid
+        end
+        n
       end
       nodes << { id: 'dut', router_id: @neighbor.neighbor_router_id&.to_ip, dut: true, address: @neighbor.neighbor_ip }
       edges = @links.map { |l| { id: l.id, from: l.spec.from, to: l.spec.to, metric: l.metric, up: l.up? } }
@@ -764,7 +778,55 @@ module OSPFv2
           @ls_db << AsExternal.new(h)
         end
       end
+      build_sr if @topology.segment_routing
       @ls_db.all.each(&:encode) # compute checksums once
+    end
+
+    # SR-MPLS (RFC 8665; docs/design/sr-ospf.md, step 5): each simulated
+    # router's Router Information LSA (its SRGB, or the topology's, and the
+    # SRLB), its Node-SID in an extended prefix LSA when it has a sid, and
+    # an extended link LSA per link with an Adj-SID from its SRLB. The
+    # simulator's own router sends its RI too, so the router under test
+    # labels the grid's prefixes through it.
+    OPAQUE_OPTIONS = 0x42 # E and O
+
+    def build_sr
+      sr = @topology.segment_routing
+      @sr_link_lsas = {}
+      adj = Hash.new { |h, rid| h[rid] = sr[:srlb][0] }
+      @topology.all_routers.each do |r|
+        body = Core::RouterInformation.build(algorithms: [0], srgb: [r.srgb || sr[:srgb]], srlb: [sr[:srlb]])
+        @ls_db << sr_lsa(r.id, 4, 0, body)
+        next unless r.sid
+        unless r.networks.any? { _1.prefix.end_with?('/32') }
+          @ls_db.add_link_to_stub_network(router_id: r.id, network: r.sid_prefix, metric: 0)
+        end
+        sid = Core::ExtendedPrefix::PrefixSid.new(flags: 0, sid: r.sid)
+        tlv = Core::ExtendedPrefix::Prefix.new(route_type: 1, prefix: r.sid_prefix, flags: Core::ExtendedPrefix::N_FLAG, subs: [sid])
+        @ls_db << sr_lsa(r.id, 7, 1, Core::ExtendedPrefix::Body.new(tlvs: [tlv]))
+      end
+      oid = Hash.new(0)
+      @links.each do |ls|
+        l = ls.lsdb_link
+        ends = [[l.router_id.to_i, l.neighbor_id.to_i, l.local_prefix], [l.neighbor_id.to_i, l.router_id.to_i, l.remote_prefix]]
+        @sr_link_lsas[ls.id] = ends.map do |rid, nbr, prefix|
+          label = adj[rid]
+          adj[rid] += 1
+          sub = Core::ExtendedLink::AdjSid.new(flags: Core::ExtendedLink::AdjSid::V | Core::ExtendedLink::AdjSid::L, sid: label)
+          link = Core::ExtendedLink::Link.new(link_type: 1, link_id: rid_s(nbr), link_data: prefix.to_s.split('/').first, subs: [sub])
+          lsa = sr_lsa(rid, 8, oid[rid] += 1, Core::ExtendedLink::Body.new(tlvs: [link]))
+          @ls_db << lsa
+          lsa
+        end
+      end
+    end
+
+    def sr_link_lsas(l) = (@sr_link_lsas || {}).fetch(l.id, [])
+
+    def sr_lsa(rid, opaque_type, opaque_id, body)
+      @ls_db.advertised_routers << rid
+      OpaqueLsa.new(ls_type: :area, opaque_type: opaque_type, opaque_id: opaque_id, advertising_router: rid,
+                    options: OPAQUE_OPTIONS, body: body)
     end
 
     def ensure_router_lsa(rid)
@@ -786,6 +848,7 @@ module OSPFv2
                                network_type: s.network_type, interface: s.device,
                                transport: transport, log: @log, debug: debug)
       @neighbor.ls_db = @ls_db
+      @neighbor.dd_options_extra = 0x40 if @topology.segment_routing
       # @neighbor is the segment (an Interface); its state is the adjacency
       # with the DR's. Events name each adjacency's neighbor.
       @neighbor.on_adjacency_change do |nbr, old, new, why|

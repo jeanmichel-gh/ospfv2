@@ -26,6 +26,7 @@ require_relative './network'
 require_relative './summary'
 require_relative './external'
 require_relative './traffic_engineering'
+require_relative './opaque_lsa'
 
 module OSPFv2
   class Lsa
@@ -41,11 +42,10 @@ module OSPFv2
           when 5 ; OSPFv2::AsExternal.new_ntop(arg)
           when 7 ; OSPFv2::AsExternal7.new_ntop(arg)
           when 9,10,11
+            # Opaque types are a registry: TE has its own class, any other
+            # is an OpaqueLsa, kept as it came (RFC 5250, unknown types too).
             _, opaque_type = arg.unpack('NC')
-            case opaque_type
-            when 1
-              OSPFv2::TrafficEngineering.new_ntop(arg)
-            end
+            opaque_type == 1 ? OSPFv2::TrafficEngineering.new_ntop(arg) : OSPFv2::OpaqueLsa.new_ntop(arg)
           else 
             raise ArgumentError, "unsupported LSA: #{arg.inspect[0,80]}"
           end
@@ -62,7 +62,7 @@ module OSPFv2
             when 1, :te_lsa
               OSPFv2::TrafficEngineering.new_hash(arg)
             else
-              raise ArgumentError, "unsupported LSA: #{arg.inspect[0,80]}"
+              OSPFv2::OpaqueLsa.new_hash(arg)
             end
           else
             raise ArgumentError, "unsupported LSA: #{arg.inspect[0,80]}"

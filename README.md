@@ -104,6 +104,27 @@ sim.link_down('r1c1--r1c2')
 sim.flap('r2c2--r2c3', count: 5, interval: 10)
 ```
 
+### Segment routing in the simulator
+
+`segment_routing` turns on SR-MPLS (RFC 8665) for every simulated router, as
+isis4r-sim's does:
+
+```yaml
+segment_routing:
+  srgb: { start: 16000, size: 8000 }   # the defaults
+  srlb: { start: 15000, size: 1000 }
+grid: { columns: 4, rows: 4, sids: 1 } # r1c1 index 1, the next router the next, row by row
+routers:
+  - { name: edge, id: 10.0.0.1, sid: 100, srgb: { start: 20000, size: 8000 } }
+```
+
+Each simulated router, the simulator's own included, then sends a Router Information
+LSA with its SRGB and SRLB. A router with a `sid` sends its Node-SID in an extended
+prefix LSA, on its first /32 or else on its router ID's /32, which it gets as a stub.
+Each link end sends an extended link LSA with an Adj-SID from its router's SRLB; a link
+taken down flushes them, and brought up sends them again. The simulator sets the O bit
+in its DDs, not in its Hellos, and installs nothing.
+
 ## Commands
 
 | Command | What it does |
@@ -138,15 +159,15 @@ The dashboard listens on 127.0.0.1 unless you pass an address. The JSON API behi
 
 | Method | Path | |
 | --- | --- | --- |
-| GET | `/api/state` | neighbor (the adjacency with the DR), neighbors (every router heard, its role and our state with it), counts, graph, links |
-| GET | `/api/lsdb` | LSA rows; `/api/lsdb.txt?format=junos\|ios&verbose=1` for text |
+| GET | `/api/state` | neighbor (the adjacency with the DR), neighbors (every router heard, its role and our state with it), counts, graph, links; with SR, a graph node has `srgb` and `sid` |
+| GET | `/api/lsdb` | LSA rows, an opaque one with `opaque_type` and `opaque_id`; `?detail=1` decodes them as ospfd's `show.database` does; `/api/lsdb.txt?format=junos\|ios&verbose=1` for text |
 | GET | `/api/lsa?type=router&id=0.1.0.1&advr=0.1.0.1` | one LSA, verbose |
 | GET | `/api/info` | `daemon`, `version`, `api` and every route served |
 | GET | `/api/events?since=N` | events after sequence N; each has `time` (HH:MM:SS), `at` (UTC, ms) and `data` |
 | GET | `/api/events/stream?since=N` | the same, one JSON line each as they happen, in ospfd's `events.subscribe` shapes, a keepalive line after 15 quiet seconds; 8 streams at most |
 | POST | `/api/links/:id/up\|down\|toggle\|flap\|metric` | flap takes `{"count":3,"interval":5}`, metric `{"metric":20}` |
 | POST | `/api/refresh`, `/api/flush`, `/api/aging` | aging takes `{"on":true}` |
-| POST | `/api/lsa/refresh`, `/api/lsa/flush` | one LSA the simulator originates: `{"type":"router","id":"0.1.0.1","advr":"0.1.0.1"}` |
+| POST | `/api/lsa/refresh`, `/api/lsa/flush` | one LSA the simulator originates: `{"type":"router","id":"0.1.0.1","advr":"0.1.0.1"}`; an opaque one by type `link_local`, `area` or `domain` and its opaque link state ID: `{"type":"area","id":"4.0.0.0","advr":"0.1.0.1"}` |
 | POST | `/api/routes/withdraw`, `/api/routes/advertise` | one of the topology's externals or summaries: `{"router":"edge","prefix":"50.0.0.0/24"}` |
 | POST | `/api/min-ls-interval` | `{"seconds":2}`, from 0 to 5 |
 | POST | `/api/fault` | floods one LSA of the fault catalog (`OSPFv2::Fault`), from the simulator's router ID or `router`: `{"case":"sid_label_range_zero","router":"10.255.0.7"}`. It answers the finding the entry makes, what the RFC expects, its text and whether it was sent |

@@ -868,6 +868,47 @@ So the simulator can send SR LSAs behind the DUT, as isis4r-sim does:
 The simulator's thread-per-timer stack is its own topic (`REVIEW.md`,
 items 3 and 4). This step adds to it and does not rewrite it.
 
+#### As built, step 5
+
+- **One codec for SR's TLVs.** The owner chose (2026-11-28) that the
+  simulator reuse the router core's TLV classes (`core/tlv.rb`,
+  `core/router_information.rb`, `core/extended.rb`, built four ways
+  there, checked against FRR's octets) rather than a second set in
+  `lsa/tlv/`. The simulator's new `OpaqueLsa` (`lsa/opaque_lsa.rb`) is
+  a simulator LSA whose body is those octets. Protocol-conventions'
+  open question 3 stays open for the rest of the two codecs.
+- **The registry.** `Lsa.factory` gives TE its class and any other
+  opaque type an `OpaqueLsa`, kept as it came; nothing returns nil.
+  `OpaqueType` gains 7 and 8 and gives an unknown type its number.
+- **A bug found and fixed.** The base `Lsa#parse` kept no link state ID
+  for an opaque LSA, so a DD's opaque header was keyed and requested as
+  0.0.0.0: ospfd answered BadLSReq and the adjacency went back to
+  ExStart for ever. It now keeps the whole ID.
+- **The topology**: `segment_routing` (`srgb`, `srlb`, FRR's and
+  isisd's defaults, checked: no overlap, labels 16 to 1048575),
+  `grid.sids`, and a router's `sid` and `srgb`, as isis4r-sim's. A `sid`
+  without `segment_routing` is refused.
+- **The LSAs**, built at the start: each router's RI (its SRGB, the
+  SRLB, algorithm 0), the simulator's own included; a Node-SID on the
+  router's first /32, else on its router ID's /32, added as a stub; an
+  extended link LSA per link end, point-to-point, with an Adj-SID from
+  its router's SRLB, V and L set. A link taken down flushes its two,
+  and up brings them back (RFC 8665 section 7.4.1). Options E and O.
+- **The O bit** is in its DDs only (`Interface#dd_options_extra`).
+- **The API** (answers 5 and 6): opaque rows add `opaque_type` and
+  `opaque_id`, `type` `area` and `type_name` `OpaqArea`; `detail` is
+  the core's (answer 2's shape); a graph node has `srgb` and `sid`.
+  `lsa.refresh` and `lsa.flush` take `link_local`, `area` and `domain`.
+  `/api/fault` is step 0's, unchanged.
+- **The gate**, with ospfd in FRR's place
+  (`test/integration/core_interop_test.rb`, no root): ospfd beside a
+  3x2 SR grid labels every grid SID through the simulator, in the
+  simulator's SRGB, and reads the simulator's RI. FRR beside the
+  simulator is the spec's gate; it waits for the labs (step 8).
+- **Not here:** the dissector's opaque TLVs with `key` (answer 7), which
+  the spec put with step 3's codec, are not built yet; the simulator
+  pane shows no SIDs yet.
+
 ### Step 6: TI-LFA, out of this spec
 
 TI-LFA in ospfd is a spec of its own, after this one. The reasons:
