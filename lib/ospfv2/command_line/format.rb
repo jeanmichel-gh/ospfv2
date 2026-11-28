@@ -28,6 +28,8 @@ module OSPFv2
         when :overview then style == :ios ? ios_overview(data) : junos_overview(data)
         when :log then log(data)
         when :statistics then statistics(data)
+        when :segment_routing then segment_routing(data)
+        when :labels then labels(data)
         when :routes
           style == :ios ? ios_routes(data) : junos_routes(data, detail)
         when :fib then style == :ios ? ios_fib(data) : junos_fib(data)
@@ -518,6 +520,44 @@ module OSPFv2
           kinds.each { |k| out << format('  %-12s %10d %10d', k, s["tx_#{k}"] || 0, s["rx_#{k}"] || 0) }
           drops = s.select { |k, _| k.start_with?('drop_') }
           out << "  Dropped: #{drops.map { |k, v| "#{k.delete_prefix('drop_')} #{v}" }.join(', ')}" unless drops.empty?
+        end
+        out.join("\n")
+      end
+
+      # ---- segment routing ----
+
+      def block(b) = b ? "#{b['start']}-#{b['start'] + b['size'] - 1}" : '-'
+
+      # "show ospf segment-routing": the same table in both styles.
+      def segment_routing(sr)
+        return 'Segment routing is off' unless sr['enabled']
+        out = ["SRGB #{sr['srgb'].map { block(_1) }.join(', ')}, SRLB #{block(sr['srlb'])}", '', 'Adj-SIDs:']
+        out << format('  %-8s %-10s %-15s %-15s %s', 'Label', 'Interface', 'Neighbor', 'Address', 'LAN')
+        sr['adj_sids'].each do |a|
+          out << format('  %-8d %-10s %-15s %-15s %s', a['label'], a['interface'], a['neighbor'], a['address'], a['lan'] ? 'yes' : 'no')
+        end
+        out += ['', 'SR routers:']
+        out << format('  %-10s %-15s %-14s %-14s %-10s %s', 'Area', 'Router ID', 'SRGB', 'SRLB', 'Algorithm', 'Node-SID')
+        sr['nodes'].each do |n|
+          sid = n['node_sid'] && "#{n['node_sid']['index']} (#{n['node_sid']['label'] || '-'}) #{n['node_sid']['prefix']}"
+          out << format('  %-10s %-15s %-14s %-14s %-10s %s', n['area'], "#{n['router_id']}#{n['self'] ? '*' : ''}",
+                        n['srgb'].map { block(_1) }.join(','), block(n['srlb']), n['algorithms'].join(','), sid || '-')
+        end
+        sr['findings'].each { |f| out << "Finding: #{f['subject']}: #{f['detail']}" }
+        out.join("\n")
+      end
+
+      # "show mpls label": one line per next hop.
+      def labels(rows)
+        return 'No labels' if rows.empty?
+        out = [format('%-8s %-6s %-11s %-19s %-10s %-15s %s', 'Label', 'Op', 'Kind', 'FEC', 'Interface', 'Next hop', 'Out')]
+        rows.each do |r|
+          hops = r['next_hops'].empty? ? [{}] : r['next_hops']
+          hops.each_with_index do |h, i|
+            out << format('%-8s %-6s %-11s %-19s %-10s %-15s %s', i.zero? ? r['label'] : '', i.zero? ? r['op'] : '',
+                          i.zero? ? r['kind'] : '', i.zero? ? r['fec'] : '', h['interface'] || '-', h['address'] || '-',
+                          h['label'] == 3 ? 'pop' : (h['label'] || '-'))
+          end
         end
         out.join("\n")
       end

@@ -151,6 +151,7 @@ module OSPFv2
             end
             cmd 'events', 'Recent protocol events', action: { view: :log, style: :junos }
             cmd 'statistics', 'Packet counters per interface', action: { view: :statistics, style: :junos }
+            cmd 'segment-routing', 'SR-MPLS: our blocks and Adj-SIDs, each SR router', action: { view: :segment_routing, style: :junos }
             cmd 'timers', 'Every timer: what it belongs to, when it fires', action: { view: :timers, style: :junos }
             cmd 'topology', 'The LSDB as nodes, links and prefixes, as SPF reached them' do
               cmd 'area', 'One area' do
@@ -158,6 +159,10 @@ module OSPFv2
               end
               cmd 'external', 'AS external LSAs, by ASBR', action: { view: :topology, style: :junos, scope: 'as' }
             end
+          end
+          cmd 'mpls', 'MPLS' do
+            cmd 'label', 'The SR label table, as the kernel should have it', action: { view: :labels, style: :junos }
+            cmd 'forwarding-table', 'The SR label table (IOS style)', action: { view: :labels, style: :ios }
           end
           cmd 'ip', 'IP information (IOS style)' do
             cmd 'ospf', 'OSPF process', action: { view: :overview, style: :ios } do
@@ -175,6 +180,7 @@ module OSPFv2
               cmd 'route', 'OSPF routing table', action: { view: :routes, style: :ios }
               cmd 'statistics', 'SPF runs', action: { view: :spf, style: :ios }
               cmd 'traffic', 'Packet counters per interface', action: { view: :statistics, style: :ios }
+              cmd 'segment-routing', 'SR-MPLS: our blocks and Adj-SIDs, each SR router', action: { view: :segment_routing, style: :ios }
               cmd 'timers', 'Every timer: what it belongs to, when it fires', action: { view: :timers, style: :ios }
               cmd 'topology', 'The LSDB as nodes, links and prefixes, as SPF reached them' do
                 cmd 'area', 'One area' do

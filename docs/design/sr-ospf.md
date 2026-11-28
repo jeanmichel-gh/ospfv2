@@ -692,6 +692,67 @@ question 2 here, to match whatever isis decides.
 **Areas.** A prefix reached in several areas gives one route; its
 labels follow that route's area. No per-area label tables.
 
+#### As built, pull request 5: calculation and API
+
+- **`core/sr_labels.rb`**, on isisd's `Spf::Labels`, built after each
+  SPF run and before the route listeners, so PR 6's FIB reads it. An
+  opaque LSA's change and an area's origination schedule it too, since
+  they run no SPF.
+- **Who advertised a route** was there already: `Spf::Route#advr` is
+  the router for an intra-area route, the ABR for an inter-area one,
+  the ASBR for an external. The SID is that router's, from its extended
+  prefix LSAs in the route's area (the AS's type 11s for an external).
+- **Labels** as above. A next hop's neighbor is found by its address on
+  the next hop's interface. When that neighbor advertised the SID too,
+  its flags decide, on the best path or not (RFC 8665 section 5). Our
+  own prefix gets a pop entry only with NP set. Each Adj-SID pops
+  toward its neighbor.
+- **Nodes** are the routers with an SR-Algorithm TLV that SPF reaches,
+  ours included, per area, with the Node-SID: an algorithm 0 index on a
+  prefix with N set.
+- **Three new rules.** `prefix_sid_multiple` (RFC 8665 section 5, an
+  LSA's two Prefix-SIDs for one MT-ID and algorithm, all ignored) has a
+  catalog entry. `prefix_sid_algorithm` (5, a SID for an algorithm its
+  router does not advertise) and `prefix_sid_duplicate` (RFC 8660
+  section 2.5, one index on two prefixes: both lose their label, as
+  isisd does, open question 2) are a new group, `labels`: no one LSA
+  makes them, so they have no catalog entry. An index past our SRGB,
+  or a neighbor with no SRGB, is a problem, not a finding, as in isisd.
+- **`sr_finding`** is announced once per finding, as answer 8 gives
+  it. Findings from the readers carry the LSA they came from.
+- **Inter-area** (RFC 8665 section 7.2): an ABR gives each type 3 it
+  originates the SID of its route from another area, in an extended
+  prefix LSA of route type 3, NP set and E clear, or its own flags for
+  a prefix of its own. Opaque IDs from 2 up, kept while summarized. A
+  summary spec now carries its route's `dest` for this.
+- **`explicit-null`**, Junos's statement under `source-packet-routing`
+  ("Configure E and P bits in all prefix segment identifier (SID)
+  advertisements"), sets NP and E on our Node-SID. It was added to test
+  explicit null without injected LSAs.
+- **API.** `show.labels`, in isisd's row shape without `level`:
+  `label`, `kind`, `fec`, `op`, `next_hops` (`address`, `interface`,
+  `label`). `show.segment_routing` in answer 1's shape. `show.routes`
+  gains `sid` and a next hop's `label`. Both new methods and the
+  `sr_finding` kind are in `api.info`.
+- **ospf-cli**: `show ospf segment-routing`, `show mpls label`, and
+  `show ip ospf segment-routing`, `show mpls forwarding-table`. Their
+  tables are ospfd's own, not checked line by line against Junos or
+  IOS output.
+- **The tests** (`test/unit/core/sr_labels_test.rb`): swap along a line
+  of four with different SRGBs; PHP and no entry for our own prefix;
+  explicit null; a neighbor with no SRGB; Adj-SIDs; two prefixes with
+  one index, announced once; inter-area through an ABR with NP; ECMP,
+  one out-label per next hop; RFC 8665 section 3.2's three ranges (index
+  100 is label 1000, 200 is 500). The daemon's views end to end. Not
+  tested yet: a next hop that advertises the prefix off the best path,
+  and a SID from a router SPF does not reach.
+- **Interop with FRR** (in CI, FRR 10.5.1): ospfd's 16002 pops toward
+  FRR, and FRR's 18001 pops toward ospfd. FRR's own label table (`show
+  mpls table`) stays empty in CI's namespaces, with no MPLS in the
+  runner's kernel; the first run failed on it. FRR's SR database gives
+  the labels it computed (`inputLabel` 18001, `outputLabel` 3), and the
+  test reads those. The kernel's side is PR 6's.
+
 #### Forwarding
 
 Ported from isisd's, not shared: ospfv2 takes no gem but bfd4r

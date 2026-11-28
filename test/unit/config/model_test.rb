@@ -44,12 +44,12 @@ class TestConfigModel < Test::Unit::TestCase
 
   def test_source_packet_routing
     assert_nil model.sr
-    assert_equal({ srgb: [16_000, 8_000], srlb: [15_000, 1_000], index: nil, no_adj_sid: [] },
+    assert_equal({ srgb: [16_000, 8_000], srlb: [15_000, 1_000], index: nil, no_adj_sid: [], explicit_null: false },
                  model("#{SPR} srgb start-label 16000").sr, 'the defaults')
     m = model("#{SPR} srgb start-label 17000", "#{SPR} srgb index-range 4000", "#{SPR} srlb start-label 14000",
               "#{SPR} node-segment ipv4-index 3", 'set protocols ospf area 0 interface eth1 no-adjacency-sid',
-              'set protocols ospf area 0 interface eth2')
-    assert_equal({ srgb: [17_000, 4_000], srlb: [14_000, 1_000], index: 3, no_adj_sid: ['eth1'] }, m.sr)
+              'set protocols ospf area 0 interface eth2', "#{SPR} explicit-null")
+    assert_equal({ srgb: [17_000, 4_000], srlb: [14_000, 1_000], index: 3, no_adj_sid: ['eth1'], explicit_null: true }, m.sr)
   end
 
   def test_source_packet_routing_refused

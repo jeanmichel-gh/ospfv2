@@ -51,6 +51,8 @@ module OSPFv2
         'show.timers' => ->(d, _) { d.views.timers },
         'show.routes' => ->(d, _) { d.views.routes },
         'show.fib' => ->(d, _) { d.views.fib },
+        'show.labels' => ->(d, _) { d.views.labels },
+        'show.segment_routing' => ->(d, _) { d.views.segment_routing },
         'show.topology' => ->(d, p) { d.views.topology(area: p['area'], scope: p['scope']) },
         'show.spf' => ->(d, p) { d.views.spf((p['count'] || 100).to_i.clamp(1, 100), run: p['run']&.to_i) },
         'show.configuration' => lambda do |d, p|

@@ -7,6 +7,7 @@ require_relative 'lsa'
 require_relative 'validation'
 require_relative 'router_information'
 require_relative 'extended'
+require_relative 'sr_labels'
 require_relative 'lsdb'
 require_relative 'wire'
 require_relative 'neighbor'
@@ -87,6 +88,10 @@ module OSPFv2
         @sr = nil
         @adj_labels = {}   # [interface name, neighbor router id] => label from the SRLB
         @link_oids = {}    # [area id, link key] => opaque ID of its extended link LSA
+        @prefix_oids = {}  # [area id, "p/len"] => opaque ID of an inter-area extended prefix LSA
+        @sr_labels = nil
+        @sr_found = []     # findings already announced (sr_finding)
+        @labels_pending = false
         @loop = loop
         @random = random
         @logger = logger
@@ -306,6 +311,72 @@ module OSPFv2
       # originates our Node-SID and Adj-SIDs (Area#sr_specs).
       def segment_routing = @sr
 
+      # The Adj-SID labels given out: [interface name, router id] => label.
+      attr_reader :adj_labels
+
+      # The label table of the last calculation (SrLabels), or nil without SR.
+      attr_reader :sr_labels
+
+      # Builds the label table, announces new findings (an sr_finding
+      # event each, once), and has an ABR re-originate its inter-area SIDs
+      # when they changed. After each SPF run, and on a change to an opaque
+      # LSA or an adjacency, which run no SPF.
+      def compute_labels
+        @labels_pending = false
+        old = @sr_labels&.sids
+        @sr_labels = @sr && @opaque ? SrLabels.new(self).build : nil
+        found = @sr_labels&.findings || []
+        (found - @sr_found).each { announce_sr_finding(_1) }
+        @sr_found = found
+        @areas.each_value(&:schedule_origination) if abr? && old != @sr_labels&.sids
+      end
+
+      def schedule_labels
+        return if @labels_pending || !@running
+        @labels_pending = true
+        @loop.post { compute_labels if @labels_pending }
+      end
+
+      # docs/design/sr-ospf.md, "Answers for routescope", answer 8.
+      def announce_sr_finding(f)
+        rule = Validation.rule(f[:name])
+        rfc = rule.clause[/\ARFC (\d+) section ([\d.]+)/] && "RFC #{$1} #{$2}"
+        action = %i[ignore_sid ignore_range ignore_router ignore_lsa ignore_tlv drop_lsa use_first].include?(rule.actions.fetch(@receive_policy)) ? 'ignored' : 'no_label'
+        lsa = f[:lsa] && { type: f[:lsa][:type], ls_id: f[:lsa][:ls_id], advr: f[:lsa][:advr] }
+        log(:warn, nil, "SR: #{f[:subject]}: #{f[:detail]} (#{rule.clause})", kind: :sr_finding,
+            finding: f[:name].to_s, rfc: rfc, action: action, area: f[:area], router_id: f[:lsa]&.dig(:advr) || f[:subject],
+            lsa: lsa)
+      end
+
+      # The inter-area SIDs an ABR gives +area+ (RFC 8665 section 7.2): for
+      # each type 3 of ours there, the SID of its route, from another area.
+      # NP set and E clear, unless the prefix is ours (directly attached),
+      # when our own flags go. { "p/len" => [index, flags] }
+      def inter_area_sids(area)
+        return {} unless @sr_labels && abr?
+        area.summaries.each_value.filter_map do |spec|
+          dest = spec[:dest] or next
+          s = @sr_labels.sids[dest] or next
+          r = @route_table.routes.values.find { _1.dest_s == dest }
+          next unless r && r.area && r.area != area.id
+          flags = Addr.to_i(s[:advr]) == @router_id ? s[:flags] : (s[:flags] | SrLabels::NP) & ~SrLabels::E
+          [dest, [s[:index], flags]]
+        end.to_h
+      end
+
+      # The opaque ID of an inter-area extended prefix LSA: 2 and up (1 is
+      # the Node-SID's), kept while the prefix is summarized.
+      def prefix_oid(area, dest)
+        @prefix_oids[[area.id, dest]] ||= begin
+          used = @prefix_oids.select { |(a, _), _| a == area.id }.values
+          (2..0xff_ffff).find { !used.include?(_1) }
+        end
+      end
+
+      def release_prefix_oids(area, live)
+        @prefix_oids.delete_if { |(a, d), _| a == area.id && !live.include?(d) }
+      end
+
       def segment_routing=(sr)
         @sr = sr&.dup&.freeze
         @adj_labels.clear unless @sr && @adj_labels.values.all? { in_block?(_1, @sr[:srlb]) }
@@ -375,14 +446,15 @@ module OSPFv2
         ris = area.lsdb.live.select { _1.type == 10 && (_1.ls_id >> 24) == RouterInformation::OPAQUE_TYPE }
         ris.sort_by { [_1.advr, _1.ls_id & 0xff_ffff] }.group_by(&:advr).to_h do |advr, list|
           rid = Addr.to_s(advr)
-          findings = list.flat_map { Validation.opaque(RouterInformation::OPAQUE_TYPE, _1.body, rid) }
+          found = list.flat_map { |l| Validation.opaque(RouterInformation::OPAQUE_TYPE, l.body, rid).map { [_1, l] } }
+          findings = found.map(&:first)
           bodies = list.filter_map do |l|
             RouterInformation::Body.new(l.body)
           rescue Tlv::Error
             nil
           end
           row = { router_id: rid, capabilities: bodies.first&.capabilities, algorithms: nil, srgb: [], srlb: [],
-                  findings: findings.map(&:to_hash) }
+                  findings: found.map { |f, l| f.to_hash.merge(lsa: l.instance_fields.slice(:ls_id, :advr).merge(type: l.type)) } }
           sr = bodies.find(&:algorithms)
           if sr && findings.none? { Validation.action(_1, @receive_policy) == :ignore_router }
             usable = ->(k) { sr.ranges(k).select { _1.size.positive? && _1.sid_labels == 1 }.map { |r| [r.first, r.size] } }
@@ -404,6 +476,8 @@ module OSPFv2
           body.prefixes.each do |t|
             next if out.key?(t.prefix_s) && out[t.prefix_s][:opaque_id] <= oid
             sids = t.sids.select { |s| s.flags.anybits?(ExtendedPrefix::PrefixSid::V) == s.flags.anybits?(ExtendedPrefix::PrefixSid::L) }
+            # RFC 8665 section 5: several for one MT-ID and algorithm, all ignored.
+            sids = sids.group_by { [_1.mt_id, _1.algorithm] }.values.select { _1.size == 1 }.flatten
             out[t.prefix_s] = { route_type: t.route_type, flags: t.flags, opaque_id: oid,
                                 sids: sids.map { _1.to_hash.except(:type) } }
           end
@@ -443,7 +517,7 @@ module OSPFv2
           findings = []
           list.each do |l|
             f = Validation.opaque(kind::OPAQUE_TYPE, l.body, rid)
-            findings.concat(f)
+            findings.concat(f.map { [_1, l] })
             next if f.any? { Validation.action(_1, @receive_policy) == :ignore_lsa }
             body = begin
               kind::Body.new(l.body)
@@ -452,7 +526,7 @@ module OSPFv2
             end
             yield body, items, l.ls_id & 0xff_ffff
           end
-          [rid, { items: items, findings: findings.map(&:to_hash) }]
+          [rid, { items: items, findings: findings.map { |f, l| f.to_hash.merge(lsa: l.instance_fields.slice(:ls_id, :advr).merge(type: l.type)) } }]
         end
       end
 
@@ -977,7 +1051,8 @@ module OSPFv2
           next unless summarize?(r, area)
           next if area.stub? && r.prefix_len.zero? # our default is the one there
           ls_id = summary_ls_id(r, ids) or next
-          specs[[3, ls_id, @router_id]] = { type: 3, ls_id: ls_id, body: [Addr.mask(r.prefix_len), r.cost].pack('NN') }
+          specs[[3, ls_id, @router_id]] = { type: 3, ls_id: ls_id, body: [Addr.mask(r.prefix_len), r.cost].pack('NN'),
+                                            dest: r.dest_s }
         end
         best_asbrs(table).each_value do |r|
           next unless area.external_capable? # no type 5 there, so no ASBRs to reach
@@ -1116,8 +1191,8 @@ module OSPFv2
 
       def lsdb_changed(lsa, _old, area = nil)
         return unless @running
-        # No reader of opaque LSAs runs SPF yet.
-        return if OPAQUE.include?(lsa.type)
+        # Opaque LSAs run no SPF: only the label table reads them.
+        return schedule_labels if OPAQUE.include?(lsa.type)
         # SPF never uses our own summaries and externals: no run for them,
         # but show.topology lists them.
         if lsa.advr == @router_id && [3, 4, 5, 7].include?(lsa.type)
@@ -1146,6 +1221,7 @@ module OSPFv2
       def replace_routes(table, reasons, duration, started: @loop.clock.wall)
         diff = Spf.diff(@route_table.routes, table.routes)
         @route_table = table
+        compute_labels
         n = @spf.runs
         fib = nil
         unless diff.empty?

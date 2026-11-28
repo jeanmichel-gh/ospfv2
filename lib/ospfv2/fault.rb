@@ -43,6 +43,8 @@ module OSPFv2
        ->(c) { [10, opaque_id(EXT_LINK, 1), Fault.extended_link(c) + Fault.extended_link(c, link_id: '10.255.0.8')] }],
       [:adj_sid_vl_invalid, :adj_sid_vl_invalid, 'an extended link LSA whose Adj-SID has V set and L clear',
        ->(c) { [10, opaque_id(EXT_LINK, 1), Fault.extended_link(c, flags: 0x40)] }],
+      [:prefix_sid_multiple, :prefix_sid_multiple, 'an extended prefix LSA with two Prefix-SIDs for algorithm 0',
+       ->(c) { [10, opaque_id(EXT_PREFIX, 1), Fault.extended_prefix(c, sids: 2)] }],
       [:tlv_overrun, :tlv_overrun, 'an extended prefix LSA whose Prefix-SID sub-TLV runs 4 octets past its TLV',
        ->(c) { [10, opaque_id(EXT_PREFIX, 1), Fault.extended_prefix(c, overrun: 4)] }]
     ].freeze
@@ -111,10 +113,10 @@ module OSPFv2
     # An extended prefix body (RFC 7684 section 2.1): the router ID's /32,
     # intra-area, N set, with a Prefix-SID (RFC 8665 section 5) of
     # +flags+. +overrun+ octets more in the sub-TLV's length than it has.
-    def extended_prefix(c, flags: 0, overrun: 0)
+    def extended_prefix(c, flags: 0, overrun: 0, sids: 1)
       sid = flags.anybits?(V_FLAG) && flags.anybits?(L_FLAG) ? three(c[:index]) : [c[:index]].pack('N')
       value = [flags, 0, 0, 0].pack('C4') + sid
-      sub = [2, value.bytesize + overrun].pack('nn') + value
+      sub = ([2, value.bytesize + overrun].pack('nn') + value) * sids
       tlv(1, [1, 32, 0, N_FLAG].pack('C4') + [Core::Addr.to_i(c[:router_id])].pack('N') + sub)
     end
 
