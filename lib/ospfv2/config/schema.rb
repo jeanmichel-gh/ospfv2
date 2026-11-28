@@ -209,6 +209,22 @@ module OSPFv2
               leaf 'export', NAME, help: 'Policy choosing routes to advertise as AS externals'
               # ospfd's own, as FRR's capability opaque: Junos has no statement for it.
               flag 'opaque', help: 'Opaque LSAs (RFC 5250): set the O bit in DDs, hold and flood types 9 to 11'
+              # SR-MPLS (RFC 8665). node-segment ipv4-index is Junos's; srgb,
+              # srlb and no-adjacency-sid are ospfd's own (Junos's OSPF page
+              # has none of them), as FRR's global-block and local-block.
+              container 'source-packet-routing', help: 'Segment routing over MPLS (RFC 8665); turns opaque on' do
+                container 'srgb', help: 'Segment Routing Global Block (default 16000, 8000 labels)' do
+                  leaf 'start-label', Schema.hint(T.range(16, 1_048_575), '<16..1048575>'), help: 'First label'
+                  leaf 'index-range', Schema.hint(T.range(1, 1_048_560), '<labels>'), help: 'Number of labels'
+                end
+                container 'srlb', help: 'Segment Routing Local Block, for Adj-SIDs (default 15000, 1000 labels)' do
+                  leaf 'start-label', Schema.hint(T.range(16, 1_048_575), '<16..1048575>'), help: 'First label'
+                  leaf 'index-range', Schema.hint(T.range(1, 1_048_560), '<labels>'), help: 'Number of labels'
+                end
+                container 'node-segment', help: 'The Node-SID on the router ID\'s /32, a passive interface\'s address' do
+                  leaf 'ipv4-index', Schema.hint(T.range(0, 1_048_559), '<index>'), help: 'Index in the SRGB'
+                end
+              end
               list 'area', key: AREA, help: 'OSPF area' do
                 container 'virtual-link', help: 'Virtual links to area border routers (backbone only)' do
                   list 'neighbor-id', key: IPV4, help: 'Router id of the other end' do
@@ -243,6 +259,7 @@ module OSPFv2
                   leaf 'mtu', Schema.hint(T.range(576, 65_535), '<576..65535>'), help: 'MTU used in database description packets (default: the kernel interface MTU)'
                   flag 'mtu-ignore', help: 'Do not check the neighbor MTU'
                   flag 'passive', help: 'Advertise the subnet, form no adjacency'
+                  flag 'no-adjacency-sid', help: 'Send no Adj-SID for the neighbors here (source-packet-routing)'
                   flag 'disable', help: 'Keep the configuration, do not run OSPF here'
                   instance_eval(&Schema::AUTHENTICATION)
                   # Junos: [edit protocols ospf area area-id interface

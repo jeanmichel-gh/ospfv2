@@ -40,6 +40,28 @@ class TestConfigModel < Test::Unit::TestCase
     assert_equal true, model('set protocols ospf opaque').opaque
   end
 
+  SPR = 'set protocols ospf source-packet-routing'
+
+  def test_source_packet_routing
+    assert_nil model.sr
+    assert_equal({ srgb: [16_000, 8_000], srlb: [15_000, 1_000], index: nil, no_adj_sid: [] },
+                 model("#{SPR} srgb start-label 16000").sr, 'the defaults')
+    m = model("#{SPR} srgb start-label 17000", "#{SPR} srgb index-range 4000", "#{SPR} srlb start-label 14000",
+              "#{SPR} node-segment ipv4-index 3", 'set protocols ospf area 0 interface eth1 no-adjacency-sid',
+              'set protocols ospf area 0 interface eth2')
+    assert_equal({ srgb: [17_000, 4_000], srlb: [14_000, 1_000], index: 3, no_adj_sid: ['eth1'] }, m.sr)
+  end
+
+  def test_source_packet_routing_refused
+    base = ['set routing-options router-id 1.1.1.1', 'set protocols ospf area 0 interface eth1']
+    assert_match(/srgb 15500-23499 and the srlb 15000-15999 overlap/,
+                 errors(*base, "#{SPR} srgb start-label 15500").join("\n"))
+    assert_match(/node-segment ipv4-index 8000 is past the srgb's 8000 labels/,
+                 errors(*base, "#{SPR} node-segment ipv4-index 8000").join("\n"))
+    assert_match(/srgb: 1048000 \+ 8000 labels passes the last label, 1048575/,
+                 errors(*base, "#{SPR} srgb start-label 1048000").join("\n"))
+  end
+
   def test_authentication_specs_build
     m = model('set protocols ospf area 0 interface a authentication simple-password pw',
               'set protocols ospf area 0 interface b authentication md5 1 key k1',

@@ -79,6 +79,24 @@ class TestDaemon < Test::Unit::TestCase
     refute @d.views.database.any? { _1[:type] == 10 }
   end
 
+  # source-packet-routing turns opaque on and SR on: the peer reads our
+  # SRGB, our Node-SID and our Adj-SID to it.
+  def test_source_packet_routing
+    @peer.opaque = true
+    daemon((BASE + ['set protocols ospf source-packet-routing node-segment ipv4-index 1']).join("\n"))
+    @loop.run_until(120) { peer_full? }
+    assert @d.instance.opaque?
+    ok = @loop.run_until(30) do
+      @peer.router_information(0).dig('1.1.1.1', :srgb) == [[16_000, 8_000]] &&
+        @peer.extended_prefixes(0).dig('1.1.1.1', :prefixes, '1.1.1.1/32') &&
+        @peer.extended_links(0).dig('1.1.1.1', :links)&.any?
+    end
+    assert ok
+    assert_equal [1], @peer.extended_prefixes(0)['1.1.1.1'][:prefixes]['1.1.1.1/32'][:sids].map { _1[:sid] }
+    commit!('delete protocols ospf source-packet-routing')
+    refute @d.instance.opaque?
+  end
+
   # show timers: every timer with its owner and when it fires, the
   # neighbor's among them; the clock moves, the time left goes down.
   def test_timers

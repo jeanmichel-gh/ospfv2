@@ -31,7 +31,11 @@ module OSPFv2
         @octets = f[:octets] && Integer(f[:octets])
       end
 
-      def sid_fields = { flags: @flags, mt_id: @mt_id, sid: @sid }.merge(@octets ? { octets: @octets } : {})
+      # +octets+ only when it is not what the V flag says.
+      def sid_fields
+        f = { flags: @flags, mt_id: @mt_id, sid: @sid }
+        @octets && @octets != (label? ? 3 : 4) ? f.merge(octets: @octets) : f
+      end
     end
 
     # The extended prefix opaque LSA (RFC 7684 section 2): opaque type 7.

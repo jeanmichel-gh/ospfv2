@@ -591,6 +591,61 @@ set protocols ospf area 0.0.0.0 interface eth1 no-adjacency-sid
   other Full neighbor. Whether FRR sends LAN Adj-SIDs is measured in
   the interop lab and written here.
 
+#### As built, pull request 4: configuration and origination
+
+- **The leaves, checked** (2026-11-27) against Juniper's
+  `source-packet-routing` (Protocols OSPF) page. It gives
+  `node-segment` with `ipv4-index` and `index-range` (an index range,
+  32 to 16384, default 4096), `adjacency-segment hold-time`,
+  `explicit-null` and `disable`. It has no `srgb`, no SRLB statement
+  and no per-interface `no-adjacency-sid`. Cisco has all three: IOS
+  XE's `segment-routing mpls` with `global-block`, IOS XR's
+  `segment-routing global-block` and `local-block`, and a prefix-SID
+  and Adj-SID per interface. The owner chose the draft's leaves
+  (2026-11-27): `node-segment ipv4-index` as Junos has it, `srgb`,
+  `srlb` and `no-adjacency-sid` as ospfd's own, documented so.
+- **The model** (`config/model.rb`) gives `sr: { srgb:, srlb:, index:,
+  no_adj_sid: }`, with the defaults, and refuses blocks that overlap,
+  pass label 1048575, or an index past the SRGB. The SRGB's first label
+  is 16 or more, past the reserved labels.
+- **SR turns opaque on.** The daemon sets `opaque` from `opaque` or
+  `source-packet-routing`, and `Instance#segment_routing=` from the
+  model. Off, every LSA is as before.
+- **The RI LSA** carries SR-Algorithm 0, the SRGB and the SRLB.
+- **The Node-SID**: an extended prefix LSA, 7.0.0.1, route type 1, N
+  set, NP and E clear, in the area of the passive interface that holds
+  the router ID's /32, as FRR does. Without such an interface, none.
+  The router ID's /32 is checked when the area originates, since the
+  configuration does not know addresses.
+- **Adj-SIDs follow the router-LSA's links**, so each extended link
+  LSA matches a link there (RFC 7684 section 3.1): on point-to-point,
+  one per full neighbor; on a transit link, an Adj-SID to the DR and a
+  LAN Adj-SID for each other full neighbor. 7.4.1 says 2-Way or above;
+  a point-to-point neighbor has no router-LSA link below Full, so Full
+  it is. A label from the SRLB is kept while the adjacency lives and
+  let go after; the lowest free one is taken. V and L set, B and P
+  clear: no backup Adj-SID, as FRR sends, until TI-LFA.
+- **Opaque IDs.** One extended link LSA per link, its opaque ID the
+  lowest free in the area, kept while the link exists.
+  `opaque_lsas=` refuses opaque types 7 and 8: they are ospfd's own.
+- **Inter-area SIDs move to pull request 5.** An ABR's extended prefix
+  LSA for a type 3 needs the SID of the route's advertising router,
+  which the calculation finds. External SIDs stay reading-only, as
+  said.
+- **The tests** (`test/unit/core/sr_origination_test.rb`): the RI's
+  blocks, the Node-SID, an Adj-SID per point-to-point neighbor, the
+  Adj-SID withdrawn with the adjacency and its label taken again, no
+  Node-SID without a passive /32, `no-adjacency-sid`, a LAN of three
+  (the DR's LAN Adj-SIDs; the BDR's Adj-SID to the DR and LAN Adj-SID
+  to the DROther), SR off. The model's defaults and refusals, and the
+  daemon from the statement to a peer's reading.
+- **Interop with FRR** (in CI, FRR 10.5.1): FRR's `show ip ospf
+  database segment-routing json` lists ospfd with its SRGB, SRLB,
+  Node-SID and its Adj-SID, 15000. FRR also lists, for the same link, a
+  second entry with `sid` 0 and next hop 0.0.0.0: an empty slot for the
+  backup Adj-SID FRR itself sends and ospfd does not. Measured on the
+  first CI run, whose test expected none.
+
 #### Calculation
 
 A step after each SPF run, as isis's `Spf::Labels`. It does not change

@@ -84,6 +84,9 @@ module OSPFv2
         @opaque = false
         @opaque_specs = {} # [area id or nil, key] => { type:, ls_id:, body:, options: }
         @sr_capabilities = nil
+        @sr = nil
+        @adj_labels = {}   # [interface name, neighbor router id] => label from the SRLB
+        @link_oids = {}    # [area id, link key] => opaque ID of its extended link LSA
         @loop = loop
         @random = random
         @logger = logger
@@ -255,6 +258,7 @@ module OSPFv2
         unless on
           self.opaque_lsas = []
           @areas.each_value { |a| flush_own(a, [10, RI_ID, @router_id]) }
+          @areas.each_value(&:flush_sr)
         end
         @opaque = on
         @areas.each_value(&:schedule_origination) if on && @running
@@ -282,6 +286,7 @@ module OSPFv2
           raise ArgumentError, "opaque ID #{oid}: 0 to 16777215" unless oid.between?(0, 0xff_ffff)
           ls_id = (ot << 24) | oid
           raise ArgumentError, 'the Router Information LSA 4.0.0.0 is ospfd\'s own' if type == 10 && ls_id == RI_ID
+          raise ArgumentError, "opaque type #{ot}: ospfd's own with SR" if [7, 8].include?(ot)
           aid = type == 10 ? Addr.to_i(o.fetch(:area)) : nil
           [[aid, [type, ls_id, @router_id]], { type: type, ls_id: ls_id, body: o.fetch(:body).b }]
         end
@@ -293,6 +298,52 @@ module OSPFv2
           flush_own(a, key) if a
         end
         want.each_key { |aid, _| opaque_area(aid)&.schedule_origination }
+      end
+
+      # SR-MPLS (RFC 8665), or nil for off:
+      #   { srgb: [first, size], srlb: [first, size], index: 1 or nil, no_adj_sid: [interface names] }
+      # It needs opaque on. It sets our RI LSA's SR TLVs; each area then
+      # originates our Node-SID and Adj-SIDs (Area#sr_specs).
+      def segment_routing = @sr
+
+      def segment_routing=(sr)
+        @sr = sr&.dup&.freeze
+        @adj_labels.clear unless @sr && @adj_labels.values.all? { in_block?(_1, @sr[:srlb]) }
+        self.sr_capabilities = sr && { algorithms: [0], srgb: [sr[:srgb]], srlb: [sr[:srlb]] }
+      end
+
+      def in_block?(label, (first, size)) = label >= first && label < first + size
+
+      # The Adj-SID label for +nbr+ on +iface+, from the SRLB, kept while
+      # the adjacency lives (RFC 8665 section 6.1, P clear). nil when the
+      # SRLB is used up.
+      def adj_label(iface, nbr)
+        key = [iface.name, nbr.router_id]
+        @adj_labels[key] ||= begin
+          first, size = @sr[:srlb]
+          used = @adj_labels.values
+          (first...(first + size)).find { !used.include?(_1) }
+        end
+      end
+
+      # Lets go of the Adj-SID labels whose adjacencies are gone: +live+ is
+      # the [interface name, router id] keys still in use in +area+.
+      def release_adj_labels(area, live)
+        names = area.interfaces.map(&:name)
+        @adj_labels.delete_if { |k, _| names.include?(k[0]) && !live.include?(k) }
+      end
+
+      # The opaque ID of +area+'s extended link LSA for +key+, kept while
+      # the link exists: the lowest one free. +live+ lets go of the rest.
+      def link_oid(area, key)
+        @link_oids[[area.id, key]] ||= begin
+          used = @link_oids.select { |(a, _), _| a == area.id }.values
+          (1..0xff_ffff).find { !used.include?(_1) }
+        end
+      end
+
+      def release_link_oids(area, live)
+        @link_oids.delete_if { |(a, k), _| a == area.id && !live.include?(k) }
       end
 
       # SR's TLVs in our RI LSA, or nil for none (step 4 sets them from
@@ -477,6 +528,7 @@ module OSPFv2
       def neighbor_changed(nbr, old, new)
         nbr.iface.forget(nbr) if new == :down
         if old == :full || new == :full
+          # Our Adj-SIDs follow the router-LSA's links (Area#sr_specs).
           nbr.iface.area.schedule_origination
           # The V bit in the transit area's router-LSA follows the link.
           @areas[nbr.iface.transit_area_id]&.schedule_origination if nbr.iface.virtual?

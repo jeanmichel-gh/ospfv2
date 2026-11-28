@@ -69,7 +69,7 @@ router.area_options = (config[:areas] || {}).to_h do |id, o|
   end
   [OSPFv2::Core::Addr.to_i(id.to_s), opts]
 end
-config.fetch(:interfaces).each do |i|
+(config[:interfaces] + (config[:passive] ? [{ name: config[:passive][0], address: config[:passive][1], passive: true }] : [])).each do |i|
   ip = i.fetch(:address).split('/').first
   opts = { name: i.fetch(:name), address: i.fetch(:address), area: i[:area] || 0 }
   opts[:cost] = i[:cost] if i[:cost]
@@ -88,6 +88,10 @@ end
 end
 loop_.call { router.opaque = true } if config[:opaque]
 loop_.call { router.sr_capabilities = config[:sr] } if config[:sr]
+# "segment_routing": {"srgb": [16000, 8000], "srlb": [15000, 1000], "index": 1}
+# turns SR on, as source-packet-routing does; "passive": ["lo", "1.1.1.1/32"]
+# adds the loopback that holds the Node-SID.
+loop_.call { router.segment_routing = config[:segment_routing] } if config[:segment_routing]
 loop_.call { router.start }
 if config[:opaque_lsas]
   list = config[:opaque_lsas].map { |o| o.merge(body: [o.fetch(:body)].pack('H*')) }

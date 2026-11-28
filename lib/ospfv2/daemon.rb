@@ -306,7 +306,9 @@ module OSPFv2
         @fib&.attach(@instance)
       end
       apply_kernel(model.kernel)
-      @instance.opaque = model.opaque
+      # SR needs opaque (RFC 8665 rides in opaque LSAs).
+      @instance.opaque = model.opaque || !model.sr.nil?
+      @instance.segment_routing = model.sr
       apply_areas(model.areas)
       apply_bfd(model.interfaces)
       sync_interfaces

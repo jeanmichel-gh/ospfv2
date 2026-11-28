@@ -35,7 +35,11 @@ module OSPFv2
         197 => 'openfabric (FRR)', 198 => 'srte (FRR)'
       }.freeze
 
-      attr_reader :router_id, :interfaces, :warnings, :kernel, :export, :areas, :virtual_links, :opaque
+      attr_reader :router_id, :interfaces, :warnings, :kernel, :export, :areas, :virtual_links, :opaque, :sr
+
+      SRGB = [16_000, 8_000].freeze # FRR's and isisd's default
+      SRLB = [15_000, 1_000].freeze
+      MAX_LABEL = 1_048_575
 
       def initialize(tree)
         @errors = []
@@ -59,6 +63,7 @@ module OSPFv2
         end
         @export = export_policy(data)
         @opaque = data.dig('protocols', 'ospf', 'opaque') == true
+        @sr = segment_routing(data.dig('protocols', 'ospf', 'source-packet-routing'), areas)
         @warnings << 'no OSPF interfaces configured' if @interfaces.empty? && @errors.empty?
         raise Error, @errors.join("\n") unless @errors.empty?
         freeze
@@ -171,6 +176,31 @@ module OSPFv2
         end
         @warnings << "policy-statement #{name} accepts nothing" if p.terms.none? { |t| t.action == :accept }
         p
+      end
+
+      # { srgb: [first, size], srlb: [first, size], index: or nil,
+      #   no_adj_sid: [interface names] }, or nil without the statement.
+      # The blocks must fit in the label space, past the reserved labels 0
+      # to 15, and not overlap; the index must be inside the SRGB.
+      def segment_routing(c, areas)
+        return nil if c.nil?
+        block = lambda do |word, default|
+          b = c[word] || {}
+          r = [b['start-label'] || default[0], b['index-range'] || default[1]]
+          @errors << "source-packet-routing #{word}: #{r[0]} + #{r[1]} labels passes the last label, #{MAX_LABEL}" if r.sum - 1 > MAX_LABEL
+          r
+        end
+        srgb = block.('srgb', SRGB)
+        srlb = block.('srlb', SRLB)
+        if srgb[0] < srlb.sum && srlb[0] < srgb.sum
+          @errors << "source-packet-routing: the srgb #{srgb[0]}-#{srgb.sum - 1} and the srlb #{srlb[0]}-#{srlb.sum - 1} overlap"
+        end
+        index = c.dig('node-segment', 'ipv4-index')
+        if index && index >= srgb[1]
+          @errors << "source-packet-routing node-segment ipv4-index #{index} is past the srgb's #{srgb[1]} labels"
+        end
+        no_adj = areas.flat_map { |_, a| (a['interface'] || {}).select { |_, i| i['no-adjacency-sid'] }.keys }
+        { srgb: srgb, srlb: srlb, index: index, no_adj_sid: no_adj }.freeze
       end
 
       def kernel_options(k)
