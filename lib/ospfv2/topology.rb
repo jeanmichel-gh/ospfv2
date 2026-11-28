@@ -22,6 +22,19 @@ module OSPFv2
   #     end
   #     link 'edge', 'r3c3', metric: 5
   #   end
+  #
+  # SR-MPLS (RFC 8665; docs/design/sr-ospf.md, step 5), as isis4r-sim's:
+  #
+  #   segment_routing:                       SR on, for every simulated
+  #     srgb: { start: 16000, size: 8000 }   router, with these blocks
+  #     srlb: { start: 15000, size: 1000 }   by default
+  #   grid: { columns: 3, rows: 3, sids: 1 } r1c1 index 1, then the next
+  #                                          router the next, row by row
+  #   routers:
+  #     - { name: edge, id: 10.0.0.1, sid: 100, srgb: { start: 20000, size: 8000 } }
+  #
+  # A router with a sid carries it on its first /32 network, else on its
+  # router ID's /32, added as a stub as a loopback is.
   class Topology
     class Error < StandardError; end
 
@@ -29,7 +42,7 @@ module OSPFv2
     External = Struct.new(:prefix, :metric, :type, :tag, :forwarding_address, keyword_init: true)
 
     Router = Struct.new(:name, :id, :abr, :asbr, :networks, :summaries, :asbr_summaries,
-                        :externals, :grid, keyword_init: true) do
+                        :externals, :grid, :sid, :srgb, keyword_init: true) do
       def id_ip
         IP.create(id).to_s
       end
@@ -43,9 +56,18 @@ module OSPFv2
         h[:asbr_summaries] = asbr_summaries.map { |i| IP.create(i).to_s } unless asbr_summaries.empty?
         h[:externals] = externals.map { |n| n.to_h.compact } unless externals.empty?
         h[:grid] = grid if grid
+        h[:sid] = sid if sid
+        h[:srgb] = { start: srgb[0], size: srgb[1] } if srgb
         h
       end
+
+      # The prefix its Node-SID is on: its first /32, else its router ID's.
+      def sid_prefix = networks.find { _1.prefix.end_with?('/32') }&.prefix || "#{id_ip}/32"
     end
+
+    # SR's defaults, as FRR's and isisd's.
+    SRGB = [16_000, 8_000].freeze
+    SRLB = [15_000, 1_000].freeze
 
     Link = Struct.new(:from, :to, :metric, :state, keyword_init: true) do
       def up?
@@ -71,6 +93,9 @@ module OSPFv2
     SIM = 'sim'
 
     attr_reader :settings, :routers, :links, :lsdb
+
+    # { srgb: [first, size], srlb: [first, size] }, or nil: SR off.
+    attr_reader :segment_routing
 
     def self.load(path)
       data = YAML.safe_load(File.read(path), symbolize_names: true) || {}
@@ -143,6 +168,7 @@ module OSPFv2
           network_type: s.network_type.to_s, metric: s.metric
         }.compact,
         lsdb: @lsdb,
+        segment_routing: @segment_routing && @segment_routing.transform_values { |(f, n)| { start: f, size: n } },
         routers: @routers.values.map(&:to_h),
         links: @links.map { |l| { from: l.from, to: l.to, metric: l.metric, state: (l.up? ? nil : 'down') }.compact }
       }
@@ -177,7 +203,7 @@ module OSPFv2
     end
 
     def add_router(name: nil, id:, abr: false, asbr: false, networks: [], loopback: nil, loopbacks: [],
-                   summaries: [], asbr_summaries: [], externals: [], grid: nil, where: 'router')
+                   summaries: [], asbr_summaries: [], externals: [], grid: nil, sid: nil, srgb: nil, where: 'router')
       rid = id_of(id, "#{where}.id")
       name = (name || IP.create(rid).to_s).to_s
       raise Error, "#{where}: name '#{SIM}' is reserved for the simulated router" if name == SIM
@@ -196,9 +222,34 @@ module OSPFv2
       exts = Array(externals).each_with_index.flat_map { |e, i| expand(e, "#{where}.externals[#{i}]", external: true) }
       asbrs = Array(asbr_summaries).each_with_index.map { |a, i| id_of(a, "#{where}.asbr_summaries[#{i}]") }
 
+      sid = index(sid, "#{where}.sid") unless sid.nil?
+      srgb = block(srgb, "#{where}.srgb") unless srgb.nil?
       @routers[name] = Router.new(name: name, id: rid, abr: !!abr || !sums.empty?, asbr: !!asbr || !exts.empty?,
                                   networks: nets, summaries: sums, asbr_summaries: asbrs, externals: exts,
-                                  grid: grid)
+                                  grid: grid, sid: sid, srgb: srgb)
+    end
+
+    # Turns SR on: +srgb+ and +srlb+ as { start:, size: } (or [start,
+    # size]), FRR's and isisd's by default. They must not overlap, nor pass
+    # label 1048575 or start below 16 (the reserved labels).
+    def configure_segment_routing(opts = {})
+      opts = (opts || {}).transform_keys(&:to_sym)
+      unknown = opts.keys - %i[srgb srlb]
+      raise Error, "segment_routing: unknown key(s) #{unknown.join(', ')}" unless unknown.empty?
+      srgb = opts.key?(:srgb) ? block(opts[:srgb], 'segment_routing.srgb') : SRGB.dup
+      srlb = opts.key?(:srlb) ? block(opts[:srlb], 'segment_routing.srlb') : SRLB.dup
+      if srgb[0] < srlb.sum && srlb[0] < srgb.sum
+        raise Error, "segment_routing: the srgb #{srgb[0]}-#{srgb.sum - 1} and the srlb #{srlb[0]}-#{srlb.sum - 1} overlap"
+      end
+      @segment_routing = { srgb: srgb, srlb: srlb }
+      self
+    end
+
+    # A grid's sids: r1c1 takes +first+, and each next router the next,
+    # row by row.
+    def number_grid(first, columns, rows, where)
+      n = index(first, "#{where}.sids")
+      1.upto(rows) { |r| 1.upto(columns) { |c| @routers["r#{r}c#{c}"].sid = n + ((r - 1) * columns) + (c - 1) } }
     end
 
     def add_link(from, to, metric: nil, state: nil, where: 'link')
@@ -217,7 +268,7 @@ module OSPFv2
 
     # Adds a columns x rows grid named r<row>c<col>. Router ids are
     # base + (row << 16) + col, so r2c3 is 0.2.0.3 with the default base.
-    def add_grid(columns:, rows:, base_router_id: 0, metric: nil, where: 'grid')
+    def add_grid(columns:, rows:, base_router_id: 0, metric: nil, sids: nil, where: 'grid')
       cols = positive(columns, "#{where}.columns")
       rws = positive(rows, "#{where}.rows")
       raise Error, "#{where}: at most 255 rows and 65535 columns" if rws > 255 || cols > 0xffff
@@ -233,6 +284,7 @@ module OSPFv2
           add_link("r#{r - 1}c#{c}", "r#{r}c#{c}", metric: metric, where: where) if r > 1
         end
       end
+      number_grid(sids, cols, rws, where) unless sids.nil?
       @attach = 'r1c1' if @attach == :auto
       self
     end
@@ -259,6 +311,9 @@ module OSPFv2
 
     def validate!
       attach!
+      if (with = @routers.values.select(&:sid)).any? && @segment_routing.nil?
+        raise Error, "#{with.first.name}.sid: needs a segment_routing section"
+      end
       self
     end
 
@@ -266,14 +321,15 @@ module OSPFv2
 
     def load_hash(h, source)
       h = h.transform_keys(&:to_sym)
-      unknown = h.keys - %i[simulator lsdb grid routers links]
+      unknown = h.keys - %i[simulator lsdb grid routers links segment_routing]
       raise Error, "#{source}: unknown section(s) #{unknown.join(', ')}" unless unknown.empty?
       configure(h[:simulator] || {})
       configure_lsdb(h[:lsdb] || {})
+      configure_segment_routing(h[:segment_routing]) if h.key?(:segment_routing)
       if (g = h[:grid])
         g = g.transform_keys(&:to_sym)
         attach = g.delete(:attach_to)
-        unknown = g.keys - %i[columns rows base_router_id metric]
+        unknown = g.keys - %i[columns rows base_router_id metric sids]
         raise Error, "grid: unknown key(s) #{unknown.join(', ')}" unless unknown.empty?
         add_grid(**g)
         @attach = attach.to_s == 'none' ? :none : attach.to_s if attach
@@ -281,7 +337,7 @@ module OSPFv2
       Array(h[:routers]).each_with_index do |r, i|
         raise Error, "routers[#{i}]: expected a mapping" unless r.is_a?(Hash)
         r = r.transform_keys(&:to_sym)
-        allowed = %i[name id abr asbr networks loopback loopbacks summaries asbr_summaries externals grid]
+        allowed = %i[name id abr asbr networks loopback loopbacks summaries asbr_summaries externals grid sid srgb]
         unknown = r.keys - allowed
         raise Error, "routers[#{i}]: unknown key(s) #{unknown.join(', ')}" unless unknown.empty?
         raise Error, "routers[#{i}]: id is required" unless r[:id]
@@ -309,6 +365,23 @@ module OSPFv2
       validate!
     rescue ArgumentError => e
       raise Error, "#{source}: #{e.message}"
+    end
+
+    # A SID index: 0 or more.
+    def index(v, where)
+      n = Integer(v, exception: false)
+      raise Error, "#{where}: expected an index, 0 or more, got #{v.inspect}" unless n && n >= 0
+      n
+    end
+
+    # A block of labels as [first, size], from { start:, size: } or [start, size].
+    def block(v, where)
+      first, size = v.is_a?(Hash) ? v.transform_keys(&:to_sym).values_at(:start, :size) : Array(v)
+      first = Integer(first, exception: false)
+      size = Integer(size, exception: false)
+      raise Error, "#{where}: expected { start:, size: }, got #{v.inspect}" unless first && size && size.positive?
+      raise Error, "#{where}: labels #{first}-#{first + size - 1} must be from 16 to 1048575" if first < 16 || first + size - 1 > 1_048_575
+      [first, size]
     end
 
     def id_of(v, where = 'id')
@@ -392,6 +465,7 @@ module OSPFv2
       def lsdb(opts = {}, **kw) = @t.configure_lsdb(opts.merge(kw))
       def grid(opts = {}, **kw) = @t.add_grid(**opts.merge(kw).transform_keys(&:to_sym))
       def link(from, to, **opts) = @t.add_link(from, to, **opts)
+      def segment_routing(opts = {}, **kw) = @t.configure_segment_routing(opts.merge(kw))
 
       def router(name = nil, id:, **opts, &block)
         if block

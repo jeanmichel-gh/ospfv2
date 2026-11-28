@@ -18,6 +18,8 @@ class OpaqueType
     2  => :sycamore_optical_topology_description,
     3  => :grace_lsa,
     4  => :router_information,
+    7  => :extended_prefix,     # RFC 7684 section 2
+    8  => :extended_link,       # RFC 7684 section 3
   }
   
   @opaque_type_sym_to_i = @opaque_type_sym.invert
@@ -27,13 +29,11 @@ class OpaqueType
       @opaque_type_sym_to_i.key
     end
     
+    # An opaque type with no name gives its number: the simulator keeps
+    # opaque LSAs of any type (OpaqueLsa).
     def to_sym(arg)
       return arg unless arg.is_a?(Integer)
-      if @opaque_type_sym.has_key?(arg)
-        @opaque_type_sym[arg]
-      else
-        raise
-      end
+      @opaque_type_sym.fetch(arg, arg)
     end
     
     def to_i(arg)

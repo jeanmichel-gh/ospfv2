@@ -414,9 +414,10 @@ module OSPFv2
       if is_opaque?
         @opaque_type = OpaqueType.new(ls_id>>24)
         @opaque_id = OpaqueId.new(ls_id & 0xffffff)
-      else
-        @ls_id = LsId.new ls_id
       end
+      # The whole link state ID, opaque or not: a DD's header of an opaque
+      # LSA is keyed and requested by it (RFC 5250 section 3).
+      @ls_id = LsId.new ls_id
       lsa
     end
     

@@ -77,6 +77,10 @@ module OSPFv2
 
     attr_writer :hello_int, :dead_int
 
+    # Options its DDs set beyond its Hellos': the O bit, 0x40, when the
+    # simulation runs SR (RFC 5250 section 3.1: in DDs, not in Hellos).
+    attr_accessor :dd_options_extra
+
     def synchronize(&block)
       @lock.synchronize(&block)
     end
