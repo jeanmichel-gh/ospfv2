@@ -183,6 +183,31 @@ jobs:
       - run: test/lab/pull.sh quay.io/frrouting/frr:10.2.1
       - run: test/lab/bfd_test.sh
 
+  # SR-MPLS: routescope/labs/ospf-sr-frr, ospfd between two FRR routers,
+  # and ospf-sr, four ospfd routers (test/lab/sr_test.sh, the step 4 gate
+  # of docs/design/sr-ospf.md). The runner's kernel needs MPLS loaded.
+  sr:
+    if: github.event_name != 'pull_request' || !github.event.pull_request.draft
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      # bfd4r is a path dependency (../bfd4r in the Gemfile, a build
+      # context for the image), so it goes beside this repository.
+      - uses: actions/checkout@v4
+        with:
+          repository: jeanmichel-gh/bfd4r
+          path: bfd4r
+          persist-credentials: false
+      - run: mv bfd4r ../bfd4r
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.3'
+      - run: sudo modprobe mpls_router && sudo modprobe mpls_iptunnel && test -e /proc/sys/net/mpls/platform_labels
+      - run: bash -c "$(curl -sL https://get.containerlab.dev)"
+      - run: test/lab/pull.sh quay.io/frrouting/frr:10.2.1
+      - run: test/lab/sr_test.sh
+
   # The BGP labs: three iBGP speakers in one AS (FRR, FRR, BIRD), then an
   # OSPF domain redistributed into BGP and carried into that AS.
   bgp:

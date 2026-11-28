@@ -1,0 +1,69 @@
+# ospfd forwarding on SR-MPLS labels (RFC 8665) between two FRR routers,
+# the interop check:
+#
+#   f1 ---- o1 ---- o2 ---- f2      OSPF area 0, point-to-point
+#   FRR     ospfd   ospfd   FRR
+#   16000   17000   18000   16000   SRGB start
+#   idx 1   idx 2   idx 3   idx 4   Node-SID on 10.255.0.N/32
+#       10.0.12.0/30    10.0.23.0/30    10.0.34.0/30
+#
+# A ping from f1's loopback to f2's goes f1 -> o1 on 17004, o1 swaps it
+# to 18004 toward o2, and o2 pops it before f2 (PHP). The way back: f2
+# pushes 18001, o2 swaps it to 17001, o1 pops it before f1.
+#
+# Label routes need the mpls_router and mpls_iptunnel modules on the host
+# (the lab VMs load them at boot). The ospfd nodes size their label table
+# and turn on forwarding before ospfd starts; FRR's exec does the same.
+#
+# Images: ospfv2:latest, built in ~/ospfv2 with bfd4r beside it, and FRR
+# 10.2.1, the version ospfv2's labs and CI pin:
+#   docker build -t ospfv2 --build-context bfd4r=../bfd4r .
+#   docker pull quay.io/frrouting/frr:10.2.1
+#   sudo containerlab deploy -t ospf-sr-frr.clab.yml
+# test/lab/sr_test.sh runs it and is its gate.
+name: ospf-sr-frr
+
+topology:
+  defaults:
+    labels: { routescope.protocols: ospf }
+  nodes:
+    o1:
+      kind: linux
+      image: ospfv2:latest
+      binds: [o1:/etc/ospfv2]
+      entrypoint: sh
+      cmd: >-
+        -c "until ip link show eth2 >/dev/null 2>&1; do sleep 0.2; done;
+        ip addr add 10.0.12.2/30 dev eth1; ip addr add 10.0.23.1/30 dev eth2; ip addr add 10.255.0.2/32 dev lo;
+        ip route del default dev eth0 2>/dev/null;
+        echo 1 > /proc/sys/net/ipv4/ip_forward; echo 100000 > /proc/sys/net/mpls/platform_labels;
+        exec with-bfdd4r ospfd"
+    o2:
+      kind: linux
+      image: ospfv2:latest
+      binds: [o2:/etc/ospfv2]
+      entrypoint: sh
+      cmd: >-
+        -c "until ip link show eth2 >/dev/null 2>&1; do sleep 0.2; done;
+        ip addr add 10.0.23.2/30 dev eth1; ip addr add 10.0.34.1/30 dev eth2; ip addr add 10.255.0.3/32 dev lo;
+        ip route del default dev eth0 2>/dev/null;
+        echo 1 > /proc/sys/net/ipv4/ip_forward; echo 100000 > /proc/sys/net/mpls/platform_labels;
+        exec with-bfdd4r ospfd"
+    f1:
+      kind: linux
+      image: quay.io/frrouting/frr:10.2.1
+      binds: [f1:/etc/frr]
+      exec:
+        - sh -c "ip route del default dev eth0 2>/dev/null || true"
+        - sysctl -qw net.mpls.platform_labels=100000 net.mpls.conf.eth1.input=1
+    f2:
+      kind: linux
+      image: quay.io/frrouting/frr:10.2.1
+      binds: [f2:/etc/frr]
+      exec:
+        - sh -c "ip route del default dev eth0 2>/dev/null || true"
+        - sysctl -qw net.mpls.platform_labels=100000 net.mpls.conf.eth1.input=1
+  links:
+    - endpoints: ["f1:eth1", "o1:eth1"]
+    - endpoints: ["o1:eth2", "o2:eth1"]
+    - endpoints: ["o2:eth2", "f2:eth1"]

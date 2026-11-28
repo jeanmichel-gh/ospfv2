@@ -188,7 +188,7 @@ module OSPFv2
                   ospf_bgp: 'ospf-bgp', isis_bgp: 'isis-bgp' }.freeze
     # Every lab in routescope/labs. lab new copies those above only: it
     # stays one release, and labs newer than it come by routescope-labs.
-    LABS = (LAB_NAMES.values + %w[ospf-bfd]).freeze
+    LABS = (LAB_NAMES.values + %w[ospf-bfd ospf-sr ospf-sr-frr]).freeze
     LAB_TEMPLATE = File.join(LABS_DIR, 'ospf-lab')
     CLAB_TEMPLATE = File.join(LABS_DIR, 'ospf-ring')
     SRL_TEMPLATE = File.join(LABS_DIR, 'ospf-srl')

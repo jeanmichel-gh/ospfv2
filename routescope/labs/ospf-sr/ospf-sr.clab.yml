@@ -1,0 +1,63 @@
+# ospfd forwarding on SR-MPLS labels (RFC 8665), four in a line:
+#
+#   o1 ---- o2 ---- o3 ---- o4      OSPF area 0, point-to-point
+#   16000   17000   18000   19000   SRGB start
+#   idx 1   idx 2   idx 3   idx 4   Node-SID on 10.255.0.N/32
+#       10.0.12.0/30    10.0.23.0/30    10.0.34.0/30
+#
+# The SRGBs differ, so a label taken from the wrong block shows. A ping
+# from o1's loopback to o4's goes on o1 with 17004 to o2, o2 swaps it to
+# 18004 toward o3, and o3 pops it before o4 (PHP).
+#
+# Label routes need the mpls_router and mpls_iptunnel modules on the host
+# (the lab VMs load them at boot). Each node sizes its label table and
+# turns on forwarding before ospfd starts, since ospfd checks the table
+# when it applies its configuration; ospfd turns on MPLS input itself.
+#
+# Image: ospfv2:latest, built in ~/ospfv2 with bfd4r beside it:
+#   docker build -t ospfv2 --build-context bfd4r=../bfd4r .
+#   sudo containerlab deploy -t ospf-sr.clab.yml
+# test/lab/sr_test.sh runs it.
+name: ospf-sr
+
+topology:
+  defaults:
+    labels: { routescope.protocols: ospf }
+    kind: linux
+    image: ospfv2:latest
+    entrypoint: sh
+  nodes:
+    o1:
+      binds: [o1:/etc/ospfv2]
+      cmd: >-
+        -c "until ip link show eth1 >/dev/null 2>&1; do sleep 0.2; done;
+        ip addr add 10.0.12.1/30 dev eth1; ip addr add 10.255.0.1/32 dev lo; ip route del default dev eth0 2>/dev/null;
+        echo 1 > /proc/sys/net/ipv4/ip_forward; echo 100000 > /proc/sys/net/mpls/platform_labels;
+        exec with-bfdd4r ospfd"
+    o2:
+      binds: [o2:/etc/ospfv2]
+      cmd: >-
+        -c "until ip link show eth2 >/dev/null 2>&1; do sleep 0.2; done;
+        ip addr add 10.0.12.2/30 dev eth1; ip addr add 10.0.23.1/30 dev eth2; ip addr add 10.255.0.2/32 dev lo;
+        ip route del default dev eth0 2>/dev/null;
+        echo 1 > /proc/sys/net/ipv4/ip_forward; echo 100000 > /proc/sys/net/mpls/platform_labels;
+        exec with-bfdd4r ospfd"
+    o3:
+      binds: [o3:/etc/ospfv2]
+      cmd: >-
+        -c "until ip link show eth2 >/dev/null 2>&1; do sleep 0.2; done;
+        ip addr add 10.0.23.2/30 dev eth1; ip addr add 10.0.34.1/30 dev eth2; ip addr add 10.255.0.3/32 dev lo;
+        ip route del default dev eth0 2>/dev/null;
+        echo 1 > /proc/sys/net/ipv4/ip_forward; echo 100000 > /proc/sys/net/mpls/platform_labels;
+        exec with-bfdd4r ospfd"
+    o4:
+      binds: [o4:/etc/ospfv2]
+      cmd: >-
+        -c "until ip link show eth1 >/dev/null 2>&1; do sleep 0.2; done;
+        ip addr add 10.0.34.2/30 dev eth1; ip addr add 10.255.0.4/32 dev lo; ip route del default dev eth0 2>/dev/null;
+        echo 1 > /proc/sys/net/ipv4/ip_forward; echo 100000 > /proc/sys/net/mpls/platform_labels;
+        exec with-bfdd4r ospfd"
+  links:
+    - endpoints: ["o1:eth1", "o2:eth1"]
+    - endpoints: ["o2:eth2", "o3:eth1"]
+    - endpoints: ["o3:eth2", "o4:eth1"]
