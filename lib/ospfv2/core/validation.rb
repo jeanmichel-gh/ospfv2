@@ -31,7 +31,9 @@ module OSPFv2
     POLICIES = %i[rfc strict lenient].freeze
     # :rfc2328 rules are the receive path's checks on packets this spec
     # touches; :opaque and :sr rules each have an entry in OSPFv2::Fault.
-    GROUPS = %i[rfc2328 opaque sr].freeze
+    # :labels rules are found by the label calculation (Core::SrLabels),
+    # across LSAs, so no one LSA of the catalog makes them.
+    GROUPS = %i[rfc2328 opaque sr labels].freeze
 
     Rule = Struct.new(:name, :group, :clause, :description, :actions, keyword_init: true)
 
@@ -141,6 +143,25 @@ module OSPFv2
                        'Advertisement received with an invalid setting for V- and L-Flags MUST be ignored"',
                description: 'an Adj-SID or LAN Adj-SID with V set and L clear, or L set and V clear',
                actions: always(:ignore_sid)),
+      Rule.new(name: :prefix_sid_multiple, group: :sr,
+               clause: 'RFC 8665 section 5: "If an OSPF router advertises multiple Prefix-SIDs for the same prefix, ' \
+                       'topology, and algorithm, all of them MUST be ignored"',
+               description: 'an Extended Prefix TLV with two Prefix-SIDs for one MT-ID and algorithm',
+               actions: always(:ignore_sid)),
+
+      # ---- The label calculation (Core::SrLabels)
+      Rule.new(name: :prefix_sid_algorithm, group: :labels,
+               clause: 'RFC 8665 section 5: a Prefix-SID "with an algorithm value that the remote node has not ' \
+                       'advertised in the SR-Algorithm TLV (Section 3.1) MUST" be ignored',
+               description: 'a Prefix-SID for an algorithm its router does not advertise',
+               actions: always(:ignore_sid)),
+      # Open question 2: drop both, as isisd does, or RFC 8660 2.5.1's
+      # tie-breaking. Both are dropped until the owner decides.
+      Rule.new(name: :prefix_sid_duplicate, group: :labels,
+               clause: 'RFC 8660 section 2.5: "An implementation MUST NOT allow the MCCs belonging to the same router ' \
+                       'to assign the same incoming label to more than one SR FEC"',
+               description: 'one index on two prefixes',
+               actions: always(:drop_both)),
       # The rest of the LSA cannot be read, so no policy uses it.
       Rule.new(name: :tlv_overrun, group: :sr,
                clause: 'RFC 8665 section 9: "if the length is invalid, the LSA in which it is advertised is ' \
@@ -184,7 +205,8 @@ module OSPFv2
       when OPAQUE_RI then router_information(body, subject)
       when OPAQUE_EXT_PREFIX
         found = extended(body, subject, 1, 8) { |sub| prefix_sid(sub, subject) }
-        found + twice(body, subject, :prefix_tlv_twice) { |v| v.byteslice(1, 1) + v.byteslice(4, 4).to_s }
+        found + twice(body, subject, :prefix_tlv_twice) { |v| v.byteslice(1, 1) + v.byteslice(4, 4).to_s } +
+          multiple_sids(body, subject)
       when OPAQUE_EXT_LINK
         extended(body, subject, 1, 12) { |sub| adj_sid(sub, subject) } +
           twice(body, subject, :link_tlv_twice) { |_| :link }
@@ -272,6 +294,24 @@ module OSPFv2
       return [] if v == l
       what = type == 2 ? 'Adj-SID' : 'LAN Adj-SID'
       [finding(:adj_sid_vl_invalid, subject, "#{what} flags 0x#{flags.to_s(16).rjust(2, '0')}: #{v ? 'V' : 'L'} set, #{v ? 'L' : 'V'} clear")]
+    end
+
+    # Two Prefix-SIDs for one MT-ID and algorithm in one Extended Prefix
+    # TLV (RFC 8665 section 5).
+    def multiple_sids(body, subject)
+      list, bad = tlvs(body)
+      return [] if bad
+      list.flat_map do |type, value|
+        next [] unless type == 1 && value.bytesize >= 8
+        subs, bad = tlvs(value.byteslice(8..))
+        next [] if bad
+        keys = subs.select { _1[0] == 2 && _1[1].bytesize >= 4 }.map { _1[1].byteslice(2, 2) }
+        twice = keys.tally.select { |_, n| n > 1 }
+        twice.map do |k, n|
+          mt, algo = k.unpack('CC')
+          finding(:prefix_sid_multiple, subject, "#{n} Prefix-SIDs for MT-ID #{mt}, algorithm #{algo}")
+        end
+      end
     end
 
     # RFC 8665 section 5: V and L both clear (an index) or both set (a label).

@@ -365,6 +365,7 @@ set protocols ospf area 0 interface eth1 no-adjacency-sid
 | `srlb start-label`, `index-range` | 15000, 1000 labels: the local block Adj-SIDs come from |
 | `node-segment ipv4-index` | none: the Node-SID on the router ID's /32, which a passive interface must hold |
 | `no-adjacency-sid` on an interface | Adj-SIDs on: no Adj-SID for the neighbors there |
+| `explicit-null` | off: NP and E on our Node-SID, so the hop before us sends label 0 (Junos's) |
 
 `node-segment ipv4-index` is Junos's statement. Juniper's OSPF page has no `srgb`,
 `srlb` or `no-adjacency-sid`; they are ospfd's own, as FRR's `global-block` and
@@ -374,7 +375,17 @@ index is past the SRGB.
 ospfd then sends, in each area: its SRGB, SRLB and algorithm 0 in the Router
 Information LSA; its Node-SID in an extended prefix LSA (in the loopback's area); and an
 Adj-SID for each adjacency in an extended link LSA, a LAN Adj-SID on a broadcast link.
-The label calculation and the label routes come next (`docs/design/sr-ospf.md`, step 4).
+An area border router gives each prefix it summarizes the SID of its route, NP set.
+
+After each SPF run, and when an SR LSA or an adjacency changes, ospfd works out its label
+table (RFC 8665, RFC 8660): each route's in-label is its index in our SRGB; toward a
+next hop that advertised the SID, pop (or label 0 with NP and E), else the index in that
+neighbor's SRGB; each Adj-SID pops. Two prefixes with one index get no label. Only
+routers SPF reaches count. `show.labels` gives the table, `show.segment_routing` our
+blocks, our Adj-SIDs and each SR router per area, and `show.routes` a route's `sid` and
+each next hop's `label`. In ospf-cli: `show ospf segment-routing` and `show mpls label`,
+or `show ip ospf segment-routing` and `show mpls forwarding-table`. Installing the labels
+in the kernel comes next (`docs/design/sr-ospf.md`, step 4).
 
 ### Opaque LSAs
 
@@ -440,8 +451,8 @@ request and one reply per line.
 
 `api.info` returns ospfd's version, the API version, the methods and the event kinds.
 The methods: `show.overview`, `show.neighbors`, `show.interfaces`, `show.database`,
-`show.routes`, `show.fib`, `show.spf`, `show.topology`, `show.log`, `show.statistics`,
-`show.timers`, `show.configuration`, `config.load`, `config.replace`, `config.compare`, `config.changed`,
+`show.routes`, `show.fib`, `show.labels`, `show.segment_routing`, `show.spf`, `show.topology`,
+`show.log`, `show.statistics`, `show.timers`, `show.configuration`, `config.load`, `config.replace`, `config.compare`, `config.changed`,
 `config.commit`, `config.discard`, `config.rollback`, `config.history`,
 `clear.neighbors`, `events.subscribe` and `events.unsubscribe`. `config.load` adds set
 lines to the candidate; `config.replace` makes them the whole candidate, like Junos
@@ -481,6 +492,7 @@ time, a level, a kind, a message and, for most kinds, structured `data`:
 | `spf_skipped` | SPF skipped a bad LSA | `why` |
 | `topology` | After each SPF run, once per area and once for the AS; after a change to our own summaries and externals, which run no SPF | `area` or `scope` (`as`), `run` |
 | `lsa` | One of our LSAs is flushed, or an LSA reaches MaxAge | `change`, `lsa_type`, `ls_id`, `advr`, `seq` |
+| `sr_finding` | An SR finding first appears (`core/validation.rb`) | `finding`, `rfc`, `action` (`ignored` or `no_label`), `area`, `router_id`, `lsa` |
 | `router` | The router starts or stops | `state`, `router_id` |
 | `virtual_link` | A virtual link comes up or goes down | `to`, `neighbor_id`, `cost` |
 | `bfd` | A BFD session is wanted, let go or changes state; bfdd4r answers or is lost | `peer`, `from`, `to` (`wanted`, `released`, or a BFD state), `diag`; or `bfdd4r` (`connected`, `lost`); or `peer`, `error` |

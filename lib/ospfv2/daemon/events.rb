@@ -20,7 +20,8 @@ module OSPFv2
       BACKLOG = 2000
       MAX_QUEUE = 10_000
 
-      KINDS = %w[neighbor interface dr drop spf spf_skipped routes topology lsa router virtual_link bfd commit log].freeze
+      KINDS = %w[neighbor interface dr drop spf spf_skipped routes topology lsa router virtual_link bfd commit log
+                 sr_finding].freeze
 
       attr_reader :seq
 

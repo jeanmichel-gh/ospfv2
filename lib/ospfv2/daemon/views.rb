@@ -79,7 +79,7 @@ module OSPFv2
         on_loop do |r|
           next { routes: [], routers: [] } unless r
           t = r.route_table
-          { routes: t.routes.values.sort_by { |x| [x.prefix, x.prefix_len] }.map { |x| route(x).merge(spf_run: r.spf_run_of_route(x.dest_s)) },
+          { routes: t.routes.values.sort_by { |x| [x.prefix, x.prefix_len] }.map { |x| route(x, r.sr_labels).merge(spf_run: r.spf_run_of_route(x.dest_s)) },
             routers: t.routers.values.sort_by { |x| [x.prefix, x.area || 0] }.map do |x|
               route(x).merge(router_id: Core::Addr.to_s(x.prefix), abr: x.tag[:abr], asbr: x.tag[:asbr])
             end }
@@ -196,6 +196,48 @@ module OSPFv2
         end
       end
 
+      # The label table, as the kernel should have it, one row per in-label,
+      # as isisd's show.labels without its level.
+      def labels
+        on_loop do |r|
+          t = r&.sr_labels or next []
+          t.entries.values.sort_by(&:label).map do |e|
+            { label: e.label, kind: e.kind.to_s, fec: e.fec, op: e.op.to_s,
+              next_hops: e.next_hops.map { |h| { address: h[:address], interface: h[:interface], label: h[:out_label] } } }
+          end
+        end
+      end
+
+      # SR's state (docs/design/sr-ospf.md, "Answers for routescope",
+      # answer 1): our blocks and Adj-SIDs, each SR router SPF reaches per
+      # area, ours with self, and the findings.
+      def segment_routing
+        on_loop do |r|
+          sr = r&.segment_routing
+          next { enabled: false, srgb: [], adj_sids: [], nodes: [], findings: [] } unless sr && r.opaque?
+          block = ->((first, size)) { { start: first, size: size } }
+          t = r.sr_labels
+          own = [sr[:srgb]]
+          adj = r.adj_labels.filter_map do |(ifname, rid), label|
+            i = r.interfaces[ifname] or next
+            n = i.neighbors.each_value.find { _1.router_id == rid } or next
+            { interface: ifname, neighbor: Core::Addr.to_s(rid), address: Core::Addr.to_s(n.address), label: label,
+              flags: %w[V L], weight: 0, lan: !i.p2p? && n.address != i.dr }
+          end
+          nodes = (t&.nodes || {}).values.sort_by { [Core::Addr.to_i(_1.area), Core::Addr.to_i(_1.router_id)] }.map do |n|
+            row = { area: n.area, router_id: n.router_id, self: n.self, srgb: n.srgb.map(&block) }
+            row[:srlb] = block.(n.srlb.first) if n.srlb.any?
+            row[:algorithms] = n.algorithms
+            if n.index
+              row[:node_sid] = { prefix: n.prefix, index: n.index, label: Core::SrLabels.label_at(own, n.index) }.compact
+            end
+            row
+          end
+          { enabled: true, srgb: [block.(sr[:srgb])], srlb: block.(sr[:srlb]), adj_sids: adj, nodes: nodes,
+            findings: t&.findings || [] }
+        end
+      end
+
       private
 
       def on_loop(&block)
@@ -241,11 +283,19 @@ module OSPFv2
 
       def fib_hops(route) = route.next_hops.map { |i, g| { interface: i, gateway: g && Core::Addr.to_s(g) } }
 
-      def route(x)
-        { prefix: x.dest_s, path_type: x.path_type, cost: x.cost, type2_cost: x.type2_cost, area: x.area_s,
-          next_hops: x.next_hops.map { |h| { interface: h.interface, gateway: h.gateway && Core::Addr.to_s(h.gateway) } },
-          advr: x.advr && Core::Addr.to_s(x.advr), tag: x.tag.is_a?(Integer) ? x.tag : nil,
-          forwarding: x.forwarding && Core::Addr.to_s(x.forwarding) }
+      # With SR, a route with a Prefix-SID gains +sid+, its index, and each
+      # next hop with a label +label+ (docs/design/sr-ospf.md, step 4).
+      def route(x, labels = nil)
+        hops = x.next_hops.map do |h|
+          hop = { interface: h.interface, gateway: h.gateway && Core::Addr.to_s(h.gateway) }
+          out = labels&.out_label(x.dest_s, h)
+          out ? hop.merge(label: out) : hop
+        end
+        row = { prefix: x.dest_s, path_type: x.path_type, cost: x.cost, type2_cost: x.type2_cost, area: x.area_s,
+                next_hops: hops, advr: x.advr && Core::Addr.to_s(x.advr), tag: x.tag.is_a?(Integer) ? x.tag : nil,
+                forwarding: x.forwarding && Core::Addr.to_s(x.forwarding) }
+        sid = labels&.sids&.[](x.dest_s)
+        sid ? row.merge(sid: sid[:index]) : row
       end
 
       def fib_summary

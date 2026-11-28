@@ -200,7 +200,7 @@ module OSPFv2
           @errors << "source-packet-routing node-segment ipv4-index #{index} is past the srgb's #{srgb[1]} labels"
         end
         no_adj = areas.flat_map { |_, a| (a['interface'] || {}).select { |_, i| i['no-adjacency-sid'] }.keys }
-        { srgb: srgb, srlb: srlb, index: index, no_adj_sid: no_adj }.freeze
+        { srgb: srgb, srlb: srlb, index: index, no_adj_sid: no_adj, explicit_null: c['explicit-null'] == true }.freeze
       end
 
       def kernel_options(k)

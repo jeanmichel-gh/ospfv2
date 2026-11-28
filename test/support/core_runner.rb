@@ -137,7 +137,8 @@ until stop
       externals: router.as_lsdb.live.map { |l| l.bytes.unpack1('H*') },
       router_information: router.opaque? ? router.router_information(0) : {},
       extended_prefixes: router.opaque? ? router.extended_prefixes(0) : {},
-      extended_links: router.opaque? ? router.extended_links(0) : {}
+      extended_links: router.opaque? ? router.extended_links(0) : {},
+      labels: (router.sr_labels&.entries || {}).values.map { |e| { label: e.label, op: e.op, kind: e.kind, fec: e.fec, next_hops: e.next_hops } }
     }
   end
   tmp = "#{state_file}.tmp"

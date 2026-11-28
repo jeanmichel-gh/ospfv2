@@ -221,6 +221,9 @@ module OSPFv2
                   leaf 'start-label', Schema.hint(T.range(16, 1_048_575), '<16..1048575>'), help: 'First label'
                   leaf 'index-range', Schema.hint(T.range(1, 1_048_560), '<labels>'), help: 'Number of labels'
                 end
+                # Junos's: "Configure E and P bits in all prefix segment
+                # identifier (SID) advertisements"; in OSPF the P bit is NP.
+                flag 'explicit-null', help: 'Set NP and E on our Node-SID: the hop before us sends explicit null'
                 container 'node-segment', help: 'The Node-SID on the router ID\'s /32, a passive interface\'s address' do
                   leaf 'ipv4-index', Schema.hint(T.range(0, 1_048_559), '<index>'), help: 'Index in the SRGB'
                 end

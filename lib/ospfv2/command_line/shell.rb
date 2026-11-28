@@ -34,6 +34,8 @@ module OSPFv2
           show ospf topology area 0   show ip ospf topology external
           show ospf events            show ip ospf events
           show ospf statistics        show ip ospf traffic
+          show ospf segment-routing   show ip ospf segment-routing
+          show mpls label             show mpls forwarding-table
           show configuration
           clear ospf neighbor         clear ip ospf process
           monitor ospf events [KIND]  monitor ip ospf events      (Ctrl-C stops)

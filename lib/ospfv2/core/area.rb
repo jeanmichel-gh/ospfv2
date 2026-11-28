@@ -160,7 +160,8 @@ module OSPFv2
         me = @instance.router_id
         specs = {}
         if sr[:index] && @interfaces.any? { |i| i.passive? && i.address == me && i.prefix_len == 32 }
-          sid = ExtendedPrefix::PrefixSid.new(flags: 0, sid: sr[:index])
+          flags = sr[:explicit_null] ? ExtendedPrefix::PrefixSid::NP | ExtendedPrefix::PrefixSid::E : 0
+          sid = ExtendedPrefix::PrefixSid.new(flags: flags, sid: sr[:index])
           body = ExtendedPrefix::Body.new(tlvs: [ExtendedPrefix::Prefix.new(route_type: 1, prefix: "#{Addr.to_s(me)}/32",
                                                                             flags: ExtendedPrefix::N_FLAG, subs: [sid])])
           ls_id = (ExtendedPrefix::OPAQUE_TYPE << 24) | 1
@@ -188,6 +189,15 @@ module OSPFv2
         end
         @instance.release_adj_labels(self, live_labels)
         @instance.release_link_oids(self, live_links)
+        inter = @instance.inter_area_sids(self)
+        inter.each do |dest, (index, flags)|
+          sid = ExtendedPrefix::PrefixSid.new(flags: flags, sid: index)
+          body = ExtendedPrefix::Body.new(tlvs: [ExtendedPrefix::Prefix.new(route_type: 3, prefix: dest, subs: [sid])])
+          ls_id = (ExtendedPrefix::OPAQUE_TYPE << 24) | @instance.prefix_oid(self, dest)
+          specs[[10, ls_id, me]] = { type: 10, ls_id: ls_id, body: body.encode }
+        end
+        @instance.release_prefix_oids(self, inter.keys)
+        @instance.schedule_labels
         specs
       end
 

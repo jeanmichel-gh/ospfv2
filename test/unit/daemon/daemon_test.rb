@@ -97,6 +97,33 @@ class TestDaemon < Test::Unit::TestCase
     refute @d.instance.opaque?
   end
 
+  # PR 5: show.segment_routing, show.labels and the SID and label on
+  # show.routes, with the peer an SR router with a loopback.
+  def test_segment_routing_views
+    @peer.add_interface(name: 'lo', address: '2.2.2.2/32', passive: true)
+    @peer.opaque = true
+    @peer.segment_routing = { srgb: [17_000, 8_000], srlb: [15_000, 1_000], index: 2 }
+    daemon((BASE + ['set protocols ospf source-packet-routing node-segment ipv4-index 1']).join("\n"))
+    @loop.run_until(120) { peer_full? }
+    ok = @loop.run_until(60) { @d.views.labels.any? { _1[:fec] == '2.2.2.2/32' } }
+    assert ok, @d.views.segment_routing.inspect
+    sr = @d.views.segment_routing
+    assert_equal [true, [{ start: 16_000, size: 8_000 }], { start: 15_000, size: 1_000 }],
+                 sr.values_at(:enabled, :srgb, :srlb)
+    assert_equal [['0.0.0.0', '1.1.1.1', true, { prefix: '1.1.1.1/32', index: 1, label: 16_001 }],
+                  ['0.0.0.0', '2.2.2.2', false, { prefix: '2.2.2.2/32', index: 2, label: 16_002 }]],
+                 sr[:nodes].map { _1.values_at(:area, :router_id, :self, :node_sid) }
+    assert_equal [{ start: 17_000, size: 8_000 }], sr[:nodes][1][:srgb]
+    adj = sr[:adj_sids].first
+    assert_equal ['eth1', '2.2.2.2', '10.0.0.2', 15_000, %w[V L], false], adj.values_at(:interface, :neighbor, :address, :label, :flags, :lan)
+    php = @d.views.labels.find { _1[:fec] == '2.2.2.2/32' }
+    assert_equal [16_002, 'prefix_sid', 'php', [{ address: '10.0.0.2', interface: 'eth1', label: 3 }]],
+                 php.values_at(:label, :kind, :op, :next_hops)
+    route = @d.views.routes[:routes].find { _1[:prefix] == '2.2.2.2/32' }
+    assert_equal [2, [3]], [route[:sid], route[:next_hops].map { _1[:label] }]
+    refute @d.views.routes[:routes].find { _1[:prefix] == '10.0.0.0/24' }.key?(:sid), 'no SID: no column'
+  end
+
   # show timers: every timer with its owner and when it fires, the
   # neighbor's among them; the clock moves, the time left goes down.
   def test_timers
