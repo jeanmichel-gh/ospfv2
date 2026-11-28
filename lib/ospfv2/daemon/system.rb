@@ -37,6 +37,27 @@ module OSPFv2
         nil
       end
 
+      PROC_MPLS = '/proc/sys/net/mpls'
+
+      # Makes the host take label routes for +interfaces+, as isisd's
+      # Router::Host#mpls does: MPLS input on each (net.mpls.conf.IF.input),
+      # and a check that net.mpls.platform_labels is past +highest+.
+      # Returns nil when it can, else why not. The mpls_router module and
+      # the size of the label table are the host's to set.
+      def mpls(interfaces, highest:, proc_mpls: PROC_MPLS)
+        table = File.join(proc_mpls, 'platform_labels')
+        return "#{table} is missing: is the mpls_router module loaded?" unless File.exist?(table)
+        size = Integer(File.read(table).strip)
+        return "net.mpls.platform_labels is #{size}, and labels go up to #{highest}" if size <= highest
+        interfaces.each do |name|
+          path = File.join(proc_mpls, 'conf', name, 'input')
+          File.write(path, "1\n") if File.exist?(path)
+        end
+        nil
+      rescue SystemCallError, ArgumentError => e
+        "the MPLS settings cannot be written: #{e.message}"
+      end
+
       STATIC_PROTOCOLS = [3, 4].freeze # RTPROT_BOOT (ip route add), RTPROT_STATIC
 
       # Static routes in the main table, as [prefix, prefix_len] Integers;
@@ -71,6 +92,16 @@ module OSPFv2
       end
 
       def remove(name) = @links.delete(name)
+
+      # What mpls answers: nil (it can), or why not. +mpls_calls+ records
+      # what was asked.
+      attr_accessor :mpls_answer
+      attr_reader :mpls_calls
+
+      def mpls(interfaces, highest:)
+        (@mpls_calls ||= []) << [interfaces, highest]
+        @mpls_answer
+      end
       def links = @links.dup
     end
   end

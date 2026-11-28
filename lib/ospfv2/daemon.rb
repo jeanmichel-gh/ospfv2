@@ -309,6 +309,7 @@ module OSPFv2
       # SR needs opaque (RFC 8665 rides in opaque LSAs).
       @instance.opaque = model.opaque || !model.sr.nil?
       @instance.segment_routing = model.sr
+      apply_mpls(model)
       apply_areas(model.areas)
       apply_bfd(model.interfaces)
       sync_interfaces
@@ -425,6 +426,26 @@ module OSPFv2
 
     # routing-options kernel: a new metric applies in place; a new table
     # or protocol id withdraws our routes and installs them again there.
+    # With SR and routes going into the kernel, the host must take label
+    # routes (System#mpls). When it cannot, ospfd says why, once, keeps
+    # sending its SIDs, and installs IP routes only.
+    def apply_mpls(model)
+      return unless @fib
+      sr = model.sr
+      unless sr
+        @fib.labels_on = true
+        @mpls_why = nil
+        return
+      end
+      top = [sr[:srgb].sum, sr[:srlb].sum].max - 1
+      names = model.interfaces.reject { |_, o| o[:passive] }.keys
+      why = @system.mpls(names, highest: top)
+      log(:warn, "SR: label routes not installed: #{why}; IP routes only") if why && why != @mpls_why
+      log(:info, 'SR: label routes go into the kernel') if why.nil? && @mpls_why
+      @mpls_why = why
+      @fib.labels_on = why.nil?
+    end
+
     def apply_kernel(k)
       unless k[:install]
         log(:info, 'kernel route install off: routes withdrawn') if @fib

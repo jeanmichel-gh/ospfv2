@@ -64,6 +64,39 @@ class TestDaemonKernel < Test::Unit::TestCase
     assert @loop.run_until(120) { kernel.include?(ROUTE) }
   end
 
+  # SR (docs/design/sr-ospf.md, step 4, PR 6): the host is asked to take
+  # label routes on ospfd's interfaces, up to the top of its blocks; label
+  # routes and pushes go in, and show.fib lists them.
+  def sr_peer
+    @peer.opaque = true
+    @peer.segment_routing = { srgb: [17_000, 8_000], srlb: [15_000, 1_000], index: 2 }
+  end
+
+  SR = 'set protocols ospf source-packet-routing node-segment ipv4-index 1'
+
+  def labels = (@tables[[89, 254]]&.dump_labels || []).map(&:to_s).sort
+
+  def test_label_routes_go_in
+    sr_peer
+    commit!(*BASE, SR)
+    assert @loop.run_until(120) { labels.include?('label 16002 pop via 10.0.0.2 dev eth1') }
+    assert_equal [[['eth1'], 23_999]], @system.mpls_calls.uniq, 'non-passive interfaces, the SRGB\'s top'
+    v = @d.views.fib
+    assert_equal true, v[:labels_on]
+    row = v[:labels].find { _1[:label] == 16_002 }
+    assert_equal [:installed, [{ interface: 'eth1', gateway: '10.0.0.2', out_label: nil }]], row.values_at(:state, :want)
+  end
+
+  def test_a_host_without_mpls_gets_ip_routes_only
+    sr_peer
+    @system.mpls_answer = '/proc/sys/net/mpls/platform_labels is missing: is the mpls_router module loaded?'
+    commit!(*BASE, SR)
+    assert @loop.run_until(120) { kernel.include?(ROUTE) }
+    assert_empty labels
+    assert_equal false, @d.views.fib[:labels_on]
+    assert_equal 1, @log.count { _1.include?('SR: label routes not installed: /proc/sys/net/mpls/platform_labels is missing') }
+  end
+
   def test_routes_go_in_with_the_defaults
     converge
     assert_equal [ROUTE], kernel
