@@ -102,7 +102,7 @@ class TestCoreRouterInformation < Test::Unit::TestCase
     assert @lab.run_until(30) { ri_of(@b, '1.1.1.1') }
     l = ri_of(@b, '1.1.1.1')
     assert_equal [{ type: 1, bits: 0 }], RI::Body.new(l.body).to_hash[:tlvs], 'no capability bits, no SR yet'
-    assert_equal({ opaque_type: 4, opaque_id: 0, tlvs: [{ type: 1, bits: 0 }] }, l.detail)
+    assert_equal({ opaque_type: 4, opaque_id: 0, tlvs: [{ type: 1, name: 'informational-capabilities', bits: [] }] }, l.detail)
     # The flush must come MinLSArrival after the LSA, or b discards it
     # (RFC 2328 13 (5a)) and keeps the LSA until MaxAge.
     @lab.advance(OSPFv2::MinLSArrival)

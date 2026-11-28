@@ -925,6 +925,19 @@ a call exists today, what it gives was read from the code at ospfv2
    `neighbor`. `name` is the registry name with hyphens, the same word
    as the dissector's `key` (answer 7).
 
+   **As built** (2026-11-28): `core/opaque_detail.rb` gives this
+   shape; steps 2 and 3 had given the codec's `to_hash` until then.
+   Capability bits are RFC 7770 section 2.4's names
+   (`graceful-restart-capable`, `graceful-restart-helper`,
+   `stub-router`, `traffic-engineering`, `p2p-over-lan`,
+   `experimental-te`), else `bit-N`. A range gives its first `label`
+   (or `sid`), and `finding: range_two_sid_labels` with two. An Adj-SID
+   with V and L unequal gives `finding: adj_sid_vl_invalid`, a new rule:
+   RFC 8665 section 6.1 gives its SID "As described in Section 5", so
+   section 5's "MUST be ignored" holds for it, and `extended_links`
+   leaves it out. An unknown TLV gives `type` and `hex`; an opaque type
+   not decoded, `hex`.
+
 3. **The kernel protocol id** is `protocol` in `show.fib`, and
    `fib.protocol` in `show.overview`, today (`daemon/views.rb`, `fib`
    and `fib_summary`). It is 89 unless `routing-options kernel

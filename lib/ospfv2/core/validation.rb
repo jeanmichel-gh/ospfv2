@@ -134,6 +134,13 @@ module OSPFv2
                        'L-Flags MUST be ignored"',
                description: 'a Prefix-SID with V set and L clear, or L set and V clear',
                actions: always(:ignore_sid)),
+      # RFC 8665 section 6.1 gives the Adj-SID's SID "As described in
+      # Section 5", so section 5's rule holds for it too.
+      Rule.new(name: :adj_sid_vl_invalid, group: :sr,
+               clause: 'RFC 8665 section 6.1: the SID "As described in Section 5"; section 5: "any SID ' \
+                       'Advertisement received with an invalid setting for V- and L-Flags MUST be ignored"',
+               description: 'an Adj-SID or LAN Adj-SID with V set and L clear, or L set and V clear',
+               actions: always(:ignore_sid)),
       # The rest of the LSA cannot be read, so no policy uses it.
       Rule.new(name: :tlv_overrun, group: :sr,
                clause: 'RFC 8665 section 9: "if the length is invalid, the LSA in which it is advertised is ' \
@@ -179,7 +186,8 @@ module OSPFv2
         found = extended(body, subject, 1, 8) { |sub| prefix_sid(sub, subject) }
         found + twice(body, subject, :prefix_tlv_twice) { |v| v.byteslice(1, 1) + v.byteslice(4, 4).to_s }
       when OPAQUE_EXT_LINK
-        extended(body, subject, 1, 12) + twice(body, subject, :link_tlv_twice) { |_| :link }
+        extended(body, subject, 1, 12) { |sub| adj_sid(sub, subject) } +
+          twice(body, subject, :link_tlv_twice) { |_| :link }
       else []
       end
     end
@@ -251,6 +259,20 @@ module OSPFv2
 
     V_FLAG = 0x08
     L_FLAG = 0x04
+
+    ADJ_V = 0x40
+    ADJ_L = 0x20
+
+    # RFC 8665 section 6.1 and 6.2: an Adj-SID's V and L, as a Prefix-SID's.
+    def adj_sid((type, value), subject)
+      return [] unless [2, 3].include?(type) && value.bytesize >= 1
+      flags = value.getbyte(0)
+      v = flags.anybits?(ADJ_V)
+      l = flags.anybits?(ADJ_L)
+      return [] if v == l
+      what = type == 2 ? 'Adj-SID' : 'LAN Adj-SID'
+      [finding(:adj_sid_vl_invalid, subject, "#{what} flags 0x#{flags.to_s(16).rjust(2, '0')}: #{v ? 'V' : 'L'} set, #{v ? 'L' : 'V'} clear")]
+    end
 
     # RFC 8665 section 5: V and L both clear (an index) or both set (a label).
     def prefix_sid((type, value), subject)
