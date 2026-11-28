@@ -125,6 +125,11 @@ Each link end sends an extended link LSA with an Adj-SID from its router's SRLB;
 taken down flushes them, and brought up sends them again. The simulator sets the O bit
 in its DDs, not in its Hellos, and installs nothing.
 
+`routescope/labs/ospf-sr` is the main lab, four ospfd routers on labels, and
+`routescope/labs/ospf-sr-frr` the interop check, two ospfd routers between two FRR
+routers. `test/lab/sr_test.sh` runs both and is their gate: the labels each router
+holds, its kernel's, a ping across on labels with tcpdump, and a link flap.
+
 ## Commands
 
 | Command | What it does |

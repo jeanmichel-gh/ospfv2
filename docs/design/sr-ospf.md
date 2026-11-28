@@ -1155,6 +1155,30 @@ idx 1   idx 2   idx 3   idx 4     Node-SIDs
   `net.mpls.platform_labels` and `net.mpls.conf.IF.input` in each
   node's `exec`, as routescope's `frr-sr` lab does.
 
+### As built, step 8: the labs
+
+- **`ospf-sr`** (main, ospfd alone) and **`ospf-sr-frr`** (interop, FRR
+  10.2.1), as drawn above, in `routescope/labs/`, each with its
+  `ABOUT.md`. A node sizes its label table and turns on forwarding
+  before ospfd starts, since ospfd checks `net.mpls.platform_labels`
+  when it applies its configuration; ospfd turns on MPLS input itself.
+- **`test/lab/sr_test.sh`**, the step 4 gate: every router Full; the
+  labels the gate names (17004 swapped to 18004 on o1, the PHP pops,
+  the way back); each ospfd's table against its kernel's; FRR listing
+  o1 and o2 with their SRGBs; a ping across on labels, tcpdump showing
+  17004 into o1, 18004 from o1 to o2, plain IP from o2 to f2, and 17001
+  back; o1's link to o2 down and up, with no stale label. Then
+  `ospf-sr`: the labels along four ospfd routers, and the ping.
+- **Run on ospflab**, 2026-11-28, ospfd at `a065d34` (an image of its
+  own, `vm-build`), under `vm-lock shared`: 38 checks passed. The first
+  run failed on the script's own ping: the ospfv2 image has no `ping`,
+  so the script runs the host's in the node's network namespace.
+- **CI** gains an `sr` job. Its runner had no MPLS loaded (PR 5's and 6's
+  runs), so the job loads `mpls_router` and `mpls_iptunnel` first and
+  stops if it cannot.
+- **Not here:** the two-area lab (open question 7), and the gate with the
+  simulator beside FRR (step 5's), which a later lab can add.
+
 ## Tests
 
 The four tiers of protocol-conventions part 10.
